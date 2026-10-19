@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Arev Service",
-    "slug": "arev-service-master",
+    "slug": "arev-service-maste",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -44,8 +44,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "ВСТАВЬТЕ_ID_ПРОЕКТА_EXPO"
+        "projectId": "5d449219-c6f3-4e80-b202-e27a54b9bbeb"
       }
-    }
+    },
+    "owner": "abo33651s-team"
   }
 }
