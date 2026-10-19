@@ -1,0 +1,407 @@
+/* Arev Service — админка. Работает напрямую с вашим сервером Supabase. */
+(function(){
+"use strict";
+const CFG=window.AREV_CONFIG||{};
+const sb=window.supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+
+/* ---------- иконки ---------- */
+const I={
+ chart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+ team:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5.5 6.5-5.5s5.5 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.8 3 2.6 3.5 5.2"/></svg>',
+ clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+ fuel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M6 9h6"/><path d="M14 10h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3"/></svg>',
+ list:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/></svg>',
+ cog:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>',
+ alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+ back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+ plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+ pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
+ info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
+};
+const CATS={inverter:'Не работает инвертор',output:'Упала выработка',panel:'Повреждена панель',wiring:'Проводка и разъёмы',battery:'Аккумулятор',cleaning:'Чистка панелей',checkup:'Плановый техосмотр',expand:'Расширение или чужая станция',other:'Другое'};
+const ST={new:['Новая','c-info'],assigned:['Взята','c-info'],enroute:['В пути','c-warn'],onsite:['На месте','c-sun'],done:['Выполнена','c-ok'],closed:['Закрыта','c-muted'],cancelled:['Отменена','c-muted']};
+const ACTIVE=['new','assigned','enroute','onsite'];
+
+/* ---------- помощники ---------- */
+const h=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ms=v=>v?new Date(v).getTime():null;
+const MON=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];const WD=['вс','пн','вт','ср','чт','пт','сб'];
+const p2=n=>String(n).padStart(2,'0');
+const fT=ts=>{if(!ts)return '—';const d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+', '+p2(d.getHours())+':'+p2(d.getMinutes())};
+const fHM=ts=>{if(!ts)return '—';const d=new Date(ts);return p2(d.getHours())+':'+p2(d.getMinutes())};
+const fDay=ts=>{const d=new Date(ts);return WD[d.getDay()]+', '+d.getDate()+' '+MON[d.getMonth()]};
+const fDur=m=>{if(m==null||m<0)return '—';const x=Math.round(m/60000);return x<60?x+' мин':Math.floor(x/60)+' ч '+p2(x%60)+' мин'};
+const ago=ts=>{const m=Math.round((Date.now()-ts)/60000);if(m<1)return 'только что';if(m<60)return m+' мин назад';const hh=Math.floor(m/60);if(hh<24)return hh+' ч назад';return fT(ts)};
+const money=n=>n==null||isNaN(n)?'—':Math.round(n).toLocaleString('ru-RU')+' ֏';
+const n1=x=>(Math.round((+x||0)*10)/10).toLocaleString('ru-RU');
+const fDist=m=>m==null?'—':m<1000?Math.round(m)+' м':(m/1000).toFixed(1).replace('.',',')+' км';
+function distM(a,b){if(!a||!b||a.lat==null||b.lat==null)return null;const R=6371000,t=Math.PI/180;const dLa=(b.lat-a.lat)*t,dLo=(b.lng-a.lng)*t;const x=Math.sin(dLa/2)**2+Math.cos(a.lat*t)*Math.cos(b.lat*t)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+const mapUrl=p=>'https://www.google.com/maps?q='+(+p.lat).toFixed(6)+','+(+p.lng).toFixed(6);
+const initials=n=>String(n||'?').split(/\s+/).map(s=>s[0]).slice(0,2).join('').toUpperCase();
+const dayStart=ts=>{const d=new Date(ts);d.setHours(0,0,0,0);return d.getTime()};
+const monthStart=()=>{const d=new Date();return new Date(d.getFullYear(),d.getMonth(),1).getTime()};
+const hmToTs=(day,hm)=>{const p=String(hm||'09:00').split(':').map(Number);return dayStart(day)+((p[0]||0)*60+(p[1]||0))*60000};
+const LS={get(k,d){try{const v=localStorage.getItem('arevadm.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('arevadm.'+k,JSON.stringify(v))}catch(e){}}};
+
+/* ---------- состояние ---------- */
+const S={session:null,isAdmin:false,loaded:false,view:{name:'a-dash',p:{}},form:{},filter:'active',per:LS.get('per','week'),empF:null,
+ cfg:{},staff:[],shifts:[],fuel:[],tickets:[],tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
+const tech=id=>S.staff.find(m=>m.id===id);
+const approved=()=>S.staff.filter(m=>m.status==='approved');
+const T=id=>S.tickets.find(t=>t.id===id);
+const fuelUnit=m=>m&&m.fuel_type==='gas'?'м³':'л';
+const office=()=>S.cfg.office_lat!=null?{lat:S.cfg.office_lat,lng:S.cfg.office_lng}:null;
+
+/* ---------- загрузка ---------- */
+async function load(){
+ const from=new Date(Date.now()-62*864e5).toISOString();const from7=new Date(Date.now()-7*864e5).toISOString();
+ const q=await Promise.all([
+  sb.from('config').select('*').eq('id',1).maybeSingle(),
+  sb.from('staff').select('*').order('created_at'),
+  sb.from('shifts').select('*').gte('start_at',from).order('start_at',{ascending:false}).limit(3000),
+  sb.from('fuel').select('*').gte('at',from).order('at',{ascending:false}).limit(3000),
+  sb.from('tickets').select('*').or('created_at.gte.'+from+',status.in.(new,assigned,enroute,onsite,done)').order('created_at',{ascending:false}).limit(2000),
+  sb.from('alerts').select('*').gte('at',from).order('at',{ascending:false}).limit(2000),
+  sb.from('ai_checks').select('*').limit(5000),
+  sb.from('card_tx').select('*').gte('at',from).order('at',{ascending:false}).limit(5000),
+  sb.from('track_points').select('staff_id,at,lat,lng,acc,mocked').gte('at',from7).order('at').limit(20000)
+ ]);
+ const err=q.find(r=>r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
+ S.cfg=q[0].data||{};S.staff=q[1].data||[];
+ S.shifts=(q[2].data||[]).map(x=>({...x,masterId:x.staff_id,startAt:ms(x.start_at),endAt:ms(x.end_at),
+   start:{lat:x.start_lat,lng:x.start_lng,acc:x.start_acc,dist:x.start_dist,odo:x.start_odo,photo:x.start_photo,wifi:x.start_wifi_ok},
+   end:x.end_at?{lat:x.end_lat,lng:x.end_lng,acc:x.end_acc,dist:x.end_dist,odo:x.end_odo,photo:x.end_photo,wifi:x.end_wifi_ok}:null}));
+ S.fuel=(q[3].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.at),sum:x.amount,loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
+ S.tickets=(q[4].data||[]).map(x=>({...x,techId:x.staff_id,createdAt:ms(x.created_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null,
+   times:{assigned:ms(x.assigned_at),enroute:ms(x.enroute_at),onsite:ms(x.onsite_at),done:ms(x.done_at),closed:ms(x.closed_at)},
+   gps:{enroute:x.enroute_lat!=null?{lat:x.enroute_lat,lng:x.enroute_lng}:null,onsite:x.onsite_lat!=null?{lat:x.onsite_lat,lng:x.onsite_lng,dist:x.onsite_dist}:null,done:x.done_lat!=null?{lat:x.done_lat,lng:x.done_lng,dist:x.done_dist}:null}}));
+ S.alerts=(q[5].data||[]).map(x=>({...x,at:ms(x.at)}));
+ S.checks={};(q[6].data||[]).forEach(c=>S.checks[c.photo]=c);
+ S.tx=(q[7].data||[]).map(x=>({...x,at:ms(x.at)}));
+ S.track={};(q[8].data||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,at:ms(p.at),mocked:p.mocked,what:'трек'})});
+ const ids=S.tickets.map(t=>t.id);S.tphotos={};
+ if(ids.length){for(let i=0;i<ids.length;i+=150){const r=await sb.from('ticket_photos').select('*').in('ticket_id',ids.slice(i,i+150));(r.data||[]).forEach(p=>{(S.tphotos[p.ticket_id]=S.tphotos[p.ticket_id]||[]).push({...p,at:ms(p.at)})})}}
+ S.loaded=true;render(true)}
+
+/* ---------- фото: подписанные ссылки ---------- */
+let pending=new Set(),pendT=null;
+function thumb(path,cls){if(!path)return '<span class="tiny muted">нет фото</span>';const u=S.urls[path];const ch=S.checks[path];
+ if(!u){pending.add(path);clearTimeout(pendT);pendT=setTimeout(signPending,30)}
+ return '<span class="thw"><img class="'+(cls||'thumb')+'" alt="Фото" data-path="'+h(path)+'" '+(u?'src="'+h(u)+'"':'')+' data-act="view">'+(ch?'<span class="aib" title="Проверено ИИ">ИИ</span>':'')+'</span>'}
+async function signPending(){const list=[...pending].filter(p=>!S.urls[p]);pending.clear();if(!list.length)return;
+ const r=await sb.storage.from('photos').createSignedUrls(list,3600);(r.data||[]).forEach(x=>{if(x.signedUrl)S.urls[x.path]=x.signedUrl});
+ document.querySelectorAll('img[data-path]').forEach(im=>{const u=S.urls[im.dataset.path];if(u&&!im.getAttribute('src'))im.src=u})}
+
+/* ---------- расчёты и отклонения ---------- */
+function routeKm(sh){return sh.route_km!=null?+sh.route_km:0}
+const odoKm=sh=>sh.end&&sh.end.odo!=null&&sh.start.odo!=null?sh.end.odo-sh.start.odo:null;
+const normOf=m=>+(m&&m.norm_approved)||+S.cfg.default_norm||9;
+function aiOdo(mk){const f=[];const ch=mk&&mk.photo&&S.checks[mk.photo];if(!ch)return f;const r=ch.result||{};
+ if(r.isDashboard===false)f.push({lv:'bad',t:'ИИ: на фото нет приборной панели'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
+ if(r.odo!=null&&mk.odo!=null&&Math.abs(+r.odo-mk.odo)>2)f.push({lv:'bad',t:'ИИ: на фото '+(+r.odo).toLocaleString('ru-RU')+' км, введено '+mk.odo.toLocaleString('ru-RU')});return f}
+function aiRcpt(rec){const f=[];const ch=S.checks[rec.photo];if(!ch)return f;const r=ch.result||{};
+ if(r.isReceipt===false)f.push({lv:'bad',t:'ИИ: на фото не чек'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
+ if(r.liters!=null&&Math.abs(+r.liters-rec.liters)>0.5)f.push({lv:'bad',t:'ИИ: в чеке '+n1(r.liters)+', введено '+n1(rec.liters)});
+ if(r.sum!=null&&rec.sum&&Math.abs(+r.sum-rec.sum)>Math.max(100,rec.sum*0.02))f.push({lv:'warn',t:'ИИ: в чеке сумма '+money(+r.sum)+', введено '+money(rec.sum)});
+ if(r.date){const m=String(r.date).match(/(\d{1,2})\D(\d{1,2})\D(\d{2,4})/);if(m){const d=new Date(+(m[3].length===2?'20'+m[3]:m[3]),+m[2]-1,+m[1]).getTime();if(Math.abs(d-dayStart(rec.at))>864e5)f.push({lv:'bad',t:'ИИ: чек от '+r.date+', а заправка внесена '+fDay(rec.at)})}}
+ if(r.nonFuel)f.push({lv:'warn',t:'ИИ: в чеке есть не только топливо'});return f}
+function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const g=+c.grace_min||0;const rad=+c.office_radius||150;
+ const late=Math.round((sh.startAt-hmToTs(sh.startAt,c.work_start))/60000);if(late>g)f.push({lv:'warn',t:'Опоздание '+fDur(late*60000)});
+ if(s.dist!=null&&s.dist>rad)f.push({lv:'bad',t:'Приход отмечен в '+fDist(s.dist)+' от офиса'});else if(s.lat==null)f.push({lv:'warn',t:'Приход без координат'});
+ if(c.office_wifi&&s.wifi===false)f.push({lv:'warn',t:'При приходе телефон не видел офисный Wi-Fi'});
+ const prev=S.shifts.filter(x=>x.masterId===sh.masterId&&x.endAt&&x.endAt<=sh.startAt).sort((a,b)=>b.endAt-a.endAt)[0];
+ if(prev&&prev.end&&s.odo<prev.end.odo)f.push({lv:'bad',t:'Утром одометр меньше, чем был '+fDay(prev.endAt)+' вечером ('+(s.odo-prev.end.odo)+' км)'});
+ f.push(...aiOdo(s));
+ if(sh.endAt){const early=Math.round((hmToTs(sh.endAt,c.work_end)-sh.endAt)/60000);if(early>g)f.push({lv:'warn',t:'Ушёл раньше на '+fDur(early*60000)});
+  if(e.dist!=null&&e.dist>rad)f.push({lv:'bad',t:'Уход отмечен в '+fDist(e.dist)+' от офиса'});
+  if(c.office_wifi&&e.wifi===false)f.push({lv:'warn',t:'При уходе телефон не видел офисный Wi-Fi'});
+  const ok=odoKm(sh),rk=routeKm(sh);if(ok!=null&&ok>rk*1.3+10)f.push({lv:'bad',t:'Пробег за смену '+ok+' км, по заказам '+n1(rk)+' км'});
+  f.push(...aiOdo(e));
+ }else if(dayStart(sh.startAt)<dayStart(Date.now()))f.push({lv:'warn',t:'Смена не закрыта'});
+ const tk=S.tickets.filter(t=>t.techId===sh.masterId&&t.times.enroute>=sh.startAt&&t.times.enroute<=(sh.endAt||Date.now())).sort((a,b)=>a.times.enroute-b.times.enroute);
+ for(let i=1;i<tk.length;i++){const d=tk[i-1].times.done;if(d&&tk[i].times.enroute-d>(+c.max_idle_min||120)*60000)f.push({lv:'warn',t:'Пауза '+fDur(tk[i].times.enroute-d)+' между заказами '+tk[i-1].num+' и '+tk[i].num})}
+ const tr=(S.track[sh.masterId]||[]).filter(p=>p.at>=sh.startAt&&p.at<=(sh.endAt||Date.now()));
+ if(sh.endAt&&sh.endAt-sh.startAt>2*36e5&&tr.length<3&&S.shifts.length)f.push({lv:'warn',t:'Маршрут смены почти не записан (нет разрешения «всегда» или выключен GPS)'});
+ return f}
+const cardOf=m=>String((m&&m.card_last4)||'').replace(/\D/g,'');
+function txOf(id){const c=cardOf(tech(id));if(!c)return [];return S.tx.filter(x=>String(x.card||'').replace(/\D/g,'').endsWith(c))}
+const txRange=()=>{if(!S.tx.length)return null;let a=Infinity,b=0;S.tx.forEach(x=>{if(x.at<a)a=x.at;if(x.at>b)b=x.at});return{from:dayStart(a),to:dayStart(b)+864e5}};
+const covered=at=>{const r=txRange();return r&&at>=r.from&&at<r.to};
+const inShiftAt=(id,at)=>S.shifts.some(s=>s.masterId===id&&at>=s.startAt-30*60000&&at<=(s.endAt||Date.now())+30*60000);
+const matchTx=r=>txOf(r.masterId).filter(x=>Math.abs(x.at-r.at)<3*36e5).sort((a,b)=>Math.abs(a.at-r.at)-Math.abs(b.at-r.at))[0]||null;
+const matchRec=(tx,id)=>S.fuel.filter(r=>r.masterId===id&&Math.abs(r.at-tx.at)<3*36e5).sort((a,b)=>Math.abs(a.at-tx.at)-Math.abs(b.at-tx.at))[0]||null;
+const NONFUEL=/кофе|напит|вода|сигар|табак|магаз|товар|шоколад|снек|мойк|масло мотор|омывай|coffee|shop|market|wash/i;
+function txFlags(tx,id){const f=[];const m=tech(id);const rec=matchRec(tx,id);
+ if(!rec)f.push({lv:'bad',t:'Заправка по карте не внесена в приложение'});else if(Math.abs(rec.liters-tx.liters)>0.5)f.push({lv:'bad',t:'По выписке '+n1(tx.liters)+', в приложении '+n1(rec.liters)+' '+fuelUnit(m)});
+ if(!inShiftAt(id,tx.at))f.push({lv:'bad',t:'Заправка по карте вне смены'+([0,6].includes(new Date(tx.at).getDay())?' (выходной)':'')});
+ if(m&&m.tank&&tx.liters>m.tank*1.05)f.push({lv:'bad',t:'По карте '+n1(tx.liters)+' '+fuelUnit(m)+', а бак '+m.tank});
+ if(tx.product&&NONFUEL.test(tx.product))f.push({lv:'bad',t:'По топливной карте куплено: '+tx.product});return f}
+function fuelFlags(r){const m=tech(r.masterId);const f=[];
+ if(m&&m.tank&&r.liters>m.tank*1.05)f.push({lv:'bad',t:'Залито '+n1(r.liters)+' '+fuelUnit(m)+', а бак '+m.tank});
+ if(!inShiftAt(r.masterId,r.at))f.push({lv:'warn',t:'Заправка вне смены'});
+ if(!r.loc)f.push({lv:'warn',t:'Чек без координат'});
+ if(cardOf(m)&&covered(r.at)){const tx=matchTx(r);if(!tx)f.push({lv:'warn',t:'Нет в выписке по карте'});else if(Math.abs(tx.liters-r.liters)>0.5)f.push({lv:'bad',t:'По выписке '+n1(tx.liters)+', в приложении '+n1(r.liters)+' '+fuelUnit(m)})}
+ f.push(...aiRcpt(r));return f}
+function fuelBal(id,from){const m=tech(id);const norm=normOf(m);const sh=S.shifts.filter(s=>s.masterId===id&&s.startAt>=from);
+ const rk=sh.reduce((a,s)=>a+routeKm(s),0);const ok=sh.reduce((a,s)=>{const k=odoKm(s);return a+(k>0?k:0)},0);
+ const tx=txOf(id).filter(x=>x.at>=from);const useTx=tx.length>0;const fl=S.fuel.filter(r=>r.masterId===id&&r.at>=from&&!(useTx&&covered(r.at)));
+ const filled=tx.reduce((a,x)=>a+(+x.liters||0),0)+fl.reduce((a,r)=>a+(+r.liters||0),0);const sum=tx.reduce((a,x)=>a+(+x.amount||0),0)+fl.reduce((a,r)=>a+(+r.sum||0),0);
+ const allowed=rk*norm/100;const over=filled-allowed;return{rk,ok,allowed,filled,sum,over,bad:over>Math.max(5,allowed*0.2),norm,days:sh.length,unit:fuelUnit(m),src:useTx?'выписка':'приложение',normOk:!!(m&&m.norm_approved)}}
+function ticketFlags(t){const f=[];const c=S.cfg;const g=t.gps,tm=t.times;const rad=+c.client_radius||200;
+ if(g.onsite&&g.onsite.dist!=null&&g.onsite.dist>rad)f.push({lv:'bad',t:'«На месте» отмечено в '+fDist(g.onsite.dist)+' от объекта'});
+ if(g.done&&g.done.dist!=null&&g.done.dist>rad)f.push({lv:'bad',t:'Работа завершена в '+fDist(g.done.dist)+' от объекта'});
+ if(tm.enroute&&tm.onsite&&tm.onsite-tm.enroute>90*60000)f.push({lv:'warn',t:'Дорога заняла '+fDur(tm.onsite-tm.enroute)});
+ if(tm.onsite&&tm.done&&tm.done-tm.onsite<10*60000)f.push({lv:'warn',t:'На объекте всего '+fDur(tm.done-tm.onsite)});
+ if(t.price&&t.est_max&&t.price>t.est_max*1.2)f.push({lv:'warn',t:'Цена выше оценки на '+Math.round((t.price/t.est_max-1)*100)+'%'});
+ if((t.refusals||[]).length>=2)f.push({lv:'warn',t:'От заказа отказались '+t.refusals.length+' раза'});
+ if(t.rating&&t.rating<=3)f.push({lv:'warn',t:'Низкая оценка клиента: '+t.rating+' из 5'});
+ if(t.status==='done'&&tm.done&&Date.now()-tm.done>2*864e5)f.push({lv:'warn',t:'Визит не подтверждён клиентом больше 2 дней'});return f}
+function marksOf(id){const out=[];const add=(p,at,what)=>{if(p&&p.lat!=null&&at)out.push({lat:p.lat,lng:p.lng,at,what})};
+ S.shifts.filter(s=>s.masterId===id).forEach(s=>{add(s.start,s.startAt,'приход');if(s.endAt)add(s.end,s.endAt,'уход')});
+ S.fuel.filter(r=>r.masterId===id).forEach(r=>add(r.loc,r.at,'заправка'));
+ S.tickets.filter(t=>t.techId===id).forEach(t=>{add(t.gps.enroute,t.times.enroute,'выезд '+t.num);add(t.gps.onsite,t.times.onsite,'на месте '+t.num);add(t.gps.done,t.times.done,'завершение '+t.num)});
+ return out.concat(S.track[id]||[]).sort((a,b)=>a.at-b.at)}
+function teleports(id){const ms_=marksOf(id);const out=[];for(let i=1;i<ms_.length;i++){const a=ms_[i-1],b=ms_[i];const dt=(b.at-a.at)/36e5;if(dt<=0||dt>8)continue;const d=distM(a,b)/1000;if(d>3&&d/dt>130)out.push({lv:'bad',t:'Невозможное перемещение: '+n1(d)+' км за '+fDur(b.at-a.at)+' ('+a.what+' → '+b.what+')',at:b.at})}return out}
+function todayStatus(m){const now=Date.now(),t0=dayStart(now),c=S.cfg;const sh=S.shifts.filter(s=>s.masterId===m.id&&s.startAt>=t0).sort((a,b)=>a.startAt-b.startAt)[0];
+ const wk=[0,6].includes(new Date(now).getDay());const due=now>hmToTs(now,c.work_start)+(+c.grace_min||0)*60000;
+ if(!sh){if(wk)return{code:'off',label:'Выходной',chip:'c-muted',flags:[]};return due?{code:'absent',label:'Не отметился',chip:'c-bad',flags:[{lv:'bad',t:'Нет отметки о приходе'}]}:{code:'notyet',label:'Ещё не пришёл',chip:'c-muted',flags:[]}}
+ const fl=shiftFlags(sh);return sh.endAt?{code:'done',label:'Ушёл',chip:'c-muted',sh,flags:fl}:{code:'on',label:'На смене',chip:'c-ok',sh,flags:fl}}
+const nowDoing=m=>{const t=S.tickets.find(x=>x.techId===m.id&&['enroute','onsite'].includes(x.status))||S.tickets.find(x=>x.techId===m.id&&x.status==='assigned');return t?ST[t.status][0]+' · '+t.num:''};
+function allIssues(from){const out=[];const t0=dayStart(Date.now());
+ S.alerts.filter(a=>a.at>=from).forEach(a=>out.push({lv:a.level,t:a.message,who:a.staff_id,at:a.at,kind:a.kind==='mock'?'Подмена GPS':a.kind==='device'?'Чужой телефон':'Сервер',go:['a-emp',a.staff_id]}));
+ approved().forEach(m=>{const st=todayStatus(m);if(st.code==='absent')out.push({lv:'bad',t:'Нет отметки о приходе',who:m.id,at:hmToTs(t0,S.cfg.work_start),kind:'Смена',go:['a-emp',m.id]});
+  teleports(m.id).filter(x=>x.at>=from).forEach(x=>out.push({lv:'bad',t:x.t,who:m.id,at:x.at,kind:'GPS',go:['a-emp',m.id]}));
+  txOf(m.id).filter(x=>x.at>=from).forEach(x=>txFlags(x,m.id).forEach(f=>out.push({lv:f.lv,t:f.t,who:m.id,at:x.at,kind:'Выписка по карте',go:['a-fuel','']})));
+  if(m.norm_claimed&&+m.norm_claimed!==+m.norm_approved)out.push({lv:'warn',t:'Расход машины ждёт утверждения: '+n1(m.norm_claimed),who:m.id,at:ms(m.created_at),kind:'Профиль',go:['a-emp',m.id]})});
+ S.shifts.filter(s=>s.startAt>=from).forEach(s=>shiftFlags(s).forEach(f=>out.push({lv:f.lv,t:f.t,who:s.masterId,at:s.startAt,kind:'Смена',go:['a-emp',s.masterId]})));
+ S.fuel.filter(r=>r.at>=from).forEach(r=>fuelFlags(r).forEach(f=>out.push({lv:f.lv,t:f.t,who:r.masterId,at:r.at,kind:'Заправка',go:['a-fuel','']})));
+ S.tickets.filter(t=>(t.createdAt>=from||(t.times.done>=from))&&t.status!=='cancelled').forEach(t=>ticketFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t,who:t.techId,at:t.times.done||t.times.onsite||t.createdAt,kind:'Заказ '+t.num,go:['a-order',t.id]})));
+ const seen={};return out.filter(x=>{const k=x.who+'|'+x.t+'|'+dayStart(x.at);return seen[k]?false:(seen[k]=1)}).sort((a,b)=>((a.lv==='bad'?0:1)-(b.lv==='bad'?0:1))||(b.at-a.at))}
+const todayIssues=()=>approved().filter(m=>todayStatus(m).flags.length).length;
+
+/* ---------- общий интерфейс ---------- */
+const kpi=(v,l,alert)=>'<div class="kpi'+(alert?' alert':'')+'"><b class="num">'+v+'</b><span>'+l+'</span></div>';
+const chip=st=>{const s=ST[st]||ST.new;return '<span class="chip '+s[1]+'">'+s[0]+'</span>'};
+const back=(l,to)=>'<button class="btn ghost sm" style="align-self:flex-start" data-act="nav" data-v="'+to+'">'+I.back+h(l)+'</button>';
+const atop=(t,r)=>'<div class="atop"><h1>'+t+'</h1>'+(r||'')+'</div>';
+function geoChip(mk,ref){if(!mk||mk.lat==null)return '<span class="chip c-warn">без координат</span>';const r=ref==='office'?(+S.cfg.office_radius||150):(+S.cfg.client_radius||200);
+ if(mk.dist==null)return '<a class="chip c-muted" href="'+mapUrl(mk)+'" target="_blank" rel="noopener">на карте</a>';
+ return '<a class="chip '+(mk.dist>r?'c-bad':'c-ok')+'" href="'+mapUrl(mk)+'" target="_blank" rel="noopener">'+fDist(mk.dist)+(ref==='office'?' от офиса':'')+'</a>'}
+const flagCell=fl=>fl.length?fl.map(f=>'<span style="color:'+(f.lv==='bad'?'var(--bad)':'var(--warn)')+'">'+h(f.t)+'</span>').join('<br>'):'<span class="okv">нет</span>';
+function issueList(a){if(!a.length)return '<div class="empty" style="padding:18px"><p>Отклонений нет.</p></div>';
+ return '<div class="ilist">'+a.map(i=>{const m=tech(i.who);return '<button class="irow" data-act="ago" data-v="'+i.go[0]+'" data-id="'+h(i.go[1]||'')+'"><span class="sev '+(i.lv==='bad'?'bad':'warn')+'"></span><span class="grow"><b>'+h(i.t)+'</b><span class="tiny muted" style="display:block">'+h(m?m.name:'—')+' · '+h(i.kind)+' · '+fDay(i.at)+'</span></span></button>'}).join('')+'</div>'}
+const PERS=[['today','Сегодня'],['week','7 дней'],['month','Месяц']];
+const perFrom=p=>{const t0=dayStart(Date.now());return p==='today'?t0:p==='week'?t0-6*864e5:monthStart()};
+const perSeg=()=>'<div class="seg" style="width:min(100%,360px)">'+PERS.map(x=>'<button class="'+(S.per===x[0]?'on':'')+'" data-act="per" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>';
+const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min(100%,260px);padding:9px 12px;font-size:14px"><option value="">Все сотрудники</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(S.empF===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select>';
+const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
+
+const ANAV=[['a-dash','Сводка','chart'],['a-staff','Сотрудники','team'],['a-shifts','Смены','clock'],['a-fuel','Топливо','fuel'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
+function shell(body){const n=S.view.name;const cur={'a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
+ const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues()};
+ return '<div class="adm"><aside class="side"><div class="brand"><span class="sunmark" aria-hidden="true"></span><div style="min-width:0"><b>'+h(S.cfg.company||'Arev Service')+'</b><small>Контроль сотрудников</small></div></div><nav class="nav">'+ANAV.map(i=>'<button class="'+(cur===i[0]?'on':'')+'" data-act="nav" data-v="'+i[0]+'">'+I[i[2]]+'<span class="lbl">'+i[1]+'</span>'+(cnt[i[0]]?'<span class="cnt">'+cnt[i[0]]+'</span>':'')+'</button>').join('')+'</nav><div class="foot"><button class="lnk" style="color:inherit" data-act="reload">Обновить данные</button><br><button class="lnk" style="color:inherit" data-act="logout">Выйти</button></div></aside><main class="amain">'+body+'</main></div>'}
+
+/* ---------- экраны ---------- */
+function vLogin(){const f=S.form;return '<div class="loginwrap"><div class="card" style="max-width:420px;width:100%"><div class="row"><span class="sunmark"></span><h2>Arev Service</h2></div><p class="muted small">Вход в админку. Используйте свой e-mail, не номер сотрудника.</p>'+
+ '<div class="field"><label for="l-em">E-mail</label><input id="l-em" class="inp" data-f="email" type="email" value="'+h(f.email||'')+'" autocomplete="email"></div><div class="field"><label for="l-pw">Пароль</label><input id="l-pw" class="inp" data-f="pw" type="password" value="'+h(f.pw||'')+'" autocomplete="current-password"></div>'+
+ '<button class="btn primary block" data-act="login">Войти</button><button class="btn ghost block" data-act="signup">Создать аккаунт администратора</button></div></div>'}
+function vClaim(){return '<div class="loginwrap"><div class="card" style="max-width:460px"><h2>Нет прав администратора</h2><p class="small">Вы вошли как '+h(S.session.user.email)+'. Если вы владелец и это первый вход, нажмите кнопку ниже. Она сработает только один раз, пока в системе нет ни одного администратора.</p><button class="btn primary block" data-act="claim">Стать администратором</button><button class="btn ghost block" data-act="logout">Выйти</button></div></div>'}
+
+function vDash(){const now=Date.now(),t0=dayStart(now);const staff=approved();const rows=staff.map(m=>({m,st:todayStatus(m)}));
+ const on=rows.filter(r=>r.st.code==='on').length;const lateAbs=rows.filter(r=>r.st.code==='absent'||r.st.flags.some(f=>/Опоздание/.test(f.t))).length;
+ const act=S.tickets.filter(t=>['assigned','enroute','onsite'].includes(t.status)).length;const nw=S.tickets.filter(t=>t.status==='new').length;
+ const fb=staff.map(m=>fuelBal(m.id,monthStart()));const fsum=fb.reduce((a,b)=>a+b.sum,0);const over=fb.filter(b=>b.bad).length;
+ const iss=allIssues(t0-6*864e5);const bad=iss.filter(i=>i.lv==='bad').length;const tr=txRange();
+ const ph=[];S.shifts.filter(s=>s.startAt>=monthStart()).forEach(s=>{ph.push(s.start.photo);if(s.end)ph.push(s.end.photo)});S.fuel.filter(r=>r.at>=monthStart()).forEach(r=>ph.push(r.photo));const chk=ph.filter(p=>S.checks[p]).length;
+ let s=atop('Сводка','<span class="muted">'+fDay(now)+', '+fHM(now)+'</span>')+officeWarn();
+ s+='<div class="kgrid">'+kpi(on+' из '+staff.length,'на смене сейчас')+kpi(lateAbs,'опоздали или не пришли',lateAbs>0)+kpi(act,'заказов в работе'+(nw?', '+nw+' новых':''))+kpi(bad,'серьёзных отклонений за 7 дней',bad>0)+kpi(money(fsum),'топливо за месяц'+(over?', перерасход у '+over:''),over>0)+'</div>';
+ s+='<div class="cols2"><section class="card"><div class="row between"><h2>Сегодня</h2><span class="muted small">график '+h(String(S.cfg.work_start||'').slice(0,5))+'–'+h(String(S.cfg.work_end||'').slice(0,5))+'</span></div>'+
+  '<div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Пришёл</th><th>Ушёл</th><th class="l">Сейчас</th><th class="l">Отклонения</th></tr></thead><tbody>'+
+  (rows.length?rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+(r.st.sh?fHM(r.st.sh.startAt):'<span class="chip '+r.st.chip+'">'+r.st.label+'</span>')+'</td><td>'+(r.st.sh&&r.st.sh.endAt?fHM(r.st.sh.endAt):'—')+'</td><td class="l">'+h(nowDoing(r.m)||(r.st.code==='on'?'в офисе / свободен':''))+'</td><td class="l wrapc">'+flagCell(r.st.flags)+'</td></tr>').join(''):'<tr><td colspan="5" class="l muted">Сотрудников пока нет. Они регистрируются сами в приложении.</td></tr>')+'</tbody></table></div>'+
+  '<div class="prot"><span class="label">Перекрёстные проверки за месяц</span><div class="row wrapx" style="gap:8px"><span class="chip '+(chk===ph.length?'c-ok':'c-warn')+'">ИИ проверил '+chk+' из '+ph.length+' фото</span><span class="chip '+(tr?'c-ok':'c-warn')+'">'+(tr?'Выписка по картам: '+fDay(tr.from)+' – '+fDay(tr.to-1):'Выписка по картам не загружена')+'</span></div></div></section>'+
+  '<section class="card"><div class="row between"><h2>Требует внимания</h2><span class="muted small">7 дней</span></div>'+issueList(iss.slice(0,15))+'</section></div>';
+ return s}
+
+function vStaff(){const pend=S.staff.filter(x=>x.status==='pending');const from=monthStart();
+ let s=atop('Сотрудники','<span class="muted small">Сотрудник сам регистрируется в приложении на телефоне</span>');
+ if(pend.length)s+='<section class="card"><div class="row between"><h2>Новые анкеты</h2><span class="chip c-warn">'+pend.length+'</span></div><div class="tblw flat"><table class="tbl"><thead><tr><th>Имя</th><th>Телефон</th><th class="l">Машина</th><th>Когда</th><th></th></tr></thead><tbody>'+
+  pend.map(x=>'<tr><td><b>'+h(x.name)+'</b></td><td class="num" style="user-select:all">'+h(x.phone)+'</td><td class="l">'+h(x.car_model||'—')+(x.norm_claimed?' · '+n1(x.norm_claimed)+' '+fuelUnit(x)+'/100':'')+'</td><td>'+ago(ms(x.created_at))+'</td><td><div class="row" style="justify-content:flex-end"><button class="btn primary sm" data-act="approve" data-id="'+h(x.id)+'">Принять</button><button class="btn danger sm" data-act="reject" data-id="'+h(x.id)+'">Отклонить</button></div></td></tr>').join('')+'</tbody></table></div><p class="tiny muted">При приёме расход из анкеты утверждается автоматически. Сверьте его с паспортной нормой модели.</p></section>';
+ const rows=approved().map(m=>{const sh=S.shifts.filter(x=>x.masterId===m.id&&x.startAt>=from);const fl=sh.reduce((a,x)=>a.concat(shiftFlags(x)),[]).concat(teleports(m.id).filter(x=>x.at>=from));
+  const rated=S.tickets.filter(t=>t.techId===m.id&&t.rating);return {m,sh,late:fl.filter(f=>/Опоздание/.test(f.t)).length,bad:fl.filter(f=>f.lv==='bad').length+S.alerts.filter(a=>a.staff_id===m.id&&a.at>=from).length,b:fuelBal(m.id,from),st:todayStatus(m),avg:rated.length?(rated.reduce((a,t)=>a+t.rating,0)/rated.length).toFixed(1).replace('.',','):'—'}});
+ s+='<section class="card"><div class="row between"><h2>Работают</h2><span class="muted small">показатели за месяц</span></div><div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th class="l">Сегодня</th><th class="l">Машина</th><th>Карта</th><th>Смен</th><th>Опозданий</th><th>Серьёзных отклонений</th><th>Топливо: залито / положено</th><th>Рейтинг</th></tr></thead><tbody>'+
+  (rows.length?rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b><div class="tiny muted num">'+h(r.m.phone)+'</div></td><td class="l"><span class="chip '+r.st.chip+'">'+r.st.label+(r.st.sh?' '+fHM(r.st.sh.startAt):'')+'</span></td><td class="l">'+h(r.m.car_model||'не указана')+'<div class="tiny muted">'+(r.b.normOk?n1(r.b.norm)+' '+fuelUnit(r.m)+'/100 км':'<span style="color:var(--warn)">расход не утверждён</span>')+'</div></td><td>'+(cardOf(r.m)?'•• '+h(cardOf(r.m).slice(-4)):'<span style="color:var(--warn)">нет</span>')+'</td><td>'+r.sh.length+'</td><td class="'+(r.late?'over':'')+'">'+r.late+'</td><td class="'+(r.bad?'over':'')+'">'+r.bad+'</td><td class="'+(r.b.bad?'over':'')+'">'+n1(r.b.filled)+' / '+n1(r.b.allowed)+' '+r.b.unit+'</td><td>'+r.avg+'</td></tr>').join(''):'<tr><td colspan="9" class="l muted">Пока никого нет</td></tr>')+'</tbody></table></div></section>';
+ const off=S.staff.filter(x=>x.status==='blocked'||x.status==='rejected');
+ if(off.length)s+='<section class="card tight"><h2>Отклонённые и приостановленные</h2>'+off.map(x=>'<div class="row between"><span>'+h(x.name)+' <span class="muted small">'+(x.status==='blocked'?'приостановлен':'отклонён')+'</span></span><button class="btn ghost sm" data-act="restore" data-id="'+h(x.id)+'">Вернуть</button></div>').join('')+'</section>';
+ return s}
+
+function shiftRows(list,showName){return '<div class="tblw flat"><table class="tbl"><thead><tr><th>День</th>'+(showName?'<th class="l">Сотрудник</th>':'')+'<th>Приход</th><th>Одометр утром</th><th>Уход</th><th>Одометр вечером</th><th>Часов</th><th>Км по заказам</th><th>Км за смену</th><th class="l">Отклонения</th></tr></thead><tbody>'+
+ (list.length?list.map(x=>{const m=tech(x.masterId);const ff=shiftFlags(x);
+  return '<tr><td>'+fDay(x.startAt)+'</td>'+(showName?'<td class="l"><button class="lnk" data-act="ago" data-v="a-emp" data-id="'+h(x.masterId)+'">'+h(m?m.name:'—')+'</button></td>':'')+
+  '<td>'+fHM(x.startAt)+'</td><td><div class="odo">'+thumb(x.start.photo)+'<div><span class="num">'+x.start.odo.toLocaleString('ru-RU')+'</span><br>'+geoChip(x.start,'office')+'</div></div></td>'+
+  '<td>'+(x.endAt?fHM(x.endAt):'<span class="chip c-ok">идёт</span>')+'</td><td>'+(x.end?'<div class="odo">'+thumb(x.end.photo)+'<div><span class="num">'+x.end.odo.toLocaleString('ru-RU')+'</span><br>'+geoChip(x.end,'office')+'</div></div>':'—')+'</td>'+
+  '<td>'+(x.endAt?n1((x.endAt-x.startAt)/36e5):'—')+'</td><td>'+n1(routeKm(x))+'</td><td class="'+(ff.some(f=>/Пробег/.test(f.t))?'over':'')+'">'+(odoKm(x)!=null?odoKm(x):'—')+'</td><td class="l wrapc">'+flagCell(ff)+'</td></tr>'}).join(''):'<tr><td colspan="10" class="l muted">Смен за этот период нет</td></tr>')+'</tbody></table></div>'}
+function aiBar(){return '<div class="card tight aibar"><div class="row between wrapx"><div><b>Проверка фото ИИ</b><div class="small muted">ИИ читает пробег на фото одометра и данные чеков, ищет фото экрана вместо реальной панели и сравнивает с тем, что ввёл сотрудник.</div></div><button class="btn dark sm" data-act="ai"'+(S.busy?' disabled':'')+'>'+(S.busy==='ai'?'Проверяю…':'Проверить новые фото')+'</button></div></div>'}
+function vShifts(){const from=perFrom(S.per);const list=S.shifts.filter(x=>x.startAt>=from&&(!S.empF||x.masterId===S.empF)).sort((a,b)=>b.startAt-a.startAt);
+ return atop('Смены','<div class="row wrapx">'+empSel()+perSeg()+'</div>')+officeWarn()+aiBar()+shiftRows(list,true)}
+
+/* --- выписка --- */
+const KEYS={date:/дата|date/i,time:/^время|time/i,card:/карт|card|pan/i,liters:/литр|кол-?во|количеств|объ[её]м|qty|quantit|volume|liter/i,sum:/сумм|amount|стоимост|total|sum/i,station:/азс|станц|station|адрес|точк|место/i,product:/товар|продукт|вид топлива|услуг|product|наименов|номенкл/i};
+function guessMap(hd){const m={};Object.keys(KEYS).forEach(k=>{m[k]=hd.findIndex(x=>KEYS[k].test(String(x||'')))});if(m.time===m.date)m.time=-1;return m}
+const numOf=v=>{if(typeof v==='number')return v;return parseFloat(String(v||'').replace(/\s| /g,'').replace(/[^\d,.\-]/g,'').replace(',','.'))};
+function dateOf(v,t){const tt=t instanceof Date?p2(t.getHours())+':'+p2(t.getMinutes()):t;if(v instanceof Date&&!isNaN(v)){const d=new Date(v.getTime());const m=String(tt||'').match(/(\d{1,2}):(\d{2})/);if(m)d.setHours(+m[1],+m[2],0,0);return d.getTime()}
+ const s=String(v||'')+(tt?' '+tt:'');let m=s.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})(?:\D+(\d{1,2}):(\d{2}))?/);if(m)return new Date(+(m[3].length===2?'20'+m[3]:m[3]),+m[2]-1,+m[1],+(m[4]||12),+(m[5]||0)).getTime();
+ m=s.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:\D+(\d{1,2}):(\d{2}))?/);if(m)return new Date(+m[1],+m[2]-1,+m[3],+(m[4]||12),+(m[5]||0)).getTime();return null}
+function parseTxRow(r,mp){const g=k=>mp[k]>=0?r[mp[k]]:'';const at=dateOf(g('date'),mp.time>=0?g('time'):null);const liters=numOf(g('liters'));if(!at||!(liters>0))return null;
+ return{at,liters:Math.round(liters*100)/100,amount:Math.round(numOf(g('sum'))||0),card:String(g('card')||'').trim(),station:String(g('station')||'').trim().slice(0,80),product:String(g('product')||'').trim().slice(0,60)}}
+function strHash(s){let x=5381;for(let i=0;i<s.length;i++)x=((x<<5)+x+s.charCodeAt(i))>>>0;return x.toString(36)}
+async function readSheet(file){const buf=await file.arrayBuffer();let wb;
+ if(/\.csv$|\.txt$/i.test(file.name)){let txt=new TextDecoder('utf-8').decode(buf);if(txt.indexOf('�')>=0)try{txt=new TextDecoder('windows-1251').decode(buf)}catch(e){}wb=XLSX.read(txt,{type:'string',cellDates:true})}
+ else wb=XLSX.read(buf,{type:'array',cellDates:true});
+ const ws=wb.Sheets[wb.SheetNames[0]];const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+ const hi=rows.findIndex(r=>r.filter(x=>typeof x==='string'&&x.trim()&&isNaN(+x)).length>=3);const hd=(rows[hi>=0?hi:0]||[]).map(x=>String(x||'').trim());
+ return{name:file.name,header:hd,rows:rows.slice((hi>=0?hi:0)+1).filter(r=>r.some(x=>String(x).trim())),map:guessMap(hd)}}
+function impPanel(){const im=S.imp;if(!im)return '';const F=[['date','Дата'],['time','Время (если отдельно)'],['card','Номер карты'],['liters','Литры / кубы'],['sum','Сумма'],['station','АЗС'],['product','Товар / вид топлива']];
+ const opt=sel=>'<option value="-1">—</option>'+im.header.map((x,i)=>'<option value="'+i+'"'+(sel===i?' selected':'')+'>'+h(x||('Столбец '+(i+1)))+'</option>').join('');
+ const prev=im.rows.slice(0,5).map(r=>parseTxRow(r,im.map)).filter(Boolean);
+ return '<section class="card"><div class="row between"><h2>Загрузка выписки: '+h(im.name)+'</h2><button class="btn ghost sm" data-act="impcancel">Отмена</button></div><p class="small muted">Проверьте, какие столбцы чему соответствуют. Строк в файле: '+im.rows.length+'.</p>'+
+ '<div class="cols">'+F.map(x=>'<div class="field"><label>'+x[1]+'</label><select class="inp" data-act="impmap" data-k="'+x[0]+'" style="padding:9px 12px;font-size:14px">'+opt(im.map[x[0]])+'</select></div>').join('')+'</div>'+
+ '<div class="tblw flat"><table class="tbl"><thead><tr><th>Дата</th><th>Карта</th><th>Объём</th><th>Сумма</th><th class="l">АЗС</th><th class="l">Товар</th></tr></thead><tbody>'+(prev.length?prev.map(t=>'<tr><td>'+fT(t.at)+'</td><td>'+h(t.card)+'</td><td>'+n1(t.liters)+'</td><td>'+money(t.amount)+'</td><td class="l">'+h(t.station)+'</td><td class="l">'+h(t.product)+'</td></tr>').join(''):'<tr><td colspan="6" class="l" style="color:var(--bad)">Не удалось разобрать строки. Укажите столбцы даты и объёма.</td></tr>')+'</tbody></table></div>'+
+ '<button class="btn primary" style="align-self:flex-start" data-act="impsave"'+(prev.length&&!S.busy?'':' disabled')+'>Загрузить '+im.rows.length+' строк</button></section>'}
+function vFuel(){const from=perFrom(S.per);const staff=approved().filter(m=>!S.empF||m.id===S.empF);const rows=staff.map(m=>Object.assign({m},fuelBal(m.id,from)));const tot=rows.reduce((a,r)=>a+r.sum,0);const tr=txRange();
+ let s=atop('Топливо','<div class="row wrapx">'+empSel()+perSeg()+'</div>');
+ s+='<section class="card tight"><div class="row between wrapx"><div><b>Выписка по топливным картам</b><div class="small muted">'+(tr?'Загружено '+S.tx.length+' операций за '+fDay(tr.from)+' – '+fDay(tr.to-1)+'. Литры из выписки заменяют то, что вводят сотрудники.':'Главная защита от занижения литров. Загрузите выписку от поставщика карт (Excel или CSV) и укажите номер карты у каждого сотрудника.')+'</div></div><button class="btn dark sm" data-act="imppick">'+I.plus+'Загрузить выписку</button></div></section>';
+ s+=impPanel()+aiBar();
+ s+='<section class="card"><h2>Баланс</h2><div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Смен</th><th>Км по заказам</th><th>Км за смены</th><th>Расход</th><th>Положено</th><th>Залито</th><th>Разница</th><th>Сумма</th><th>Источник</th></tr></thead><tbody>'+
+  rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+r.days+'</td><td>'+n1(r.rk)+'</td><td>'+n1(r.ok)+'</td><td>'+(r.normOk?n1(r.norm)+' '+r.unit+'/100':'<span style="color:var(--warn)">не утверждён</span>')+'</td><td>'+n1(r.allowed)+' '+r.unit+'</td><td>'+n1(r.filled)+' '+r.unit+'</td><td class="'+(r.bad?'over':'okv')+'">'+(r.over>0?'+':'')+n1(r.over)+' '+r.unit+'</td><td>'+money(r.sum)+'</td><td>'+(r.src==='выписка'?'<span class="chip c-ok">выписка</span>':'<span class="chip c-warn">со слов</span>')+'</td></tr>').join('')+
+  '<tr class="tot"><td>Итого</td><td colspan="7"></td><td>'+money(tot)+'</td><td></td></tr></tbody></table></div><p class="tiny muted">Положено = км по заказам (офис → клиенты → офис × коэффициент дорог) × утверждённый расход.</p></section>';
+ const txl=[];staff.forEach(m=>txOf(m.id).filter(x=>x.at>=from).forEach(x=>{const f=txFlags(x,m.id);if(f.length)txl.push({x,m,f})}));txl.sort((a,b)=>b.x.at-a.x.at);
+ if(tr)s+='<section class="card"><h2>Расхождения с выпиской</h2>'+(txl.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>Дата</th><th class="l">Сотрудник</th><th>Объём</th><th>Сумма</th><th class="l">АЗС</th><th class="l">Что не так</th></tr></thead><tbody>'+txl.map(r=>'<tr><td>'+fDay(r.x.at)+', '+fHM(r.x.at)+'</td><td class="l">'+h(r.m.name)+'</td><td>'+n1(r.x.liters)+' '+fuelUnit(r.m)+'</td><td>'+money(r.x.amount)+'</td><td class="l">'+h(r.x.station||'')+'</td><td class="l wrapc">'+flagCell(r.f)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small okv">Все операции по картам совпадают с приложением.</p>')+'</section>';
+ const fl=S.fuel.filter(r=>r.at>=from&&staff.some(m=>m.id===r.masterId)).sort((a,b)=>b.at-a.at);
+ s+='<section class="card"><h2>Заправки в приложении</h2><div class="tblw flat"><table class="tbl"><thead><tr><th>Дата</th><th class="l">Сотрудник</th><th>Чек</th><th>Объём</th><th>Сумма</th><th>Где</th><th class="l">Отклонения</th></tr></thead><tbody>'+
+  (fl.length?fl.map(r=>{const m=tech(r.masterId);return '<tr><td>'+fDay(r.at)+', '+fHM(r.at)+'</td><td class="l">'+h(m?m.name:'—')+'</td><td>'+thumb(r.photo)+'</td><td>'+n1(r.liters)+' '+fuelUnit(m)+'</td><td>'+money(r.sum)+'</td><td>'+(r.loc?'<a class="chip c-muted" href="'+mapUrl(r.loc)+'" target="_blank" rel="noopener">на карте</a>':'—')+'</td><td class="l wrapc">'+flagCell(fuelFlags(r))+'</td></tr>'}).join(''):'<tr><td colspan="7" class="l muted">Заправок за этот период нет</td></tr>')+'</tbody></table></div></section>';
+ return s}
+
+function vEmp(){const m=tech(S.view.p.id);if(!m)return back('Сотрудники','a-staff')+'<div class="empty">Сотрудник не найден</div>';const from=monthStart();const f=S.form;
+ const sh=S.shifts.filter(x=>x.masterId===m.id&&x.startAt>=from).sort((a,b)=>b.startAt-a.startAt);const b=fuelBal(m.id,from);const st=todayStatus(m);
+ const fl=sh.reduce((a,x)=>a.concat(shiftFlags(x)),[]);const tp=teleports(m.id).filter(x=>x.at>=from);const al=S.alerts.filter(a=>a.staff_id===m.id&&a.at>=from);const hours=sh.filter(x=>x.endAt).reduce((a,x)=>a+(x.endAt-x.startAt)/36e5,0);
+ const orders=S.tickets.filter(t=>t.techId===m.id).slice(0,15);const fuel=S.fuel.filter(r=>r.masterId===m.id&&r.at>=from);
+ let s=back('Сотрудники','a-staff')+'<div class="atop"><div class="row"><span class="avatar" style="width:52px;height:52px;font-size:18px">'+h(initials(m.name))+'</span><div><h1>'+h(m.name)+'</h1><div class="muted small"><span class="num" style="user-select:all">'+h(m.phone)+'</span> · '+h(m.car_model||'машина не указана')+(m.car_plate?' · '+h(m.car_plate):'')+(m.tank?' · бак '+m.tank:'')+'</div></div></div><div class="row wrapx"><span class="chip '+st.chip+'">Сегодня: '+st.label+'</span>'+(m.status==='approved'?'<button class="btn danger sm" data-act="block" data-id="'+h(m.id)+'">Приостановить</button>':'<button class="btn ghost sm" data-act="restore" data-id="'+h(m.id)+'">Вернуть</button>')+'</div></div>';
+ s+='<div class="kgrid">'+kpi(sh.length,'смен в этом месяце')+kpi(n1(hours),'часов отработано')+kpi(fl.filter(x=>/Опоздание/.test(x.t)).length,'опозданий',fl.some(x=>/Опоздание/.test(x.t)))+kpi(fl.filter(x=>x.lv==='bad').length+tp.length+al.length,'серьёзных отклонений',fl.some(x=>x.lv==='bad')||tp.length||al.length)+kpi(n1(b.filled)+' / '+n1(b.allowed)+' '+b.unit,'топливо: залито / положено ('+b.src+')',b.bad)+'</div>';
+ s+='<section class="card"><h2>Настройки контроля</h2><div class="cols"><div class="field"><label for="e-card">Последние 4 цифры топливной карты</label><div class="row"><input id="e-card" class="inp num" inputmode="numeric" maxlength="8" data-f="card" value="'+h(f.card!=null?f.card:(m.card_last4||''))+'" placeholder="1234"><button class="btn ghost sm" data-act="setcard" data-id="'+h(m.id)+'">Сохранить</button></div></div>'+
+  '<div class="field"><label for="e-norm">Утверждённый расход, '+fuelUnit(m)+'/100 км</label><div class="row"><input id="e-norm" class="inp num" inputmode="decimal" data-f="norm" value="'+h(f.norm!=null?f.norm:(m.norm_approved||''))+'" placeholder="'+h(m.norm_claimed||'')+'"><button class="btn ghost sm" data-act="setnorm" data-id="'+h(m.id)+'">Утвердить</button></div>'+(m.norm_claimed&&+m.norm_claimed!==+m.norm_approved?'<p class="tiny" style="color:var(--warn)">Сотрудник указал '+n1(m.norm_claimed)+'. Сверьте с паспортной нормой модели.</p>':'')+'</div>'+
+  '<div class="field"><label>Телефон сотрудника</label><div class="row wrapx"><span class="small muted">'+(m.device_id?'привязан':'не привязан')+'</span><button class="btn ghost sm" data-act="resetdev" data-id="'+h(m.id)+'">Разрешить вход с нового телефона</button></div></div>'+
+  '<div class="field"><label for="e-pin">Новый PIN-код (если сотрудник забыл)</label><div class="row"><input id="e-pin" class="inp num" inputmode="numeric" maxlength="12" data-f="pin" value="'+h(f.pin||'')+'" placeholder="6 цифр"><button class="btn ghost sm" data-act="resetpin" data-id="'+h(m.id)+'">Задать</button></div></div></div></section>';
+ if(al.length||tp.length)s+='<section class="card tight"><h2>Тревоги</h2>'+al.map(a=>'<div class="flag '+(a.level==='bad'?'bad':'warn')+'">'+I.alert+'<span>'+fT(a.at)+': '+h(a.message)+'</span></div>').join('')+tp.map(x=>'<div class="flag bad">'+I.alert+'<span>'+fT(x.at)+': '+h(x.t)+'. Возможна подмена GPS</span></div>').join('')+'</section>';
+ s+='<section class="card"><h2>Смены за месяц</h2>'+shiftRows(sh,false)+'</section>';
+ s+='<div class="cols2"><section class="card"><h2>Заправки за месяц</h2>'+(fuel.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>Дата</th><th>Чек</th><th>Объём</th><th>Сумма</th><th class="l">Отклонения</th></tr></thead><tbody>'+fuel.map(r=>'<tr><td>'+fDay(r.at)+', '+fHM(r.at)+'</td><td>'+thumb(r.photo)+'</td><td>'+n1(r.liters)+' '+fuelUnit(m)+'</td><td>'+money(r.sum)+'</td><td class="l wrapc">'+flagCell(fuelFlags(r))+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Заправок нет.</p>')+'</section>'+
+  '<section class="card"><h2>Заказы</h2>'+(orders.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>№</th><th class="l">Работа</th><th class="l">Статус</th><th>Сумма</th><th class="l">Отклонения</th></tr></thead><tbody>'+orders.map(t=>'<tr class="click" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'"><td>'+h(t.num)+'</td><td class="l">'+h(CATS[t.category]||t.category)+'</td><td class="l">'+chip(t.status)+'</td><td>'+money(t.price)+'</td><td class="l wrapc">'+flagCell(ticketFlags(t))+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Заказов пока нет.</p>')+'</section></div>';
+ return s}
+
+function vOrders(){const flt=S.filter;const all=S.tickets;let list=all;
+ if(flt==='active')list=all.filter(t=>ACTIVE.includes(t.status)||t.status==='done');else if(flt==='new')list=all.filter(t=>t.status==='new');else if(flt==='flags')list=all.filter(t=>t.status!=='cancelled'&&ticketFlags(t).length);else if(flt==='done')list=all.filter(t=>['done','closed'].includes(t.status));
+ const F=[['active','Активные'],['new','Новые'],['flags','С отклонениями'],['done','Выполненные'],['all','Все']];
+ return atop('Заявки','<div class="row wrapx"><div class="filters">'+F.map(x=>'<button class="'+(flt===x[0]?'on':'')+'" data-act="filter" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div><button class="btn primary sm" data-act="nav" data-v="a-new">'+I.plus+'Новая заявка</button></div>')+
+ '<div class="tblw"><table class="tbl"><thead><tr><th>№</th><th>Создана</th><th class="l">Клиент</th><th class="l">Адрес</th><th class="l">Работа</th><th class="l">Сотрудник</th><th class="l">Статус</th><th>Сумма</th><th class="l">Отклонения</th></tr></thead><tbody>'+
+ (list.length?list.map(t=>{const m=tech(t.techId);return '<tr class="click" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'"><td>'+h(t.num)+(t.urgent?' <span class="chip c-bad">срочно</span>':'')+'</td><td>'+fT(t.createdAt)+'</td><td class="l">'+h(t.client_name)+'</td><td class="l" style="max-width:220px;white-space:normal">'+h(t.address)+'</td><td class="l">'+h(CATS[t.category]||t.category)+'</td><td class="l">'+(m?h(m.name):'<span style="color:var(--info)">не назначен</span>')+'</td><td class="l">'+chip(t.status)+'</td><td>'+(t.price?money(t.price):t.est_min?'<span class="muted">'+money(t.est_min)+'–'+money(t.est_max)+'</span>':'—')+'</td><td class="l wrapc">'+flagCell(t.status==='cancelled'?[]:ticketFlags(t))+'</td></tr>'}).join(''):'<tr><td colspan="9" class="l muted">В этом списке пусто</td></tr>')+'</tbody></table></div>'}
+function vNew(){const f=S.form;if(!f.init){Object.assign(f,{init:1,cat:'inverter',urgent:false})}
+ return back('Заявки','a-orders')+atop('Новая заявка')+'<section class="card" style="max-width:760px"><div class="cols">'+
+ '<div class="field"><label for="n-name">Имя клиента</label><input id="n-name" class="inp" data-f="cname" value="'+h(f.cname||'')+'"></div><div class="field"><label for="n-phone">Телефон</label><input id="n-phone" class="inp" data-f="cphone" value="'+h(f.cphone||'')+'" placeholder="+374 __ ___ ___"></div></div>'+
+ '<div class="field"><label for="n-addr">Адрес станции</label><input id="n-addr" class="inp" data-f="addr" value="'+h(f.addr||'')+'"></div>'+
+ '<div class="field"><label for="n-ll">Координаты (из Google Maps: нажмите на точку и скопируйте цифры)</label><input id="n-ll" class="inp" data-f="ll" value="'+h(f.ll||'')+'" placeholder="40.18110, 44.51360"><p class="tiny muted">Нужны, чтобы проверять, что сотрудник действительно приехал к клиенту.</p></div>'+
+ '<div class="cols"><div class="field"><label for="n-cat">Что случилось</label><select id="n-cat" class="inp" data-f="cat">'+Object.keys(CATS).map(k=>'<option value="'+k+'"'+(f.cat===k?' selected':'')+'>'+CATS[k]+'</option>').join('')+'</select></div><div class="field"><label for="n-err">Код ошибки инвертора</label><input id="n-err" class="inp" data-f="err" value="'+h(f.err||'')+'"></div>'+
+ '<div class="field"><label for="n-min">Оценка от, ֏</label><input id="n-min" class="inp num" type="number" data-f="emin" value="'+h(f.emin||'')+'"></div><div class="field"><label for="n-max">Оценка до, ֏</label><input id="n-max" class="inp num" type="number" data-f="emax" value="'+h(f.emax||'')+'"></div></div>'+
+ '<div class="field"><label for="n-desc">Описание</label><textarea id="n-desc" class="inp" data-f="desc">'+h(f.desc||'')+'</textarea></div>'+
+ '<label class="toggle small" for="n-urg"><input type="checkbox" id="n-urg" data-act="urg"'+(f.urgent?' checked':'')+'><span>Срочно</span></label>'+
+ '<button class="btn primary" style="align-self:flex-start" data-act="createorder"'+(S.busy?' disabled':'')+'>Создать заявку</button></section>'}
+function vOrder(){const t=T(S.view.p.id);if(!t)return back('Заявки','a-orders')+'<div class="empty">Заявка не найдена</div>';const tm=t.times,g=t.gps;const fl=ticketFlags(t);const ph=S.tphotos[t.id]||[];
+ const ev=[['Заявка создана',t.createdAt,null],['Сотрудник взял заказ',tm.assigned,null],['Выехал',tm.enroute,g.enroute],['На месте',tm.onsite,g.onsite],['Работа завершена',tm.done,g.done],['Подтверждено'+(t.confirmed_by==='admin'?' (по звонку)':''),tm.closed,null]].filter(e=>e[1]);
+ let L='<section class="card tight"><div class="row between"><span class="label">'+h(t.num)+'</span>'+chip(t.status)+'</div><h2>'+h(CATS[t.category]||t.category)+(t.urgent?' <span class="chip c-bad">срочно</span>':'')+'</h2>'+
+  '<dl class="kv"><dt>Клиент</dt><dd>'+h(t.client_name)+'</dd><dt>Телефон</dt><dd class="num" style="user-select:all">'+h(t.client_phone)+'</dd><dt>Адрес</dt><dd>'+h(t.address)+(t.loc?' · <a href="'+mapUrl(t.loc)+'" target="_blank" rel="noopener">карта</a>':' · <span style="color:var(--warn)">нет точки</span>')+'</dd><dt>Оценка</dt><dd class="num">'+(t.est_min?money(t.est_min)+' – '+money(t.est_max):'—')+'</dd><dt>Итог</dt><dd class="num"><b>'+money(t.price)+'</b></dd>'+(t.rating?'<dt>Оценка клиента</dt><dd style="color:var(--warn)">'+'★'.repeat(t.rating)+'</dd>':'')+'</dl>'+(t.descr?'<p class="small">'+h(t.descr)+'</p>':'')+(t.err_code?'<p class="small">Код ошибки: <b>'+h(t.err_code)+'</b></p>':'')+(t.review?'<p class="small muted">Отзыв: '+h(t.review)+'</p>':'')+'</section>';
+ L+='<section class="card tight"><span class="label">Сотрудник</span><select class="inp" id="m-assign" data-act="assign"'+(['done','closed','cancelled'].includes(t.status)?' disabled':'')+'><option value="">— не назначен —</option>'+approved().map(x=>'<option value="'+h(x.id)+'"'+(t.techId===x.id?' selected':'')+'>'+h(x.name)+'</option>').join('')+'</select>'+(t.status==='new'?'<p class="tiny muted">Заказ видят все сотрудники на смене. Можно назначить вручную.</p>':'')+((t.refusals||[]).length?'<p class="tiny" style="color:var(--warn)">Отказы: '+t.refusals.map(r=>h((tech(r.by)||{}).name||'сотрудник')+' в '+fHM(ms(r.at))).join(', ')+'</p>':'')+'</section>';
+ if(t.status==='done')L+='<section class="card tight"><span class="label">Подтверждение визита</span><p class="small">Позвоните клиенту: был ли мастер, всё ли сделано, сколько заплатили.</p><div class="row wrapx"><select class="inp" id="o-rate" data-f="rate" style="width:auto">'+[5,4,3,2,1].map(n=>'<option value="'+n+'"'+(+S.form.rate===n?' selected':'')+'>'+'★'.repeat(n)+'</option>').join('')+'</select><button class="btn primary sm" data-act="confirm">Клиент подтвердил</button><button class="btn danger sm" data-act="dispute">Мастера не было</button></div></section>';
+ let R='<section class="card tight"><span class="label">Контроль выезда</span>'+(fl.length?fl.map(f=>'<div class="flag '+f.lv+'">'+I.alert+'<span>'+h(f.t)+'</span></div>').join(''):tm.onsite?'<div class="flag note" style="background:var(--ok-soft);color:var(--ok)">'+I.check+'<span>Отклонений нет</span></div>':'<p class="small muted">Появится после отметок сотрудника.</p>')+'</section>';
+ R+='<section class="card tight"><span class="label">Хронология</span><div class="tl">'+ev.map(e=>'<div class="tl-i"><time>'+fHM(e[1])+'</time><span>'+e[0]+' '+(e[2]?geoChip(e[2],'obj'):'')+'</span></div>').join('')+'</div></section>';
+ if(ph.length)R+='<section class="card tight"><span class="label">Фото</span>'+(t.work?'<p class="small">'+h(t.work)+'</p>':'')+'<div class="row wrapx" style="gap:10px">'+ph.map(p=>'<div style="display:flex;flex-direction:column;gap:3px;align-items:center">'+thumb(p.path,'thumb lg')+'<span class="tiny muted">'+(p.kind==='before'?'до':p.kind==='after'?'после':'клиент')+' '+fHM(p.at)+'</span></div>').join('')+'</div></section>';
+ if(!['closed','cancelled'].includes(t.status))R+='<button class="btn danger" style="align-self:flex-start" data-act="cancel">Отменить заявку</button>';
+ return back('Заявки','a-orders')+'<div class="cols2"><div class="stack">'+L+'</div><div class="stack">'+R+'</div></div>'}
+
+function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.work_start=String(f.c.work_start||'09:00').slice(0,5);f.c.work_end=String(f.c.work_end||'18:00').slice(0,5)}const c=f.c;
+ const inp=(k,l,t,extra)=>'<div class="field"><label for="g-'+k+'">'+l+'</label><input id="g-'+k+'" class="inp num" type="'+(t||'number')+'" data-c="'+k+'" value="'+h(c[k]==null?'':c[k])+'"'+(extra||'')+'></div>';
+ let s=atop('Настройки','<button class="btn primary" data-act="savecfg">Сохранить</button>');
+ s+='<div class="cols2"><section class="card"><h2>Офис</h2><div class="field"><label for="g-ll">Координаты офиса (из Google Maps: правый клик по офису → скопировать цифры)</label><input id="g-ll" class="inp" data-c="ll" value="'+h(c.ll!=null?c.ll:(c.office_lat!=null?c.office_lat+', '+c.office_lng:''))+'" placeholder="40.17920, 44.49910"></div>'+
+  '<button class="btn ghost sm" style="align-self:flex-start" data-act="here">'+I.pin+'Я сейчас в офисе, взять точку с этого устройства</button>'+
+  '<div class="field"><label for="g-wifi">Офисный Wi-Fi: имя сети (можно несколько через запятую)</label><input id="g-wifi" class="inp" data-c="office_wifi" value="'+h(c.office_wifi||'')+'" placeholder="ArevOffice"><p class="tiny muted">Если заполнено, приход и уход проверяются ещё и по Wi-Fi: подделать его сложнее, чем GPS.</p></div>'+
+  '<div class="cols">'+inp('office_radius','Радиус офиса, м')+inp('client_radius','Радиус у клиента, м')+'</div></section>'+
+  '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+'</div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div></section></div>';
+ return s}
+
+/* ---------- рендер ---------- */
+const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-settings':vSettings};
+function render(keep){const y=window.scrollY;const root=document.getElementById('root');
+ if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
+ if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else root.innerHTML=shell((VIEWS[S.view.name]||vDash)());
+ if(keep)window.scrollTo(0,y);signPending()}
+function go(name,p){S.view={name,p:p||{}};S.form={};render();window.scrollTo(0,0)}
+let toastT;function toast(m){let el=document.getElementById('toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';document.body.appendChild(el)}el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{el.hidden=true},3500)}
+let sheetRes=null;function sheet(html){closeSheet(null);return new Promise(r=>{sheetRes=r;const s=document.createElement('div');s.className='scrim';s.id='scrim';s.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';s.addEventListener('click',e=>{if(e.target===s)closeSheet(null)});document.body.appendChild(s);const i=s.querySelector('input,button');if(i)i.focus()})}
+function closeSheet(v){const s=document.getElementById('scrim');if(s)s.remove();if(sheetRes){const r=sheetRes;sheetRes=null;r(v)}}
+const confirmBox=(title,text,ok)=>sheet('<h2>'+title+'</h2><p class="small">'+text+'</p><button class="btn danger block" data-act="sheet" data-v="y">'+ok+'</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');
+async function upd(table,id,patch,msg){const r=await sb.from(table).update(patch).eq('id',id);if(r.error){toast('Ошибка: '+r.error.message);return false}if(msg)toast(msg);await load();return true}
+
+/* ---------- действия ---------- */
+const ACT={
+ sheet(d){closeSheet(d.v)},
+ nav(d){go(d.v)},
+ ago(d){go(d.v,d.id?{id:d.id}:{})},
+ per(d){S.per=d.v;LS.set('per',d.v);render(true)},
+ filter(d){S.filter=d.v;render(true)},
+ reload(){load().then(()=>toast('Данные обновлены'))},
+ view(d,el){const src=el.currentSrc||el.src;if(!src)return;const v=document.createElement('div');v.className='viewer';v.innerHTML='<img src="'+h(src)+'" alt="Фото"><button aria-label="Закрыть">×</button>';v.addEventListener('click',()=>v.remove());document.body.appendChild(v)},
+ async login(){const f=S.form;const r=await sb.auth.signInWithPassword({email:(f.email||'').trim(),password:f.pw||''});if(r.error)toast(r.error.message==='Invalid login credentials'?'Неверный e-mail или пароль':r.error.message)},
+ async signup(){const f=S.form;if(!(f.email||'').includes('@')||(f.pw||'').length<8)return toast('Укажите e-mail и пароль не короче 8 символов');const r=await sb.auth.signUp({email:f.email.trim(),password:f.pw});if(r.error)return toast(r.error.message);if(!r.data.session)toast('Аккаунт создан. Если в Supabase включено подтверждение почты, подтвердите e-mail и войдите.')},
+ async claim(){const r=await sb.rpc('claim_first_admin');if(r.error||(r.data&&r.data.error))return toast(r.data&&r.data.error==='ADMIN_EXISTS'?'Администратор уже есть. Попросите его добавить вас.':'Ошибка: '+((r.error&&r.error.message)||r.data.error));S.isAdmin=true;render();load()},
+ async logout(){await sb.auth.signOut()},
+ async approve(d){const m=tech(d.id);await upd('staff',d.id,{status:'approved',approved_at:new Date().toISOString(),norm_approved:m.norm_approved||m.norm_claimed||null},m.name+' принят')},
+ async reject(d){const v=await sheet('<h2>Отклонить анкету?</h2><div class="field"><label for="rj">Причина (её увидит сотрудник)</label><input id="rj" class="inp"></div><button class="btn danger block" data-act="rjok">Отклонить</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');if(v==null)return;await upd('staff',d.id,{status:'rejected',note:v},'Отклонено')},
+ rjok(){const i=document.getElementById('rj');closeSheet((i&&i.value.trim())||'')},
+ async block(d){if(S.tickets.some(t=>t.techId===d.id&&['assigned','enroute','onsite'].includes(t.status)))return toast('У сотрудника есть активный заказ. Сначала переназначьте его');if(await confirmBox('Приостановить доступ?','Сотрудник не сможет начинать смены и брать заказы.','Приостановить')!=='y')return;await upd('staff',d.id,{status:'blocked'},'Доступ приостановлен')},
+ async restore(d){await upd('staff',d.id,{status:'approved',note:null},'Доступ возвращён')},
+ async setcard(d){const v=String(S.form.card!=null?S.form.card:'').replace(/\D/g,'');if(v&&v.length<4)return toast('Нужно минимум 4 цифры');await upd('staff',d.id,{card_last4:v||null},'Карта сохранена')},
+ async setnorm(d){const v=+String(S.form.norm!=null?S.form.norm:'').replace(',','.');if(!v||v>40)return toast('Укажите расход, например 7,5');await upd('staff',d.id,{norm_approved:v,norm_claimed:v},'Расход утверждён')},
+ async resetdev(d){if(await confirmBox('Разрешить вход с нового телефона?','Сотрудник будет привязан к телефону, с которого сделает следующее действие.','Разрешить')!=='y')return;await upd('staff',d.id,{device_id:null},'Привязка сброшена')},
+ async resetpin(d){const pin=String(S.form.pin||'');if(!/^\d{6,12}$/.test(pin))return toast('PIN-код — от 6 до 12 цифр');const r=await sb.functions.invoke('admin-tools',{body:{action:'reset_pin',staff_id:d.id,pin}});if(r.error||(r.data&&r.data.error))return toast('Не получилось: '+((r.data&&r.data.error)||r.error.message));S.form.pin='';toast('Новый PIN-код задан. Сообщите его сотруднику');render(true)},
+ async ai(){S.busy='ai';render(true);try{let total=0;for(let i=0;i<5;i++){const r=await sb.functions.invoke('admin-tools',{body:{action:'ai',limit:15}});if(r.error||(r.data&&r.data.error)){toast('Проверка ИИ: '+((r.data&&r.data.error)||r.error.message));break}total+=r.data.checked||0;if(!r.data.left)break}toast('Проверено фото: '+total);await load()}finally{S.busy=false;render(true)}},
+ imppick(){if(typeof XLSX==='undefined')return toast('Не загрузился модуль чтения Excel. Обновите страницу');const i=document.getElementById('fileSheet');i.value='';i.click()},
+ impcancel(){S.imp=null;render(true)},
+ async impsave(){const im=S.imp;if(!im)return;const rows=im.rows.map(r=>parseTxRow(r,im.map)).filter(Boolean).map(t=>({id:'tx'+strHash(t.card+'|'+t.at+'|'+t.liters+'|'+t.amount),at:new Date(t.at).toISOString(),card:t.card,liters:t.liters,amount:t.amount,station:t.station,product:t.product,file:im.name.slice(0,80)}));
+  S.busy='imp';render(true);let n=0;for(let i=0;i<rows.length;i+=200){const r=await sb.from('card_tx').upsert(rows.slice(i,i+200));if(r.error){toast('Ошибка: '+r.error.message);break}n+=Math.min(200,rows.length-i)}
+  S.busy=false;S.imp=null;toast('Загружено операций: '+n);await load()},
+ async createorder(){const f=S.form;if(!(f.cname||'').trim()||!(f.cphone||'').trim()||!(f.addr||'').trim())return toast('Укажите клиента, телефон и адрес');
+  const m=String(f.ll||'').match(/(-?\d+[.,]\d+)\s*[, ]\s*(-?\d+[.,]\d+)/);S.busy=true;
+  const r=await sb.from('tickets').insert({client_name:f.cname.trim(),client_phone:f.cphone.trim(),address:f.addr.trim(),lat:m?+m[1].replace(',','.'):null,lng:m?+m[2].replace(',','.'):null,category:f.cat||'other',descr:f.desc||null,err_code:f.err||null,urgent:!!f.urgent,est_min:+f.emin||null,est_max:+f.emax||+f.emin||null}).select().single();
+  S.busy=false;if(r.error)return toast('Ошибка: '+r.error.message);toast('Заявка '+r.data.num+' создана, её видят сотрудники на смене');await load();go('a-order',{id:r.data.id})},
+ async assign(d,el){const t=T(S.view.p.id);const v=el.value||null;const patch={staff_id:v};if(v&&t.status==='new'){patch.status='assigned';patch.assigned_at=new Date().toISOString()}if(!v&&t.status==='assigned'){patch.status='new';patch.assigned_at=null}await upd('tickets',t.id,patch,v?'Назначен: '+tech(v).name:'Сотрудник снят')},
+ async confirm(){const t=T(S.view.p.id);await upd('tickets',t.id,{status:'closed',closed_at:new Date().toISOString(),confirmed_by:'admin',rating:+S.form.rate||5},'Визит подтверждён')},
+ async dispute(){const t=T(S.view.p.id);if(await confirmBox('Клиент говорит, что мастера не было?','Заказ будет отмечен с оценкой 1 и отзывом клиента. Разберитесь с сотрудником.','Отметить')!=='y')return;await upd('tickets',t.id,{rating:1,review:'Клиент сообщил, что мастера не было'},'Отмечено')},
+ async cancel(){if(await confirmBox('Отменить заявку?','Сотрудники перестанут её видеть.','Отменить заявку')!=='y')return;await upd('tickets',S.view.p.id,{status:'cancelled'},'Заявка отменена')},
+ here(){if(!navigator.geolocation)return toast('Это устройство не определяет местоположение');navigator.geolocation.getCurrentPosition(p=>{S.form.c.ll=p.coords.latitude.toFixed(6)+', '+p.coords.longitude.toFixed(6);render(true);toast('Точка взята (точность ±'+Math.round(p.coords.accuracy)+' м). Нажмите «Сохранить»')},()=>toast('Не удалось определить местоположение'),{enableHighAccuracy:true,timeout:10000})},
+ async savecfg(){const c=S.form.c;const m=String(c.ll!=null?c.ll:(c.office_lat!=null?c.office_lat+','+c.office_lng:'')).match(/(-?\d+[.,]\d+)\s*[, ]\s*(-?\d+[.,]\d+)/);
+  const num=k=>{const v=parseFloat(String(c[k]).replace(',','.'));return isFinite(v)?v:null};
+  const patch={company:c.company||'Arev Service',office_lat:m?+m[1].replace(',','.'):null,office_lng:m?+m[2].replace(',','.'):null,office_wifi:(c.office_wifi||'').trim()||null,office_radius:num('office_radius')||150,client_radius:num('client_radius')||200,
+   work_start:c.work_start||'09:00',work_end:c.work_end||'18:00',grace_min:num('grace_min')??10,max_idle_min:num('max_idle_min')||120,default_norm:num('default_norm')||9,route_k:Math.min(3,Math.max(1,num('route_k')||1.3)),photo_max_age_min:num('photo_max_age_min')||10,updated_at:new Date().toISOString()};
+  const r=await sb.from('config').update(patch).eq('id',1);if(r.error)return toast('Ошибка: '+r.error.message);toast('Настройки сохранены');S.form={};await load()}
+};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});
+document.addEventListener('change',e=>{const el=e.target;const a=el.dataset.act;if(a==='assign')ACT.assign(el.dataset,el);if(a==='emp'){S.empF=el.value||null;render(true)}if(a==='impmap'&&S.imp){S.imp.map[el.dataset.k]=+el.value;render(true)}if(a==='urg')S.form.urgent=el.checked;if(el.dataset.f&&el.tagName==='SELECT')S.form[el.dataset.f]=el.value});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value;if(el.dataset.c!=null)S.form.c[el.dataset.c]=el.value});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!S.session&&e.target.matches('#l-pw'))ACT.login()});
+document.getElementById('fileSheet').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;try{S.imp=await readSheet(file);render(true)}catch(err){toast('Не удалось прочитать файл. Нужен Excel (.xlsx) или CSV')}});
+
+/* ---------- запуск ---------- */
+async function onSession(s){S.session=s;S.isAdmin=false;S.loaded=false;if(s){const r=await sb.rpc('is_admin');S.isAdmin=!!r.data;if(S.isAdmin)await load()}render()}
+sb.auth.getSession().then(({data})=>onSession(data.session||null));
+sb.auth.onAuthStateChange((ev,s)=>{if(ev==='SIGNED_IN'||ev==='SIGNED_OUT')onSession(s||null)});
+setInterval(()=>{if(S.isAdmin&&!document.hidden&&!S.busy&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
+render();
+})();
