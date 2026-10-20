@@ -1,6 +1,7 @@
 import * as Application from 'expo-application';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
+import { Camera } from 'expo-camera';
 
 NetInfo.configure({ shouldFetchWiFiSSID: true });
 
@@ -11,6 +12,26 @@ export function deviceId() {
     if (Application.androidId) return Application.androidId;
   } catch (e) {}
   return null;
+}
+
+// Состояние всех нужных разрешений
+export async function permStatus() {
+  const r = { loc: false, bg: false, cam: false, gps: true };
+  try { r.loc = (await Location.getForegroundPermissionsAsync()).status === 'granted'; } catch (e) {}
+  try { r.bg = (await Location.getBackgroundPermissionsAsync()).status === 'granted'; } catch (e) {}
+  try { r.cam = (await Camera.getCameraPermissionsAsync()).status === 'granted'; } catch (e) {}
+  try { r.gps = await Location.hasServicesEnabledAsync(); } catch (e) {}
+  return r;
+}
+
+// Запросить все разрешения по очереди: местоположение → «всегда» → камера
+export async function askPermissions() {
+  try {
+    const fg = await Location.requestForegroundPermissionsAsync();
+    if (fg.status === 'granted') { try { await Location.requestBackgroundPermissionsAsync(); } catch (e) {} }
+  } catch (e) {}
+  try { await Camera.requestCameraPermissionsAsync(); } catch (e) {}
+  return permStatus();
 }
 
 export async function ensureLocationPermission() {

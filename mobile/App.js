@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SafeAreaView, ScrollView, View, Text, Pressable, RefreshControl, Image, Alert, Linking, StatusBar as RNStatusBar, AppState } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { supabase, rpc, errText, phoneEmail, normPhone } from './src/supabase';
-import { deviceId, getFix, officeWifiOk, distM } from './src/device';
+import { deviceId, getFix, officeWifiOk, distM, permStatus, askPermissions } from './src/device';
 import { startTrack, stopTrack, flushTrack } from './src/track';
 import { CameraSheet, uploadPhoto } from './src/photo';
 import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip } from './src/ui';
@@ -164,6 +164,52 @@ function Main({ session }) {
   );
 }
 
+
+/* ---------------- разрешения ---------------- */
+function PermCard({ always }) {
+  const [p, setP] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const check = useCallback(() => { permStatus().then(setP); }, []);
+  useEffect(() => {
+    check();
+    const sub = AppState.addEventListener('change', (a) => { if (a === 'active') check(); });
+    return () => sub.remove();
+  }, [check]);
+  if (!p) return null;
+  const allOk = p.loc && p.bg && p.cam && p.gps;
+  if (allOk && !always) return null;
+  const row = (ok, text) => (
+    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+      <Text style={{ fontSize: 18, color: ok ? C.ok : C.bad, width: 22 }}>{ok ? '✓' : '✕'}</Text>
+      <T style={{ flex: 1 }}>{text}</T>
+    </View>
+  );
+  const ask = async () => {
+    setBusy(true);
+    try {
+      const r = await askPermissions();
+      setP(r);
+      if (r.loc && !r.bg) {
+        Alert.alert('Нужно «Разрешить всегда»', 'Откроются настройки приложения. Выберите «Разрешения» → «Местоположение» → «Разрешить в любом режиме» (или «Всегда»).', [{ text: 'Открыть настройки', onPress: () => Linking.openSettings() }]);
+      } else if (!r.loc || !r.cam) {
+        Alert.alert('Разрешения не выданы', 'Откройте настройки приложения и включите «Камеру» и «Местоположение».', [{ text: 'Открыть настройки', onPress: () => Linking.openSettings() }, { text: 'Позже' }]);
+      }
+    } finally { setBusy(false); }
+  };
+  return (
+    <Card style={{ borderLeftWidth: 4, borderLeftColor: allOk ? C.ok : C.warn }}>
+      <H2>{allOk ? 'Разрешения выданы' : 'Нужны разрешения'}</H2>
+      {row(p.loc, 'Местоположение')}
+      {row(p.bg, 'Местоположение «всегда» (для маршрута смены)')}
+      {row(p.cam, 'Камера')}
+      {row(p.gps, 'GPS включён на телефоне')}
+      {!allOk ? <Muted>Без них приложение не сможет отмечать приход, уход и выезды.</Muted> : null}
+      {!allOk ? <Btn title="Выдать разрешения" onPress={ask} busy={busy} /> : null}
+      {!allOk && p.loc ? <Btn kind="ghost" title="Открыть настройки приложения" onPress={() => Linking.openSettings()} /> : null}
+    </Card>
+  );
+}
+
 /* ---------------- анкета ---------------- */
 function Register({ ctx }) {
   const [f, setF] = useState({ name: '', carModel: '', carPlate: '', fuel: 'petrol', norm: '', tank: '' });
@@ -178,6 +224,7 @@ function Register({ ctx }) {
     setBusy(true);
     try {
       await rpc('register', { p_name: f.name, p_phone: phone, p_car_model: f.carModel, p_car_plate: f.carPlate, p_fuel_type: f.fuel, p_norm: num(f.norm), p_tank: num(f.tank), p_device: deviceId() });
+      await askPermissions();
       await ctx.load();
     } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
   };
@@ -234,6 +281,7 @@ function Waiting({ ctx }) {
       <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
         <H1>{s.status === 'pending' ? 'Анкета на проверке' : 'Нет доступа'}</H1>
         <Flag kind={s.status === 'pending' ? 'note' : 'warn'}>{txt}</Flag>
+        {s.status === 'pending' ? <PermCard always /> : null}
         <Btn kind="ghost" title="Проверить ещё раз" onPress={ctx.refresh} />
         <Btn kind="ghost" title="Выйти" onPress={() => supabase.auth.signOut()} />
       </Page>
@@ -251,6 +299,7 @@ function Home({ ctx }) {
     const last = st.shifts.find((x) => x.end_at);
     return (
       <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
+        <PermCard />
         <View style={{ backgroundColor: C.pine, borderRadius: 18, padding: 20, gap: 12 }}>
           <Text style={{ color: C.pineInk, fontSize: 21, fontWeight: '700' }}>{greet}, {String(st.staff.name).split(' ')[0]}</Text>
           <Text style={{ color: C.pineInk, opacity: 0.8 }}>Начните смену в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.</Text>
