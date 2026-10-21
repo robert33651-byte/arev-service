@@ -16,6 +16,7 @@ const I={
  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
  back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+ box:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
  pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
 };
@@ -46,7 +47,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('arevadm.'+k);return v==null
 
 /* ---------- состояние ---------- */
 const S={session:null,isAdmin:false,loaded:false,view:{name:'a-dash',p:{}},form:{},filter:'active',per:LS.get('per','week'),empF:null,
- cfg:{},staff:[],shifts:[],fuel:[],tickets:[],tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
+ cfg:{},staff:[],shifts:[],fuel:[],tickets:[],buys:[],bf:'open',tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
 const tech=id=>S.staff.find(m=>m.id===id);
 const approved=()=>S.staff.filter(m=>m.status==='approved');
 const T=id=>S.tickets.find(t=>t.id===id);
@@ -54,20 +55,24 @@ const fuelUnit=m=>m&&m.fuel_type==='gas'?'м³':'л';
 const office=()=>S.cfg.office_lat!=null?{lat:S.cfg.office_lat,lng:S.cfg.office_lng}:null;
 
 /* ---------- загрузка ---------- */
+// Supabase отдаёт не больше 1000 строк за запрос, поэтому читаем частями
+async function pages(mk,max){let out=[];for(let i=0;i<(max||100000);i+=1000){const r=await mk().range(i,i+999);if(r.error)return{error:r.error,data:out};const d=r.data||[];out=out.concat(d);if(d.length<1000)break}return{data:out}}
 async function load(){
  const from=new Date(Date.now()-62*864e5).toISOString();const from7=new Date(Date.now()-7*864e5).toISOString();
+ const from8=new Date(Date.now()-8*864e5).toISOString();
  const q=await Promise.all([
   sb.from('config').select('*').eq('id',1).maybeSingle(),
-  sb.from('staff').select('*').order('created_at'),
-  sb.from('shifts').select('*').gte('start_at',from).order('start_at',{ascending:false}).limit(3000),
-  sb.from('fuel').select('*').gte('at',from).order('at',{ascending:false}).limit(3000),
-  sb.from('tickets').select('*').or('created_at.gte.'+from+',status.in.(new,assigned,enroute,onsite,done)').order('created_at',{ascending:false}).limit(2000),
-  sb.from('alerts').select('*').gte('at',from).order('at',{ascending:false}).limit(2000),
-  sb.from('ai_checks').select('*').limit(5000),
-  sb.from('card_tx').select('*').gte('at',from).order('at',{ascending:false}).limit(5000),
-  sb.from('track_points').select('staff_id,at,lat,lng,acc,mocked').gte('at',from7).order('at').limit(20000)
+  pages(()=>sb.from('staff').select('*').order('created_at')),
+  pages(()=>sb.from('shifts').select('*').gte('start_at',from).order('start_at',{ascending:false})),
+  pages(()=>sb.from('fuel').select('*').gte('at',from).order('at',{ascending:false})),
+  pages(()=>sb.from('tickets').select('*').or('created_at.gte.'+from+',status.in.(new,assigned,enroute,onsite,done)').order('created_at',{ascending:false})),
+  pages(()=>sb.from('alerts').select('*').gte('at',from).order('at',{ascending:false})),
+  pages(()=>sb.from('ai_checks').select('*').order('photo')),
+  pages(()=>sb.from('card_tx').select('*').gte('at',from).order('at',{ascending:false})),
+  pages(()=>sb.from('track_points').select('staff_id,at,device_at,lat,lng,acc,mocked').gte('at',from8).order('id')),
+  pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false}))
  ]);
- const err=q.find(r=>r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
+ const err=q.find(r=>r&&r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
  S.cfg=q[0].data||{};S.staff=q[1].data||[];
  S.shifts=(q[2].data||[]).map(x=>({...x,masterId:x.staff_id,startAt:ms(x.start_at),endAt:ms(x.end_at),
    start:{lat:x.start_lat,lng:x.start_lng,acc:x.start_acc,dist:x.start_dist,odo:x.start_odo,photo:x.start_photo,wifi:x.start_wifi_ok},
@@ -79,7 +84,9 @@ async function load(){
  S.alerts=(q[5].data||[]).map(x=>({...x,at:ms(x.at)}));
  S.checks={};(q[6].data||[]).forEach(c=>S.checks[c.photo]=c);
  S.tx=(q[7].data||[]).map(x=>({...x,at:ms(x.at)}));
- S.track={};(q[8].data||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,at:ms(p.at),mocked:p.mocked,what:'трек'})});
+ S.track={};(q[8].data||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,acc:p.acc,at:ms(p.device_at||p.at),mocked:p.mocked,what:'трек'})});
+ Object.values(S.track).forEach(a=>a.sort((x,y)=>x.at-y.at));
+ S.buys=(q[9].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.created_at),dAt:ms(x.delivered_at),lAt:ms(x.left_at),accAt:ms(x.accepted_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
  const ids=S.tickets.map(t=>t.id);S.tphotos={};
  if(ids.length){for(let i=0;i<ids.length;i+=150){const r=await sb.from('ticket_photos').select('*').in('ticket_id',ids.slice(i,i+150));(r.data||[]).forEach(p=>{(S.tphotos[p.ticket_id]=S.tphotos[p.ticket_id]||[]).push({...p,at:ms(p.at)})})}}
  S.loaded=true;render(true)}
@@ -106,6 +113,53 @@ function aiRcpt(rec){const f=[];const ch=S.checks[rec.photo];if(!ch)return f;con
  if(r.sum!=null&&rec.sum&&Math.abs(+r.sum-rec.sum)>Math.max(100,rec.sum*0.02))f.push({lv:'warn',t:'ИИ: в чеке сумма '+money(+r.sum)+', введено '+money(rec.sum)});
  if(r.date){const m=String(r.date).match(/(\d{1,2})\D(\d{1,2})\D(\d{2,4})/);if(m){const d=new Date(+(m[3].length===2?'20'+m[3]:m[3]),+m[2]-1,+m[1]).getTime();if(Math.abs(d-dayStart(rec.at))>864e5)f.push({lv:'bad',t:'ИИ: чек от '+r.date+', а заправка внесена '+fDay(rec.at)})}}
  if(r.nonFuel)f.push({lv:'warn',t:'ИИ: в чеке есть не только топливо'});return f}
+/* --- маршрут по GPS: километры и стоянки --- */
+const whPoint=()=>S.cfg.warehouse_lat!=null?{lat:S.cfg.warehouse_lat,lng:S.cfg.warehouse_lng}:office();
+function trackOf(id,a,b){return (S.track[id]||[]).filter(p=>p.at>=a&&p.at<=b&&!p.mocked&&(p.acc==null||p.acc<=100))}
+function gpsKm(id,a,b){const p=trackOf(id,a,b);if(p.length<2)return null;let d=0;for(let i=1;i<p.length;i++){const x=distM(p[i-1],p[i]),dt=(p[i].at-p[i-1].at)/1000;if(dt>0&&x/dt<55)d+=x}return d/1000}
+const shiftGps=sh=>sh.gps_km!=null?+sh.gps_km:gpsKm(sh.masterId,sh.startAt,sh.endAt||Date.now());
+function placeOf(id,p){const o=office(),w=whPoint();
+ if(o&&distM(p,o)<=Math.max(250,+S.cfg.office_radius||150))return{k:'office',t:'Офис'};
+ if(w&&distM(p,w)<=250)return{k:'office',t:'Склад'};
+ const t=S.tickets.find(t=>t.techId===id&&t.loc&&distM(p,t.loc)<=(+S.cfg.client_radius||200)+100);if(t)return{k:'client',t:'Клиент '+t.num};
+ const b=S.buys.find(b=>b.masterId===id&&b.loc&&distM(p,b.loc)<=250);if(b)return{k:'shop',t:'Закупка: '+b.supplier};
+ const r=S.fuel.find(r=>r.masterId===id&&r.loc&&distM(p,r.loc)<=250);if(r)return{k:'fuel',t:'Заправка'};
+ return{k:'unknown',t:'Неизвестное место'}}
+// стоянка: подряд идущие точки в радиусе 200 м. Телефон не шлёт точки, пока машина стоит,
+// поэтому конец стоянки = время следующей точки минус время на дорогу до неё (~40 км/ч).
+function stopsOf(id,a,b){const p=trackOf(id,a,b);const out=[];const minMs=(+S.cfg.stop_min||20)*60000;let i=0;
+ while(i<p.length){const anc=p[i];let j=i;while(j+1<p.length&&distM(anc,p[j+1])<=200)j++;const nx=p[j+1];
+  let end,gap=false;if(nx){const d=distM(p[j],nx)||0;end=Math.max(p[j].at,nx.at-d/11*1000);gap=d>3000&&nx.at-p[j].at>minMs}else end=Math.max(p[j].at,Math.min(b,Date.now()));
+  if(end-anc.at>=minMs)out.push({at:anc.at,end,dur:end-anc.at,lat:anc.lat,lng:anc.lng,place:placeOf(id,anc),gap});i=j+1}
+ return out}
+function longStops(sh){const lim=(+S.cfg.long_stop_min||30)*60000;return stopsOf(sh.masterId,sh.startAt,sh.endAt||Date.now()).filter(x=>x.place.k==='unknown'&&x.dur>=lim)}
+
+/* --- закупки --- */
+const BST={bought:['Не сдано','c-warn'],partial:['Остаток не сдан','c-warn'],delivered:['Ждёт приёмки','c-info'],accepted:['Принято','c-ok'],cancelled:['Отменено','c-muted']};
+const lineTxt=l=>h(l.name)+' — '+n1(l.qty)+(l.unit?' '+h(l.unit):'');
+const leftLines=b=>(b.left_lines||[]).filter(l=>+l.qty>0);
+const acceptLines=b=>b.dest==='ticket'?leftLines(b):(b.lines||[]);
+function aiBuy(b){const f=[];const ch=S.checks[b.photo];if(!ch)return f;const r=ch.result||{};
+ if(r.isReceipt===false)f.push({lv:'bad',t:'ИИ: на фото не чек и не накладная'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
+ if(r.handwritten)f.push({lv:'warn',t:'ИИ: документ написан от руки'});
+ if(r.sum!=null&&b.amount&&Math.abs(+r.sum-b.amount)>Math.max(200,b.amount*0.03))f.push({lv:'bad',t:'ИИ: в чеке '+money(+r.sum)+', введено '+money(b.amount)});
+ if(r.date){const m=String(r.date).match(/(\d{1,2})\D(\d{1,2})\D(\d{2,4})/);if(m){const d=new Date(+(m[3].length===2?'20'+m[3]:m[3]),+m[2]-1,+m[1]).getTime();if(Math.abs(d-dayStart(b.at))>864e5)f.push({lv:'bad',t:'ИИ: чек от '+r.date+', а закупка внесена '+fDay(b.at)})}}
+ if(r.note)f.push({lv:'warn',t:'ИИ: '+r.note});return f}
+function buyFlags(b){const c=S.cfg,f=[];if(b.status==='cancelled')return f;const now=Date.now();const maxH=(+c.purchase_max_hours||24)*36e5;const radO=+c.office_radius||150,radC=+c.client_radius||200;const t=b.ticket_id?T(b.ticket_id):null;
+ if(b.status==='bought'&&now-b.at>maxH)f.push({lv:'bad',t:(b.dest==='ticket'?'Не отмечено на объекте':'Не сдано на склад')+' уже '+fDur(now-b.at)});
+ if(b.status==='partial'&&now-(b.dAt||b.at)>maxH)f.push({lv:'bad',t:'Остаток не сдан на склад уже '+fDur(now-(b.dAt||b.at))});
+ if(b.delivered_dist!=null&&b.delivered_dist>(b.dest==='ticket'?radC:radO))f.push({lv:'bad',t:(b.dest==='ticket'?'На объекте отмечено в '+fDist(b.delivered_dist)+' от объекта':'Сдача отмечена в '+fDist(b.delivered_dist)+' от склада')});
+ if(b.left_dist!=null&&b.left_dist>radO)f.push({lv:'bad',t:'Остаток сдан в '+fDist(b.left_dist)+' от склада'});
+ if(t&&t.status==='cancelled')f.push({lv:'bad',t:'Заказ '+t.num+' отменён, а материал записан на него'});
+ if(t&&t.rating===1&&/не было/.test(t.review||''))f.push({lv:'bad',t:'Клиент заказа '+t.num+' сказал, что мастера не было'});
+ if(b.shortage)f.push({lv:'bad',t:'Недостача при приёмке'+(b.accept_note?': '+b.accept_note:'')});
+ if(b.status==='delivered'&&now-(b.lAt||b.dAt||b.at)>864e5)f.push({lv:'warn',t:'Ждёт приёмки больше суток'});
+ if(!b.shift_id)f.push({lv:'warn',t:'Куплено вне смены'});
+ if(!b.loc)f.push({lv:'warn',t:'Чек без координат'});
+ const dup=S.buys.find(x=>x.id!==b.id&&x.status!=='cancelled'&&x.amount===b.amount&&Math.abs(x.at-b.at)<3*864e5&&String(x.supplier).trim().toLowerCase()===String(b.supplier).trim().toLowerCase());
+ if(dup)f.push({lv:'warn',t:'Похожая закупка на ту же сумму '+fDay(dup.at)+(dup.masterId!==b.masterId?' у другого сотрудника':'')});
+ f.push(...aiBuy(b));return f}
+
 function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const g=+c.grace_min||0;const rad=+c.office_radius||150;
  const late=Math.round((sh.startAt-hmToTs(sh.startAt,c.work_start))/60000);if(late>g)f.push({lv:'warn',t:'Опоздание '+fDur(late*60000)});
  if(s.dist!=null&&s.dist>rad)f.push({lv:'bad',t:'Приход отмечен в '+fDist(s.dist)+' от офиса'});else if(s.lat==null)f.push({lv:'warn',t:'Приход без координат'});
@@ -116,13 +170,16 @@ function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const
  if(sh.endAt){const early=Math.round((hmToTs(sh.endAt,c.work_end)-sh.endAt)/60000);if(early>g)f.push({lv:'warn',t:'Ушёл раньше на '+fDur(early*60000)});
   if(e.dist!=null&&e.dist>rad)f.push({lv:'bad',t:'Уход отмечен в '+fDist(e.dist)+' от офиса'});
   if(c.office_wifi&&e.wifi===false)f.push({lv:'warn',t:'При уходе телефон не видел офисный Wi-Fi'});
-  const ok=odoKm(sh),rk=routeKm(sh);if(ok!=null&&ok>rk*1.3+10)f.push({lv:'bad',t:'Пробег за смену '+ok+' км, по заказам '+n1(rk)+' км'});
+  const ok=odoKm(sh),rk=routeKm(sh),gk=shiftGps(sh);if(ok!=null&&ok>rk*1.3+10)f.push({lv:'bad',t:'Пробег за смену '+ok+' км, по заказам '+n1(rk)+' км'});
+  if(ok!=null&&gk!=null&&gk>=1&&ok>gk*1.25+10)f.push({lv:'bad',t:'По одометру '+ok+' км, а по GPS '+n1(gk)+' км'});
+  if(gk!=null&&gk>rk*1.5+15&&!(ok!=null&&ok>rk*1.3+10))f.push({lv:'warn',t:'По GPS '+n1(gk)+' км, по заказам '+n1(rk)+' км'});
   f.push(...aiOdo(e));
  }else if(dayStart(sh.startAt)<dayStart(Date.now()))f.push({lv:'warn',t:'Смена не закрыта'});
  const tk=S.tickets.filter(t=>t.techId===sh.masterId&&t.times.enroute>=sh.startAt&&t.times.enroute<=(sh.endAt||Date.now())).sort((a,b)=>a.times.enroute-b.times.enroute);
  for(let i=1;i<tk.length;i++){const d=tk[i-1].times.done;if(d&&tk[i].times.enroute-d>(+c.max_idle_min||120)*60000)f.push({lv:'warn',t:'Пауза '+fDur(tk[i].times.enroute-d)+' между заказами '+tk[i-1].num+' и '+tk[i].num})}
  const tr=(S.track[sh.masterId]||[]).filter(p=>p.at>=sh.startAt&&p.at<=(sh.endAt||Date.now()));
- if(sh.endAt&&sh.endAt-sh.startAt>2*36e5&&tr.length<3&&S.shifts.length)f.push({lv:'warn',t:'Маршрут смены почти не записан (нет разрешения «всегда» или выключен GPS)'});
+ longStops(sh).forEach(x=>f.push({lv:x.dur>=90*60000?'bad':'warn',t:'Стоянка '+fDur(x.dur)+' в неизвестном месте ('+fHM(x.at)+'–'+fHM(x.end)+')'+(x.gap?', возможно, пропал сигнал':'')}));
+  if(sh.endAt&&sh.endAt-sh.startAt>2*36e5&&tr.length<3&&S.shifts.length)f.push({lv:'warn',t:'Маршрут смены почти не записан (нет разрешения «всегда» или выключен GPS)'});
  return f}
 const cardOf=m=>String((m&&m.card_last4)||'').replace(/\D/g,'');
 function txOf(id){const c=cardOf(tech(id));if(!c)return [];return S.tx.filter(x=>String(x.card||'').replace(/\D/g,'').endsWith(c))}
@@ -160,6 +217,7 @@ function ticketFlags(t){const f=[];const c=S.cfg;const g=t.gps,tm=t.times;const 
 function marksOf(id){const out=[];const add=(p,at,what)=>{if(p&&p.lat!=null&&at)out.push({lat:p.lat,lng:p.lng,at,what})};
  S.shifts.filter(s=>s.masterId===id).forEach(s=>{add(s.start,s.startAt,'приход');if(s.endAt)add(s.end,s.endAt,'уход')});
  S.fuel.filter(r=>r.masterId===id).forEach(r=>add(r.loc,r.at,'заправка'));
+ S.buys.filter(b=>b.masterId===id).forEach(b=>{add(b.loc,b.at,'закупка');if(b.delivered_lat!=null)add({lat:b.delivered_lat,lng:b.delivered_lng},b.dAt,'сдача закупки');if(b.left_lat!=null)add({lat:b.left_lat,lng:b.left_lng},b.lAt,'сдача остатка')});
  S.tickets.filter(t=>t.techId===id).forEach(t=>{add(t.gps.enroute,t.times.enroute,'выезд '+t.num);add(t.gps.onsite,t.times.onsite,'на месте '+t.num);add(t.gps.done,t.times.done,'завершение '+t.num)});
  return out.concat(S.track[id]||[]).sort((a,b)=>a.at-b.at)}
 function teleports(id){const ms_=marksOf(id);const out=[];for(let i=1;i<ms_.length;i++){const a=ms_[i-1],b=ms_[i];const dt=(b.at-a.at)/36e5;if(dt<=0||dt>8)continue;const d=distM(a,b)/1000;if(d>3&&d/dt>130)out.push({lv:'bad',t:'Невозможное перемещение: '+n1(d)+' км за '+fDur(b.at-a.at)+' ('+a.what+' → '+b.what+')',at:b.at})}return out}
@@ -176,6 +234,7 @@ function allIssues(from){const out=[];const t0=dayStart(Date.now());
   if(m.norm_claimed&&+m.norm_claimed!==+m.norm_approved)out.push({lv:'warn',t:'Расход машины ждёт утверждения: '+n1(m.norm_claimed),who:m.id,at:ms(m.created_at),kind:'Профиль',go:['a-emp',m.id]})});
  S.shifts.filter(s=>s.startAt>=from).forEach(s=>shiftFlags(s).forEach(f=>out.push({lv:f.lv,t:f.t,who:s.masterId,at:s.startAt,kind:'Смена',go:['a-emp',s.masterId]})));
  S.fuel.filter(r=>r.at>=from).forEach(r=>fuelFlags(r).forEach(f=>out.push({lv:f.lv,t:f.t,who:r.masterId,at:r.at,kind:'Заправка',go:['a-fuel','']})));
+ S.buys.filter(b=>b.at>=from||['bought','partial','delivered'].includes(b.status)).forEach(b=>buyFlags(b).forEach(f=>out.push({lv:f.lv,t:f.t+' ('+b.supplier+', '+money(b.amount)+')',who:b.masterId,at:b.at,kind:'Закупка',go:['a-buys','']})));
  S.tickets.filter(t=>(t.createdAt>=from||(t.times.done>=from))&&t.status!=='cancelled').forEach(t=>ticketFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t,who:t.techId,at:t.times.done||t.times.onsite||t.createdAt,kind:'Заказ '+t.num,go:['a-order',t.id]})));
  const seen={};return out.filter(x=>{const k=x.who+'|'+x.t+'|'+dayStart(x.at);return seen[k]?false:(seen[k]=1)}).sort((a,b)=>((a.lv==='bad'?0:1)-(b.lv==='bad'?0:1))||(b.at-a.at))}
 const todayIssues=()=>approved().filter(m=>todayStatus(m).flags.length).length;
@@ -197,9 +256,9 @@ const perSeg=()=>'<div class="seg" style="width:min(100%,360px)">'+PERS.map(x=>'
 const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min(100%,260px);padding:9px 12px;font-size:14px"><option value="">Все сотрудники</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(S.empF===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select>';
 const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
 
-const ANAV=[['a-dash','Сводка','chart'],['a-staff','Сотрудники','team'],['a-shifts','Смены','clock'],['a-fuel','Топливо','fuel'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
+const ANAV=[['a-dash','Сводка','chart'],['a-staff','Сотрудники','team'],['a-shifts','Смены','clock'],['a-fuel','Топливо','fuel'],['a-orders','Заявки','list'],['a-buys','Закупки','box'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
- const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues()};
+ const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  return '<div class="adm"><aside class="side"><div class="brand"><span class="sunmark" aria-hidden="true"></span><div style="min-width:0"><b>'+h(S.cfg.company||'Arev Service')+'</b><small>Контроль сотрудников</small></div></div><nav class="nav">'+ANAV.map(i=>'<button class="'+(cur===i[0]?'on':'')+'" data-act="nav" data-v="'+i[0]+'">'+I[i[2]]+'<span class="lbl">'+i[1]+'</span>'+(cnt[i[0]]?'<span class="cnt">'+cnt[i[0]]+'</span>':'')+'</button>').join('')+'</nav><div class="foot"><button class="lnk" style="color:inherit" data-act="reload">Обновить данные</button><br><button class="lnk" style="color:inherit" data-act="logout">Выйти</button></div></aside><main class="amain">'+body+'</main></div>'}
 
 /* ---------- экраны ---------- */
@@ -214,8 +273,9 @@ function vDash(){const now=Date.now(),t0=dayStart(now);const staff=approved();co
  const fb=staff.map(m=>fuelBal(m.id,monthStart()));const fsum=fb.reduce((a,b)=>a+b.sum,0);const over=fb.filter(b=>b.bad).length;
  const iss=allIssues(t0-6*864e5);const bad=iss.filter(i=>i.lv==='bad').length;const tr=txRange();
  const ph=[];S.shifts.filter(s=>s.startAt>=monthStart()).forEach(s=>{ph.push(s.start.photo);if(s.end)ph.push(s.end.photo)});S.fuel.filter(r=>r.at>=monthStart()).forEach(r=>ph.push(r.photo));const chk=ph.filter(p=>S.checks[p]).length;
+ const bOpen=S.buys.filter(b=>['bought','partial'].includes(b.status));const bLate=bOpen.filter(b=>buyFlags(b).some(f=>/уже/.test(f.t))).length;
  let s=atop('Сводка','<span class="muted">'+fDay(now)+', '+fHM(now)+'</span>')+officeWarn();
- s+='<div class="kgrid">'+kpi(on+' из '+staff.length,'на смене сейчас')+kpi(lateAbs,'опоздали или не пришли',lateAbs>0)+kpi(act,'заказов в работе'+(nw?', '+nw+' новых':''))+kpi(bad,'серьёзных отклонений за 7 дней',bad>0)+kpi(money(fsum),'топливо за месяц'+(over?', перерасход у '+over:''),over>0)+'</div>';
+ s+='<div class="kgrid">'+kpi(on+' из '+staff.length,'на смене сейчас')+kpi(lateAbs,'опоздали или не пришли',lateAbs>0)+kpi(act,'заказов в работе'+(nw?', '+nw+' новых':''))+kpi(bad,'серьёзных отклонений за 7 дней',bad>0)+kpi(money(fsum),'топливо за месяц'+(over?', перерасход у '+over:''),over>0)+kpi(bOpen.length,'закупок не сдано'+(bLate?', просрочено '+bLate:''),bLate>0)+'</div>';
  s+='<div class="cols2"><section class="card"><div class="row between"><h2>Сегодня</h2><span class="muted small">график '+h(String(S.cfg.work_start||'').slice(0,5))+'–'+h(String(S.cfg.work_end||'').slice(0,5))+'</span></div>'+
   '<div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Пришёл</th><th>Ушёл</th><th class="l">Сейчас</th><th class="l">Отклонения</th></tr></thead><tbody>'+
   (rows.length?rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+(r.st.sh?fHM(r.st.sh.startAt):'<span class="chip '+r.st.chip+'">'+r.st.label+'</span>')+'</td><td>'+(r.st.sh&&r.st.sh.endAt?fHM(r.st.sh.endAt):'—')+'</td><td class="l">'+h(nowDoing(r.m)||(r.st.code==='on'?'в офисе / свободен':''))+'</td><td class="l wrapc">'+flagCell(r.st.flags)+'</td></tr>').join(''):'<tr><td colspan="5" class="l muted">Сотрудников пока нет. Они регистрируются сами в приложении.</td></tr>')+'</tbody></table></div>'+
@@ -235,12 +295,12 @@ function vStaff(){const pend=S.staff.filter(x=>x.status==='pending');const from=
  if(off.length)s+='<section class="card tight"><h2>Отклонённые и приостановленные</h2>'+off.map(x=>'<div class="row between"><span>'+h(x.name)+' <span class="muted small">'+(x.status==='blocked'?'приостановлен':'отклонён')+'</span></span><button class="btn ghost sm" data-act="restore" data-id="'+h(x.id)+'">Вернуть</button></div>').join('')+'</section>';
  return s}
 
-function shiftRows(list,showName){return '<div class="tblw flat"><table class="tbl"><thead><tr><th>День</th>'+(showName?'<th class="l">Сотрудник</th>':'')+'<th>Приход</th><th>Одометр утром</th><th>Уход</th><th>Одометр вечером</th><th>Часов</th><th>Км по заказам</th><th>Км за смену</th><th class="l">Отклонения</th></tr></thead><tbody>'+
+function shiftRows(list,showName){return '<div class="tblw flat"><table class="tbl"><thead><tr><th>День</th>'+(showName?'<th class="l">Сотрудник</th>':'')+'<th>Приход</th><th>Одометр утром</th><th>Уход</th><th>Одометр вечером</th><th>Часов</th><th>Км по заказам</th><th>Км по GPS</th><th>Км по одометру</th><th class="l">Отклонения</th></tr></thead><tbody>'+
  (list.length?list.map(x=>{const m=tech(x.masterId);const ff=shiftFlags(x);
   return '<tr><td>'+fDay(x.startAt)+'</td>'+(showName?'<td class="l"><button class="lnk" data-act="ago" data-v="a-emp" data-id="'+h(x.masterId)+'">'+h(m?m.name:'—')+'</button></td>':'')+
   '<td>'+fHM(x.startAt)+'</td><td><div class="odo">'+thumb(x.start.photo)+'<div><span class="num">'+x.start.odo.toLocaleString('ru-RU')+'</span><br>'+geoChip(x.start,'office')+'</div></div></td>'+
   '<td>'+(x.endAt?fHM(x.endAt):'<span class="chip c-ok">идёт</span>')+'</td><td>'+(x.end?'<div class="odo">'+thumb(x.end.photo)+'<div><span class="num">'+x.end.odo.toLocaleString('ru-RU')+'</span><br>'+geoChip(x.end,'office')+'</div></div>':'—')+'</td>'+
-  '<td>'+(x.endAt?n1((x.endAt-x.startAt)/36e5):'—')+'</td><td>'+n1(routeKm(x))+'</td><td class="'+(ff.some(f=>/Пробег/.test(f.t))?'over':'')+'">'+(odoKm(x)!=null?odoKm(x):'—')+'</td><td class="l wrapc">'+flagCell(ff)+'</td></tr>'}).join(''):'<tr><td colspan="10" class="l muted">Смен за этот период нет</td></tr>')+'</tbody></table></div>'}
+  '<td>'+(x.endAt?n1((x.endAt-x.startAt)/36e5):'—')+'</td><td>'+n1(routeKm(x))+'</td><td class="'+(ff.some(f=>/по GPS/.test(f.t))?'over':'')+'">'+(shiftGps(x)!=null?n1(shiftGps(x)):'—')+'</td><td class="'+(ff.some(f=>/Пробег|По одометру/.test(f.t))?'over':'')+'">'+(odoKm(x)!=null?odoKm(x):'—')+'</td><td class="l wrapc">'+flagCell(ff)+'</td></tr>'}).join(''):'<tr><td colspan="11" class="l muted">Смен за этот период нет</td></tr>')+'</tbody></table></div>'}
 function aiBar(){return '<div class="card tight aibar"><div class="row between wrapx"><div><b>Проверка фото ИИ</b><div class="small muted">ИИ читает пробег на фото одометра и данные чеков, ищет фото экрана вместо реальной панели и сравнивает с тем, что ввёл сотрудник.</div></div><button class="btn dark sm" data-act="ai"'+(S.busy?' disabled':'')+'>'+(S.busy==='ai'?'Проверяю…':'Проверить новые фото')+'</button></div></div>'}
 function vShifts(){const from=perFrom(S.per);const list=S.shifts.filter(x=>x.startAt>=from&&(!S.empF||x.masterId===S.empF)).sort((a,b)=>b.startAt-a.startAt);
  return atop('Смены','<div class="row wrapx">'+empSel()+perSeg()+'</div>')+officeWarn()+aiBar()+shiftRows(list,true)}
@@ -294,6 +354,12 @@ function vEmp(){const m=tech(S.view.p.id);if(!m)return back('Сотрудник�
   '<div class="field"><label for="e-pin">Новый PIN-код (если сотрудник забыл)</label><div class="row"><input id="e-pin" class="inp num" inputmode="numeric" maxlength="12" data-f="pin" value="'+h(f.pin||'')+'" placeholder="6 цифр"><button class="btn ghost sm" data-act="resetpin" data-id="'+h(m.id)+'">Задать</button></div></div></div></section>';
  if(al.length||tp.length)s+='<section class="card tight"><h2>Тревоги</h2>'+al.map(a=>'<div class="flag '+(a.level==='bad'?'bad':'warn')+'">'+I.alert+'<span>'+fT(a.at)+': '+h(a.message)+'</span></div>').join('')+tp.map(x=>'<div class="flag bad">'+I.alert+'<span>'+fT(x.at)+': '+h(x.t)+'. Возможна подмена GPS</span></div>').join('')+'</section>';
  s+='<section class="card"><h2>Смены за месяц</h2>'+shiftRows(sh,false)+'</section>';
+ const st7=S.shifts.filter(x=>x.masterId===m.id&&x.startAt>=dayStart(Date.now())-6*864e5).sort((a,b)=>b.startAt-a.startAt).map(x=>({x,stops:stopsOf(m.id,x.startAt,x.endAt||Date.now())}));const lim=(+S.cfg.long_stop_min||30)*60000;
+ const PK={office:'c-muted',client:'c-ok',shop:'c-info',fuel:'c-info',unknown:'c-warn'};
+ s+='<section class="card"><div class="row between"><h2>Стоянки за 7 дней</h2><span class="muted small">от '+(+S.cfg.stop_min||20)+' мин по GPS-треку</span></div>'+(st7.some(r=>r.stops.length)?'<div class="tblw flat"><table class="tbl"><thead><tr><th>День</th><th>Время</th><th>Сколько</th><th class="l">Где</th><th>Км по GPS за смену</th></tr></thead><tbody>'+
+  st7.map(r=>r.stops.map((z,i)=>'<tr><td>'+(i?'':fDay(r.x.startAt))+'</td><td>'+fHM(z.at)+'–'+fHM(z.end)+'</td><td class="'+(z.place.k==='unknown'&&z.dur>=lim?'over':'')+'">'+fDur(z.dur)+'</td><td class="l"><a class="chip '+PK[z.place.k]+'" href="'+mapUrl(z)+'" target="_blank" rel="noopener">'+h(z.place.t)+'</a>'+(z.gap?' <span class="tiny muted">возможно, пропал сигнал</span>':'')+'</td><td>'+(i?'':(shiftGps(r.x)!=null?n1(shiftGps(r.x)):'—'))+'</td></tr>').join('')).join('')+'</tbody></table></div>':'<p class="muted small">Стоянок нет или маршрут не записывался.</p>')+'</section>';
+ const mb=S.buys.filter(b=>b.masterId===m.id&&(b.at>=from||['bought','partial','delivered'].includes(b.status))).sort((a,b)=>b.at-a.at);
+ if(mb.length)s+='<section class="card"><h2>Закупки</h2>'+buyRows(mb,false)+'</section>';
  s+='<div class="cols2"><section class="card"><h2>Заправки за месяц</h2>'+(fuel.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>Дата</th><th>Чек</th><th>Объём</th><th>Сумма</th><th class="l">Отклонения</th></tr></thead><tbody>'+fuel.map(r=>'<tr><td>'+fDay(r.at)+', '+fHM(r.at)+'</td><td>'+thumb(r.photo)+'</td><td>'+n1(r.liters)+' '+fuelUnit(m)+'</td><td>'+money(r.sum)+'</td><td class="l wrapc">'+flagCell(fuelFlags(r))+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Заправок нет.</p>')+'</section>'+
   '<section class="card"><h2>Заказы</h2>'+(orders.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>№</th><th class="l">Работа</th><th class="l">Статус</th><th>Сумма</th><th class="l">Отклонения</th></tr></thead><tbody>'+orders.map(t=>'<tr class="click" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'"><td>'+h(t.num)+'</td><td class="l">'+h(CATS[t.category]||t.category)+'</td><td class="l">'+chip(t.status)+'</td><td>'+money(t.price)+'</td><td class="l wrapc">'+flagCell(ticketFlags(t))+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Заказов пока нет.</p>')+'</section></div>';
  return s}
@@ -323,8 +389,34 @@ function vOrder(){const t=T(S.view.p.id);if(!t)return back('Заявки','a-ord
  let R='<section class="card tight"><span class="label">Контроль выезда</span>'+(fl.length?fl.map(f=>'<div class="flag '+f.lv+'">'+I.alert+'<span>'+h(f.t)+'</span></div>').join(''):tm.onsite?'<div class="flag note" style="background:var(--ok-soft);color:var(--ok)">'+I.check+'<span>Отклонений нет</span></div>':'<p class="small muted">Появится после отметок сотрудника.</p>')+'</section>';
  R+='<section class="card tight"><span class="label">Хронология</span><div class="tl">'+ev.map(e=>'<div class="tl-i"><time>'+fHM(e[1])+'</time><span>'+e[0]+' '+(e[2]?geoChip(e[2],'obj'):'')+'</span></div>').join('')+'</div></section>';
  if(ph.length)R+='<section class="card tight"><span class="label">Фото</span>'+(t.work?'<p class="small">'+h(t.work)+'</p>':'')+'<div class="row wrapx" style="gap:10px">'+ph.map(p=>'<div style="display:flex;flex-direction:column;gap:3px;align-items:center">'+thumb(p.path,'thumb lg')+'<span class="tiny muted">'+(p.kind==='before'?'до':p.kind==='after'?'после':'клиент')+' '+fHM(p.at)+'</span></div>').join('')+'</div></section>';
+ const tb=S.buys.filter(b=>b.ticket_id===t.id&&b.status!=='cancelled');
+ if(tb.length)R+='<section class="card tight"><span class="label">Докупленный материал</span>'+tb.map(b=>'<div class="row between wrapx" style="align-items:flex-start"><div class="small"><b>'+h(b.supplier)+' · '+money(b.amount)+'</b><br>'+(b.lines||[]).map((l,i)=>lineTxt(l)+(b.used_lines?' <span class="muted">(использовано '+n1(b.used_lines[i])+')</span>':'')).join('<br>')+'</div><div class="row" style="gap:6px">'+thumb(b.photo)+(b.delivered_photo?thumb(b.delivered_photo):'')+'</div></div>'+flagCell(buyFlags(b))).join('<hr style="border:0;border-top:1px solid var(--line);margin:8px 0">')+(t.status==='done'?'<p class="tiny muted">При звонке спросите клиента, установлен ли этот материал.</p>':'')+'</section>';
  if(!['closed','cancelled'].includes(t.status))R+='<button class="btn danger" style="align-self:flex-start" data-act="cancel">Отменить заявку</button>';
  return back('Заявки','a-orders')+'<div class="cols2"><div class="stack">'+L+'</div><div class="stack">'+R+'</div></div>'}
+
+const dChip=(lat,lng,dist,rad,what)=>lat==null?'<span class="chip c-warn">без координат</span>':'<a class="chip '+(dist==null?'c-muted':dist>rad?'c-bad':'c-ok')+'" href="'+mapUrl({lat,lng})+'" target="_blank" rel="noopener">'+(dist==null?'на карте':fDist(dist)+' от '+what)+'</a>';
+function buyDeliv(b){const c=S.cfg,radO=+c.office_radius||150,radC=+c.client_radius||200;let x='';
+ if(b.dAt)x+='<div class="odo">'+thumb(b.delivered_photo)+'<div><span class="tiny">'+(b.dest==='ticket'?'на объекте':'на складе')+' '+fT(b.dAt)+'</span><br>'+dChip(b.delivered_lat,b.delivered_lng,b.delivered_dist,b.dest==='ticket'?radC:radO,b.dest==='ticket'?'объекта':'склада')+'</div></div>';
+ if(b.dest==='ticket'&&b.used_lines&&leftLines(b).length)x+='<div class="tiny muted">использовано: '+(b.lines||[]).map((l,i)=>h(l.name)+' '+n1(b.used_lines[i])+' из '+n1(l.qty)).join(', ')+'</div>';
+ if(b.lAt)x+='<div class="odo">'+thumb(b.left_photo)+'<div><span class="tiny">остаток на складе '+fT(b.lAt)+'</span><br>'+dChip(b.left_lat,b.left_lng,b.left_dist,radO,'склада')+'</div></div>';
+ else if(b.status==='partial')x+='<div class="tiny" style="color:var(--warn)">Остаток к сдаче: '+leftLines(b).map(lineTxt).join(', ')+'</div>';
+ return x||'—'}
+function buyRows(list,showName){return '<div class="tblw flat"><table class="tbl"><thead><tr><th>Куплено</th>'+(showName?'<th class="l">Сотрудник</th>':'')+'<th class="l">Где и что</th><th>Сумма</th><th>Чек</th><th class="l">Куда</th><th class="l">Сдача</th><th class="l">Статус</th><th class="l">Отклонения</th><th></th></tr></thead><tbody>'+
+ (list.length?list.map(b=>{const m=tech(b.masterId);const t=b.ticket_id?T(b.ticket_id):null;const st=BST[b.status]||BST.bought;
+  return '<tr><td>'+fT(b.at)+'<br>'+(b.loc?'<a class="tiny" href="'+mapUrl(b.loc)+'" target="_blank" rel="noopener">где купил</a>':'')+'</td>'+(showName?'<td class="l"><button class="lnk" data-act="ago" data-v="a-emp" data-id="'+h(b.masterId)+'">'+h(m?m.name:'—')+'</button></td>':'')+
+  '<td class="l wrapc"><b>'+h(b.supplier)+'</b><div class="small">'+(b.lines||[]).map(lineTxt).join('<br>')+'</div></td><td class="num">'+money(b.amount)+'</td><td>'+thumb(b.photo)+'</td>'+
+  '<td class="l">'+(b.dest==='ticket'?(t?'<button class="lnk" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'">Объект '+h(t.num)+'</button><div class="tiny muted">'+h(t.address)+'</div>':'Объект'):'Склад')+'</td>'+
+  '<td class="l wrapc">'+buyDeliv(b)+'</td><td class="l"><span class="chip '+st[1]+'">'+(b.status==='delivered'&&b.dest==='ticket'&&!leftLines(b).length?'Ждёт проверки':st[0])+'</span>'+(b.accepted_lines&&b.status==='accepted'?'<div class="tiny muted">принято: '+b.accepted_lines.map(lineTxt).join(', ')+'</div>':'')+'</td>'+
+  '<td class="l wrapc">'+flagCell(buyFlags(b))+'</td><td><div class="row" style="justify-content:flex-end;gap:6px">'+(b.status==='delivered'?'<button class="btn primary sm" data-act="buyacc" data-id="'+h(b.id)+'">'+(acceptLines(b).length?'Принять':'Подтвердить')+'</button>':'')+(['bought','partial','delivered'].includes(b.status)?'<button class="btn ghost sm" data-act="buycancel" data-id="'+h(b.id)+'">Отменить</button>':'')+'</div></td></tr>'}).join(''):'<tr><td colspan="10" class="l muted">Закупок нет</td></tr>')+'</tbody></table></div>'}
+function vBuys(){const f=S.bf;let list=S.buys.filter(b=>!S.empF||b.masterId===S.empF);
+ if(f==='open')list=list.filter(b=>['bought','partial'].includes(b.status));else if(f==='accept')list=list.filter(b=>b.status==='delivered');else if(f==='flags')list=list.filter(b=>buyFlags(b).length);
+ list=list.slice().sort((a,b)=>b.at-a.at);
+ const F=[['open','Не сданы'],['accept','На приёмке'],['flags','С отклонениями'],['all','Все']];
+ const sumOpen=S.buys.filter(b=>['bought','partial'].includes(b.status)).reduce((a,b)=>a+(+b.amount||0),0);const sumMonth=S.buys.filter(b=>b.at>=monthStart()&&b.status!=='cancelled').reduce((a,b)=>a+(+b.amount||0),0);
+ return atop('Закупки','<div class="row wrapx">'+empSel()+'<div class="filters">'+F.map(x=>'<button class="'+(f===x[0]?'on':'')+'" data-act="bfilter" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div></div>')+
+  '<div class="kgrid">'+kpi(money(sumOpen),'куплено и не сдано',sumOpen>0)+kpi(S.buys.filter(b=>b.status==='delivered').length,'ждут приёмки')+kpi(money(sumMonth),'закупок за месяц')+kpi(S.buys.filter(b=>b.shortage&&b.accAt>=monthStart()).length,'недостач за месяц',S.buys.some(b=>b.shortage&&b.accAt>=monthStart()))+'</div>'+
+  '<div class="card tight"><p class="small" style="margin:0">Каждая покупка должна дойти до склада или до объекта. Сотрудник отмечает это фото на месте, телефон записывает координаты. Материал на объект нельзя отметить, пока сотрудник не нажал «Я на месте», а заказ не закроется, пока материал не отмечен. Остаток после объекта сотрудник обязан сдать на склад. При приёмке пересчитайте товар: недостача будет видна в отклонениях. Материал на объекте сверьте по фото и при звонке клиенту.</p></div>'+
+  aiBar()+buyRows(list,true)}
 
 function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.work_start=String(f.c.work_start||'09:00').slice(0,5);f.c.work_end=String(f.c.work_end||'18:00').slice(0,5)}const c=f.c;
  const inp=(k,l,t,extra)=>'<div class="field"><label for="g-'+k+'">'+l+'</label><input id="g-'+k+'" class="inp num" type="'+(t||'number')+'" data-c="'+k+'" value="'+h(c[k]==null?'':c[k])+'"'+(extra||'')+'></div>';
@@ -332,12 +424,13 @@ function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.wor
  s+='<div class="cols2"><section class="card"><h2>Офис</h2><div class="field"><label for="g-ll">Координаты офиса (из Google Maps: правый клик по офису → скопировать цифры)</label><input id="g-ll" class="inp" data-c="ll" value="'+h(c.ll!=null?c.ll:(c.office_lat!=null?c.office_lat+', '+c.office_lng:''))+'" placeholder="40.17920, 44.49910"></div>'+
   '<button class="btn ghost sm" style="align-self:flex-start" data-act="here">'+I.pin+'Я сейчас в офисе, взять точку с этого устройства</button>'+
   '<div class="field"><label for="g-wifi">Офисный Wi-Fi: имя сети (можно несколько через запятую)</label><input id="g-wifi" class="inp" data-c="office_wifi" value="'+h(c.office_wifi||'')+'" placeholder="ArevOffice"><p class="tiny muted">Если заполнено, приход и уход проверяются ещё и по Wi-Fi: подделать его сложнее, чем GPS.</p></div>'+
-  '<div class="cols">'+inp('office_radius','Радиус офиса, м')+inp('client_radius','Радиус у клиента, м')+'</div></section>'+
-  '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+'</div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div></section></div>';
+  '<div class="cols">'+inp('office_radius','Радиус офиса, м')+inp('client_radius','Радиус у клиента, м')+'</div>'+
+  '<div class="field"><label for="g-wll">Координаты склада (если склад не в офисе)</label><input id="g-wll" class="inp" data-c="wll" value="'+h(c.wll!=null?c.wll:(c.warehouse_lat!=null?c.warehouse_lat+', '+c.warehouse_lng:''))+'" placeholder="пусто — склад в офисе"></div></section>'+
+  '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+inp('purchase_max_hours','Сдать закупку не позже, ч')+inp('stop_min','Стоянка считается от, мин')+inp('long_stop_min','Долгая стоянка от, мин')+'</div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div></section></div>';
  return s}
 
 /* ---------- рендер ---------- */
-const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-settings':vSettings};
+const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else root.innerHTML=shell((VIEWS[S.view.name]||vDash)());
@@ -356,6 +449,15 @@ const ACT={
  ago(d){go(d.v,d.id?{id:d.id}:{})},
  per(d){S.per=d.v;LS.set('per',d.v);render(true)},
  filter(d){S.filter=d.v;render(true)},
+ bfilter(d){S.bf=d.v;render(true)},
+ async buyacc(d){const b=S.buys.find(x=>x.id===d.id);if(!b)return;const L=acceptLines(b);
+  const v=await sheet('<h2>'+(L.length?'Приёмка на складе':'Подтвердить материал на объекте')+'</h2><p class="small">'+h(b.supplier)+' · '+money(b.amount)+' · '+h((tech(b.masterId)||{}).name||'')+'</p>'+
+   (L.length?'<p class="small">Пересчитайте товар и впишите, сколько фактически пришло.</p>'+L.map((l,i)=>'<div class="field"><label for="ba'+i+'">'+h(l.name)+': ожидается '+n1(l.qty)+(l.unit?' '+h(l.unit):'')+'</label><input id="ba'+i+'" class="inp num" inputmode="decimal" value="'+h(l.qty)+'"></div>').join(''):'<p class="small">Проверьте фото материала на объекте и спросите клиента при звонке, что материал установлен.</p>')+
+   '<div class="field"><label for="ban">Комментарий</label><input id="ban" class="inp"></div><button class="btn primary block" data-act="baok" data-n="'+L.length+'">'+(L.length?'Принять':'Подтвердить')+'</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');
+  if(!v||typeof v!=='object')return;const short=L.some((l,i)=>v.got[i]<+l.qty-1e-9);
+  await upd('purchases',b.id,{status:'accepted',accepted_at:new Date().toISOString(),accepted_lines:L.map((l,i)=>({name:l.name,unit:l.unit,qty:v.got[i]})),shortage:short,accept_note:v.note||null},short?'Принято с недостачей':'Принято')},
+ baok(d){const n=+d.n;const got=[];for(let i=0;i<n;i++){const x=parseFloat(String(document.getElementById('ba'+i).value).replace(',','.'));got.push(isFinite(x)&&x>=0?x:0)}const nt=document.getElementById('ban');closeSheet({got,note:nt?nt.value.trim():''})},
+ async buycancel(d){if(await confirmBox('Отменить закупку?','Например, сотрудник внёс её по ошибке или дважды. Отмена видна в истории.','Отменить закупку')!=='y')return;await upd('purchases',d.id,{status:'cancelled',accept_note:'Отменено администратором'},'Закупка отменена')},
  reload(){load().then(()=>toast('Данные обновлены'))},
  view(d,el){const src=el.currentSrc||el.src;if(!src)return;const v=document.createElement('div');v.className='viewer';v.innerHTML='<img src="'+h(src)+'" alt="Фото"><button aria-label="Закрыть">×</button>';v.addEventListener('click',()=>v.remove());document.body.appendChild(v)},
  async login(){const f=S.form;const r=await sb.auth.signInWithPassword({email:(f.email||'').trim(),password:f.pw||''});if(r.error)toast(r.error.message==='Invalid login credentials'?'Неверный e-mail или пароль':r.error.message)},
@@ -388,8 +490,10 @@ const ACT={
  here(){if(!navigator.geolocation)return toast('Это устройство не определяет местоположение');navigator.geolocation.getCurrentPosition(p=>{S.form.c.ll=p.coords.latitude.toFixed(6)+', '+p.coords.longitude.toFixed(6);render(true);toast('Точка взята (точность ±'+Math.round(p.coords.accuracy)+' м). Нажмите «Сохранить»')},()=>toast('Не удалось определить местоположение'),{enableHighAccuracy:true,timeout:10000})},
  async savecfg(){const c=S.form.c;const m=String(c.ll!=null?c.ll:(c.office_lat!=null?c.office_lat+','+c.office_lng:'')).match(/(-?\d+[.,]\d+)\s*[, ]\s*(-?\d+[.,]\d+)/);
   const num=k=>{const v=parseFloat(String(c[k]).replace(',','.'));return isFinite(v)?v:null};
+  const wm=String(c.wll!=null?c.wll:(c.warehouse_lat!=null?c.warehouse_lat+','+c.warehouse_lng:'')).match(/(-?\d+[.,]\d+)\s*[, ]\s*(-?\d+[.,]\d+)/);
   const patch={company:c.company||'Arev Service',office_lat:m?+m[1].replace(',','.'):null,office_lng:m?+m[2].replace(',','.'):null,office_wifi:(c.office_wifi||'').trim()||null,office_radius:num('office_radius')||150,client_radius:num('client_radius')||200,
-   work_start:c.work_start||'09:00',work_end:c.work_end||'18:00',grace_min:num('grace_min')??10,max_idle_min:num('max_idle_min')||120,default_norm:num('default_norm')||9,route_k:Math.min(3,Math.max(1,num('route_k')||1.3)),photo_max_age_min:num('photo_max_age_min')||10,updated_at:new Date().toISOString()};
+   work_start:c.work_start||'09:00',work_end:c.work_end||'18:00',grace_min:num('grace_min')??10,max_idle_min:num('max_idle_min')||120,default_norm:num('default_norm')||9,route_k:Math.min(3,Math.max(1,num('route_k')||1.3)),photo_max_age_min:num('photo_max_age_min')||10,
+   warehouse_lat:wm?+wm[1].replace(',','.'):null,warehouse_lng:wm?+wm[2].replace(',','.'):null,purchase_max_hours:num('purchase_max_hours')||24,stop_min:num('stop_min')||20,long_stop_min:num('long_stop_min')||30,updated_at:new Date().toISOString()};
   const r=await sb.from('config').update(patch).eq('id',1);if(r.error)return toast('Ошибка: '+r.error.message);toast('Настройки сохранены');S.form={};await load()}
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});

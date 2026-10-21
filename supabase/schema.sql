@@ -178,7 +178,7 @@ alter table public.alerts enable row level security;
 -- ---------- проверки ИИ и выписка ----------
 create table if not exists public.ai_checks(
   photo text primary key,
-  kind text not null check (kind in ('odo','receipt')),
+  kind text not null check (kind in ('odo','receipt','purchase')),
   result jsonb not null,
   at timestamptz not null default now()
 );
@@ -197,6 +197,42 @@ create table if not exists public.card_tx(
 );
 create index if not exists card_tx_at on public.card_tx(at desc);
 alter table public.card_tx enable row level security;
+
+-- ---------- закупки товара ----------
+create table if not exists public.purchases(
+  id uuid primary key default gen_random_uuid(),
+  staff_id uuid not null references public.staff(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  supplier text not null,
+  lines jsonb not null default '[]'::jsonb,          -- [{name, qty, unit}]
+  amount int not null default 0,
+  photo text not null,                                -- накладная или чек
+  lat double precision, lng double precision, acc real, device text,
+  shift_id uuid references public.shifts(id),
+  dest text not null default 'warehouse' check (dest in ('warehouse','ticket')),   -- куда везёт: на склад или на объект
+  ticket_id uuid references public.tickets(id),                                   -- для какого заказа (если на объект)
+  status text not null default 'bought' check (status in ('bought','partial','delivered','accepted','cancelled')),
+  delivered_at timestamptz, delivered_photo text,
+  delivered_lat double precision, delivered_lng double precision, delivered_dist int,
+  used_lines jsonb,                                   -- сколько использовано на объекте (по строкам)
+  left_lines jsonb,                                   -- остаток, который надо сдать на склад
+  left_at timestamptz, left_photo text, left_lat double precision, left_lng double precision, left_dist int,
+  accepted_at timestamptz, accepted_lines jsonb, shortage boolean, accept_note text
+);
+create index if not exists purchases_staff_time on public.purchases(staff_id, created_at desc);
+create index if not exists purchases_status on public.purchases(status, created_at desc);
+create index if not exists purchases_ticket on public.purchases(ticket_id);
+alter table public.purchases enable row level security;
+
+-- новые настройки и поля (для баз, созданных прошлой версией схемы)
+alter table public.config add column if not exists warehouse_lat double precision;
+alter table public.config add column if not exists warehouse_lng double precision;
+alter table public.config add column if not exists purchase_max_hours int not null default 24;
+alter table public.config add column if not exists long_stop_min int not null default 30;
+alter table public.config add column if not exists stop_min int not null default 20;
+alter table public.shifts add column if not exists gps_km numeric;
+alter table public.ai_checks drop constraint if exists ai_checks_kind_check;
+alter table public.ai_checks add constraint ai_checks_kind_check check (kind in ('odo','receipt','purchase'));
 
 -- =====================================================================
 -- Права чтения (RLS). Писать напрямую может только админ.
@@ -230,6 +266,10 @@ do $$ begin
   drop policy if exists tickets_admin on public.tickets;
   create policy tickets_admin on public.tickets for all to authenticated using (public.is_admin()) with check (public.is_admin());
   -- только админ
+  drop policy if exists purchases_read on public.purchases;
+  create policy purchases_read on public.purchases for select to authenticated using (staff_id = auth.uid() or public.is_admin());
+  drop policy if exists purchases_admin on public.purchases;
+  create policy purchases_admin on public.purchases for update to authenticated using (public.is_admin()) with check (public.is_admin());
   drop policy if exists alerts_admin on public.alerts;
   create policy alerts_admin on public.alerts for select to authenticated using (public.is_admin());
   drop policy if exists ai_admin on public.ai_checks;
@@ -260,7 +300,7 @@ end $$;
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname in ('_me','_staff','_guard','_check_photo','_check_mock','register','update_car',
-             'start_shift','end_shift','add_fuel','add_track','get_pool','take_ticket','refuse_ticket','ticket_step','add_ticket_photo','_route_km')
+             'start_shift','end_shift','add_fuel','add_track','get_pool','take_ticket','refuse_ticket','ticket_step','add_ticket_photo','_route_km','_gps_km','add_purchase','deliver_purchase')
   loop execute 'drop function ' || f.sig; end loop;
 end $$;
 
@@ -370,6 +410,23 @@ begin
   return to_jsonb(r);
 end $$;
 
+-- км по GPS-треку: сумма расстояний между точками; без точек с подменой,
+-- неточных (хуже 100 м) и невозможных скачков (быстрее 200 км/ч)
+create function public._gps_km(p_staff uuid, p_from timestamptz, p_to timestamptz)
+returns numeric language sql stable security definer set search_path = public as $$
+  with p as (
+    select lat, lng, coalesce(device_at, at) t,
+           lag(lat) over w plat, lag(lng) over w plng, lag(coalesce(device_at, at)) over w pt
+      from public.track_points
+     where staff_id = p_staff and coalesce(device_at, at) between p_from and p_to
+       and not mocked and coalesce(acc, 0) <= 100
+    window w as (order by coalesce(device_at, at))
+  )
+  select round(coalesce(sum(d), 0) / 1000.0, 1) from (
+    select public.dist_m(plat, plng, lat, lng) d, extract(epoch from t - pt) sec from p where plat is not null
+  ) x where sec > 0 and d / sec < 55
+$$;
+
 -- конец смены
 create function public.end_shift(p_odo int, p_photo text, p_lat double precision, p_lng double precision,
   p_acc real, p_mocked boolean, p_wifi_ok boolean, p_device text)
@@ -386,7 +443,7 @@ begin
   select * into c from public.config where id = 1;
   update public.shifts set end_at = now(), end_odo = p_odo, end_photo = p_photo, end_lat = p_lat, end_lng = p_lng, end_acc = p_acc,
          end_dist = public.dist_m(p_lat, p_lng, c.office_lat, c.office_lng), end_wifi_ok = p_wifi_ok, end_device = p_device,
-         route_km = public._route_km(s.id, r.start_at, now())
+         route_km = public._route_km(s.id, r.start_at, now()), gps_km = public._gps_km(s.id, r.start_at, now())
    where id = r.id returning * into r;
   return to_jsonb(r);
 end $$;
@@ -486,6 +543,9 @@ begin
       return jsonb_build_object('error','NEED_PHOTOS');
     end if;
     if coalesce(p_price,0) <= 0 then return jsonb_build_object('error','NEED_PRICE'); end if;
+    if exists(select 1 from public.purchases where ticket_id = p_id and status = 'bought') then
+      return jsonb_build_object('error','PURCHASE_NOT_DELIVERED');
+    end if;
     update public.tickets set status = 'done', done_at = now(), done_lat = p_lat, done_lng = p_lng,
            done_dist = public.dist_m(p_lat, p_lng, lat, lng), price = p_price, work = p_work where id = p_id returning * into r;
   else
@@ -509,12 +569,107 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- закупка: что, где и за сколько купил (фото накладной или чека обязательно).
+-- p_ticket: если товар везут сразу на объект, указывается заказ (свой и ещё не завершённый).
+create function public.add_purchase(p_supplier text, p_lines jsonb, p_amount int, p_photo text, p_lat double precision,
+  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; r public.purchases; e text; sh uuid;
+begin
+  s := public._staff();
+  e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
+  e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
+  if coalesce(trim(p_supplier),'') = '' then return jsonb_build_object('error','NEED_SUPPLIER'); end if;
+  if jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then return jsonb_build_object('error','NEED_LINES'); end if;
+  if exists(select 1 from jsonb_array_elements(p_lines) x
+             where coalesce(trim(x->>'name'),'') = '' or coalesce((x->>'qty')::numeric, 0) <= 0) then
+    return jsonb_build_object('error','NEED_LINES');
+  end if;
+  if coalesce(p_amount,0) <= 0 then return jsonb_build_object('error','NEED_AMOUNT'); end if;
+  if p_ticket is not null and not exists(select 1 from public.tickets where id = p_ticket and staff_id = s.id
+                                          and status in ('assigned','enroute','onsite')) then
+    return jsonb_build_object('error','BAD_TICKET');
+  end if;
+  select id into sh from public.shifts where staff_id = s.id and end_at is null;
+  insert into public.purchases(staff_id, supplier, lines, amount, photo, lat, lng, acc, device, shift_id, dest, ticket_id)
+  values (s.id, trim(p_supplier), p_lines, p_amount, p_photo, p_lat, p_lng, p_acc, p_device, sh,
+          case when p_ticket is null then 'warehouse' else 'ticket' end, p_ticket) returning * into r;
+  return to_jsonb(r);
+end $$;
+
+-- сдать закупку: фото товара на месте, место проверяется сервером.
+-- на склад: расстояние до склада (или офиса).
+-- на объект: только когда мастер «на месте» по этому заказу; p_used — сколько использовано
+--   по каждой строке; остаток становится обязательством «сдать на склад» (статус partial).
+-- остаток (partial): сдаётся на склад тем же вызовом.
+create function public.deliver_purchase(p_id uuid, p_photo text, p_lat double precision, p_lng double precision,
+  p_acc real, p_mocked boolean, p_device text, p_used jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; c public.config; r public.purchases; t public.tickets; e text;
+        used jsonb; lft jsonb; has_left boolean;
+begin
+  s := public._staff();
+  e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
+  e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
+  select * into c from public.config where id = 1;
+  select * into r from public.purchases where id = p_id and staff_id = s.id for update;
+  if r.id is null then return jsonb_build_object('error','CANNOT_DELIVER'); end if;
+
+  if r.status = 'partial' then
+    update public.purchases set status = 'delivered', left_at = now(), left_photo = p_photo, left_lat = p_lat, left_lng = p_lng,
+           left_dist = public.dist_m(p_lat, p_lng, coalesce(c.warehouse_lat, c.office_lat), coalesce(c.warehouse_lng, c.office_lng))
+     where id = r.id returning * into r;
+    return to_jsonb(r);
+  end if;
+  if r.status <> 'bought' then return jsonb_build_object('error','CANNOT_DELIVER'); end if;
+
+  if r.dest = 'warehouse' then
+    update public.purchases set status = 'delivered', delivered_at = now(), delivered_photo = p_photo, delivered_lat = p_lat, delivered_lng = p_lng,
+           delivered_dist = public.dist_m(p_lat, p_lng, coalesce(c.warehouse_lat, c.office_lat), coalesce(c.warehouse_lng, c.office_lng))
+     where id = r.id returning * into r;
+    return to_jsonb(r);
+  end if;
+
+  select * into t from public.tickets where id = r.ticket_id;
+  if t.id is null or t.staff_id is distinct from s.id or t.status <> 'onsite' then
+    return jsonb_build_object('error','NOT_ONSITE');
+  end if;
+  -- использовано по строкам; если не передано, считаем, что использовано всё
+  if p_used is null then
+    used := (select jsonb_agg((x->>'qty')::numeric order by n) from jsonb_array_elements(r.lines) with ordinality a(x, n));
+  else
+    if jsonb_typeof(p_used) <> 'array' or jsonb_array_length(p_used) <> jsonb_array_length(r.lines) then
+      return jsonb_build_object('error','BAD_USED');
+    end if;
+    if exists(select 1 from jsonb_array_elements(r.lines) with ordinality a(x, n)
+               join jsonb_array_elements(p_used) with ordinality b(u, m) on n = m
+              where jsonb_typeof(u) <> 'number' or u::text::numeric < 0 or u::text::numeric > (x->>'qty')::numeric) then
+      return jsonb_build_object('error','BAD_USED');
+    end if;
+    used := p_used;
+  end if;
+  select jsonb_agg(jsonb_build_object('name', x->>'name', 'unit', x->>'unit',
+                   'qty', (x->>'qty')::numeric - u::text::numeric) order by n),
+         bool_or((x->>'qty')::numeric - u::text::numeric > 0)
+    into lft, has_left
+    from jsonb_array_elements(r.lines) with ordinality a(x, n)
+    join jsonb_array_elements(used) with ordinality b(u, m) on n = m;
+  update public.purchases set status = case when has_left then 'partial' else 'delivered' end,
+         delivered_at = now(), delivered_photo = p_photo, delivered_lat = p_lat, delivered_lng = p_lng,
+         delivered_dist = public.dist_m(p_lat, p_lng, t.lat, t.lng),
+         used_lines = used, left_lines = case when has_left then lft end
+   where id = r.id returning * into r;
+  return to_jsonb(r);
+end $$;
+
 -- права на вызов функций
 revoke all on function public.register, public.update_car, public.start_shift, public.end_shift, public.add_fuel,
-  public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo from public, anon;
+  public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo,
+  public.add_purchase, public.deliver_purchase from public, anon;
 grant execute on function public.register, public.update_car, public.start_shift, public.end_shift, public.add_fuel,
-  public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo, public.is_admin to authenticated;
-revoke all on function public._staff, public._guard, public._check_photo, public._route_km from public, anon, authenticated;
+  public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo,
+  public.add_purchase, public.deliver_purchase, public.is_admin to authenticated;
+revoke all on function public._staff, public._guard, public._check_photo, public._route_km, public._gps_km from public, anon, authenticated;
 
 -- =====================================================================
 -- Первый администратор: кнопка «Стать администратором» в админке.

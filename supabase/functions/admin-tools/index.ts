@@ -4,7 +4,7 @@
 // Секрет: Edge Functions → Secrets → ANTHROPIC_API_KEY = ваш ключ Claude API.
 //
 // Что умеет:
-//   action "ai"        — ИИ проверяет фото одометров и чеков, которые ещё не проверены
+//   action "ai"        — ИИ проверяет фото одометров, чеков АЗС и чеков закупок, которые ещё не проверены
 //   action "reset_pin" — новый PIN-код сотруднику, который его забыл
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -23,6 +23,8 @@ const MODEL = Deno.env.get('AI_MODEL') || 'claude-sonnet-5-5';
 
 const PROMPT_ODO = 'Это фото приборной панели автомобиля, которое сотрудник сделал для отметки пробега в начале или конце смены. Определи: 1) общий пробег на одометре в километрах (ODO, не суточный TRIP); 2) похоже ли, что это фотография экрана телефона, монитора или распечатанного снимка, а не реальной панели; 3) видна ли вообще приборная панель. Ответь только JSON: {"odo": число или null, "isScreen": true или false, "isDashboard": true или false, "note": "коротко по-русски, если что-то подозрительно, иначе пустая строка"}';
 const PROMPT_RCPT = 'Это фото кассового чека с автозаправки, сделанное сотрудником. Извлеки данные чека и ответь только JSON: {"isReceipt": true или false, "date": "ДД.ММ.ГГГГ" или null, "time": "ЧЧ:ММ" или null, "liters": число или null (литры или кубометры топлива), "sum": число или null (итоговая сумма), "fuel": "вид топлива" или null, "station": "название АЗС" или null, "nonFuel": true или false (есть ли в чеке товары или услуги кроме топлива), "isScreen": true или false (фото экрана или снимка вместо бумажного чека), "note": "коротко по-русски, если что-то подозрительно, иначе пустая строка"}';
+
+const PROMPT_BUY = 'Это фото чека, накладной или счёта на покупку товара (материалы для монтажа солнечных станций), которое сотрудник сделал при закупке. Извлеки данные и ответь только JSON: {"isReceipt": true или false (это чек, накладная или счёт), "date": "ДД.ММ.ГГГГ" или null, "sum": число или null (итоговая сумма к оплате), "seller": "продавец" или null, "items": [{"name": "товар", "qty": число или null, "unit": "ед." или null, "price": число или null}], "handwritten": true или false (написано от руки, без печати или кассовых данных), "isScreen": true или false (фото экрана или снимка вместо бумажного документа), "note": "коротко по-русски, если что-то подозрительно (исправления, разные почерки, сумма не сходится с позициями), иначе пустая строка"}';
 
 function b64(buf: ArrayBuffer) {
   const bytes = new Uint8Array(buf);
@@ -43,7 +45,7 @@ async function askClaude(prompt: string, imageB64: string) {
     headers: { 'x-api-key': ANTHROPIC, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 400,
+      max_tokens: 900,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageB64 } },
         { type: 'text', text: prompt },
@@ -78,25 +80,27 @@ Deno.serve(async (req) => {
       if (!ANTHROPIC) return json({ error: 'Не задан секрет ANTHROPIC_API_KEY' }, 400);
       const since = new Date(Date.now() - 31 * 864e5).toISOString();
       const limit = Math.min(Number(body.limit) || 15, 30);
-      const [sh, fu, done] = await Promise.all([
+      const [sh, fu, done, bu] = await Promise.all([
         admin.from('shifts').select('start_photo,end_photo').gte('start_at', since),
         admin.from('fuel').select('photo').gte('at', since),
         admin.from('ai_checks').select('photo'),
+        admin.from('purchases').select('photo').gte('created_at', since),
       ]);
       const checked = new Set((done.data || []).map((x: { photo: string }) => x.photo));
-      const todo: { photo: string; kind: 'odo' | 'receipt' }[] = [];
+      const todo: { photo: string; kind: 'odo' | 'receipt' | 'purchase' }[] = [];
       (sh.data || []).forEach((s: { start_photo: string; end_photo: string }) => {
         if (s.start_photo && !checked.has(s.start_photo)) todo.push({ photo: s.start_photo, kind: 'odo' });
         if (s.end_photo && !checked.has(s.end_photo)) todo.push({ photo: s.end_photo, kind: 'odo' });
       });
       (fu.data || []).forEach((f: { photo: string }) => { if (f.photo && !checked.has(f.photo)) todo.push({ photo: f.photo, kind: 'receipt' }); });
+      (bu.data || []).forEach((b: { photo: string }) => { if (b.photo && !checked.has(b.photo)) todo.push({ photo: b.photo, kind: 'purchase' }); });
       const batch = todo.slice(0, limit);
       let ok = 0; const errors: string[] = [];
       for (const it of batch) {
         try {
           const { data: file, error } = await admin.storage.from('photos').download(it.photo);
           if (error || !file) throw new Error('фото не найдено');
-          const result = await askClaude(it.kind === 'odo' ? PROMPT_ODO : PROMPT_RCPT, b64(await file.arrayBuffer()));
+          const result = await askClaude(it.kind === 'odo' ? PROMPT_ODO : it.kind === 'purchase' ? PROMPT_BUY : PROMPT_RCPT, b64(await file.arrayBuffer()));
           await admin.from('ai_checks').upsert({ photo: it.photo, kind: it.kind, result });
           ok++;
         } catch (e) { errors.push(String((e as Error).message || e)); }

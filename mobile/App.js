@@ -106,12 +106,13 @@ function Main({ session }) {
 
   const load = useCallback(async () => {
     try {
-      const [staffR, cfgR, shiftR, myR, poolR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
         supabase.from('tickets').select('*').eq('staff_id', uid).order('created_at', { ascending: false }).limit(30),
         supabase.rpc('get_pool'),
+        supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
       ]);
       const shifts = shiftR.data || [];
       setSt({
@@ -122,6 +123,7 @@ function Main({ session }) {
         open: shifts.find((x) => !x.end_at) || null,
         mine: myR.data || [],
         pool: poolR.data || [],
+        buys: buyR.data || [],
         err: staffR.error ? errText(staffR.error) : null,
       });
     } catch (e) {
@@ -153,6 +155,8 @@ function Main({ session }) {
   else if (view.name === 'fuel') body = <FuelScreen ctx={ctx} />;
   else if (view.name === 'ticket') body = <TicketScreen ctx={ctx} id={view.id} pooled={view.pooled} />;
   else if (view.name === 'profile') body = <Profile ctx={ctx} />;
+  else if (view.name === 'purchase') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} />;
+  else if (view.name === 'deliver') body = <DeliverScreen ctx={ctx} id={view.id} />;
   else body = <Home ctx={ctx} />;
   return (
     <>
@@ -318,9 +322,11 @@ function Home({ ctx }) {
         </View>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <Btn kind="ghost" title="Заправка" onPress={() => nav('fuel')} style={{ flex: 1 }} />
-          <Btn kind="ghost" title="Закончить" onPress={() => nav('shift')} style={{ flex: 1 }} />
+          <Btn kind="ghost" title="Закупка" onPress={() => nav('purchase')} style={{ flex: 1 }} />
         </View>
+        <Btn kind="ghost" title="Закончить смену" onPress={() => nav('shift')} />
       </Card>
+      <BuyList ctx={ctx} items={st.buys} />
       {mine.length ? <H2>{mine.length > 1 ? 'Мои заказы' : 'Мой заказ'}</H2> : null}
       {mine.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id })}>
@@ -371,10 +377,14 @@ function ShiftScreen({ ctx }) {
       setCam(false);
     } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
   };
-  const submit = async () => {
+  const submit = async (force) => {
     const v = parseInt(String(odo).replace(/\D/g, ''), 10);
     if (!shot) return Alert.alert('Фото', 'Сфотографируйте одометр');
     if (!v) return Alert.alert('Одометр', 'Введите показания одометра');
+    if (ending && force !== true && st.buys.length) {
+      return Alert.alert('Не сдана закупка', 'Есть купленный товар, который не сдан на склад или на объект (' + st.buys.length + '). Руководитель увидит это. Закончить смену всё равно?',
+        [{ text: 'Сначала сдам' }, { text: 'Закончить', onPress: () => submit(true) }]);
+    }
     setBusy(true);
     try {
       const wifi = await officeWifiOk(st.cfg.office_wifi);
@@ -538,6 +548,7 @@ function TicketScreen({ ctx, id, pooled }) {
         {t.descr ? <Muted>{t.descr}</Muted> : null}
         {t.err_code ? <T>Код ошибки: {t.err_code}</T> : null}
       </Card>
+      {['assigned', 'enroute', 'onsite'].includes(t.status) ? <TicketBuys ctx={ctx} t={t} /> : null}
       {t.status === 'assigned' ? <>
         <Btn kind="dark" title="Выехал к клиенту" big busy={busy} onPress={() => step('enroute')} />
         <Btn kind="ghost" title="Отказаться от заказа" onPress={() => Alert.alert('Отказаться?', 'Заказ вернётся в общий список, отказ увидит руководитель.', [{ text: 'Нет' }, { text: 'Отказаться', onPress: () => act(async () => { await rpc('refuse_ticket', { p_id: t.id, p_device: deviceId() }); nav('home'); }) }])} />
@@ -562,6 +573,208 @@ function TicketScreen({ ctx, id, pooled }) {
       </> : null}
       {t.status === 'done' || t.status === 'closed' ? <Card><T>Сумма: {money(t.price)}</T>{t.work ? <Muted>{t.work}</Muted> : null}<Chip kind={t.status === 'closed' ? 'ok' : 'note'}>{t.status === 'closed' ? 'Клиент подтвердил' : 'Ждём подтверждения'}</Chip></Card> : null}
       <CameraSheet visible={!!cam} title={cam === 'before' ? 'Фото до' : 'Фото после'} onClose={() => setCam(null)} onShot={onShot} />
+    </Page>
+  );
+}
+
+/* ---------------- закупки ---------------- */
+const lineText = (l) => l.name + ' — ' + l.qty + (l.unit ? ' ' + l.unit : '');
+const buyWhere = (b, mine) => {
+  if (b.status === 'partial') return 'Остаток → на склад';
+  if (b.dest === 'ticket') { const t = (mine || []).find((x) => x.id === b.ticket_id); return 'На объект' + (t ? ' · ' + t.num : ''); }
+  return 'На склад';
+};
+
+// список несданного товара на главном экране
+function BuyList({ ctx, items }) {
+  if (!items || !items.length) return null;
+  const maxH = ctx.st.cfg.purchase_max_hours || 24;
+  return (
+    <>
+      <H2>Не сдано ({items.length})</H2>
+      {items.map((b) => {
+        const late = Date.now() - new Date(b.created_at).getTime() > maxH * 3600000;
+        const lines = b.status === 'partial' ? (b.left_lines || []).filter((l) => l.qty > 0) : b.lines || [];
+        return (
+          <Pressable key={b.id} onPress={() => ctx.nav('deliver', { id: b.id })}>
+            <Card style={{ borderLeftWidth: 4, borderLeftColor: late ? C.bad : C.sun }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Label>{buyWhere(b, ctx.st.mine)}</Label>
+                {late ? <Chip kind="bad">просрочено</Chip> : <Chip kind="warn">{hm(b.created_at)}</Chip>}
+              </View>
+              <T style={{ fontWeight: '700' }}>{b.supplier} · {money(b.amount)}</T>
+              <Muted>{lines.map(lineText).join(', ')}</Muted>
+            </Card>
+          </Pressable>
+        );
+      })}
+    </>
+  );
+}
+
+// материалы внутри заказа
+function TicketBuys({ ctx, t }) {
+  const items = ctx.st.buys.filter((b) => b.ticket_id === t.id && b.status === 'bought');
+  return (
+    <Card>
+      <T style={{ fontWeight: '700' }}>Материал для заказа</T>
+      {items.length ? items.map((b) => (
+        <Pressable key={b.id} onPress={() => ctx.nav('deliver', { id: b.id })} style={{ paddingVertical: 4 }}>
+          <T>{b.supplier} · {money(b.amount)}</T>
+          <Muted>{(b.lines || []).map(lineText).join(', ')}</Muted>
+          <Text style={{ color: C.info }}>{t.status === 'onsite' ? 'Отметить на объекте →' : 'Отметить можно будет на объекте'}</Text>
+        </Pressable>
+      )) : <Muted>Если докупаете что-то для этой работы, запишите покупку здесь. Без отметки на объекте заказ не закроется.</Muted>}
+      <Btn kind="ghost" title="Докупил материал" onPress={() => ctx.nav('purchase', { ticket: t.id })} />
+    </Card>
+  );
+}
+
+function PurchaseScreen({ ctx, ticket }) {
+  const { st, uid, load, nav } = ctx;
+  const active = st.mine.filter((t) => ['assigned', 'enroute', 'onsite'].includes(t.status));
+  const [dest, setDest] = useState(ticket || 'warehouse');
+  const [supplier, setSupplier] = useState('');
+  const [lines, setLines] = useState([{ name: '', qty: '', unit: 'шт' }]);
+  const [sum, setSum] = useState('');
+  const [cam, setCam] = useState(false);
+  const [shot, setShot] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const setLine = (i, k) => (v) => setLines((p) => p.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
+  const onShot = async (uri) => {
+    try {
+      const fix = await getFix();
+      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      const up = await uploadPhoto(uri, uid, 'buy');
+      setShot({ ...up, fix }); setCam(false);
+    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+  };
+  const submit = async () => {
+    const clean = lines.map((l) => ({ name: String(l.name).trim(), qty: num(l.qty), unit: String(l.unit || '').trim() })).filter((l) => l.name || l.qty);
+    const a = parseInt(String(sum).replace(/\D/g, ''), 10);
+    if (!shot) return Alert.alert('Чек', 'Сфотографируйте чек или накладную');
+    if (!supplier.trim()) return Alert.alert('Где купили', 'Укажите магазин или поставщика');
+    if (!clean.length || clean.some((l) => !l.name || !l.qty)) return Alert.alert('Товар', 'Для каждой строки укажите название и количество');
+    if (!a) return Alert.alert('Сумма', 'Укажите сумму из чека');
+    setBusy(true);
+    try {
+      await rpc('add_purchase', { p_supplier: supplier, p_lines: clean, p_amount: a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' ? null : dest });
+      await load();
+      nav(dest === 'warehouse' ? 'home' : 'ticket', dest === 'warehouse' ? undefined : { id: dest });
+    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Page>
+      <H1>Закупка</H1>
+      <Muted>Каждая покупка должна дойти до склада или до объекта. Там вы отметите её фото, место проверит телефон.</Muted>
+      <Card>
+        <T style={{ fontWeight: '700' }}>1. Куда везёте</T>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Btn kind={dest === 'warehouse' ? 'dark' : 'ghost'} title="На склад" onPress={() => setDest('warehouse')} />
+          {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={'Объект ' + t.num} onPress={() => setDest(t.id)} />)}
+        </View>
+        {dest !== 'warehouse' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
+        {!active.length ? <Muted>Чтобы везти сразу на объект, сначала возьмите заказ.</Muted> : null}
+      </Card>
+      <Card>
+        <T style={{ fontWeight: '700' }}>2. Фото чека или накладной</T>
+        {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 10 }} /> : null}
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать чек'} onPress={() => setCam(true)} />
+      </Card>
+      <Card>
+        <T style={{ fontWeight: '700' }}>3. Что купили, как в чеке</T>
+        <Field label="Магазин или поставщик" value={supplier} onChangeText={setSupplier} placeholder="Электротовары, ул. ..." />
+        {lines.map((l, i) => (
+          <View key={i} style={{ gap: 6, borderTopWidth: i ? 1 : 0, borderTopColor: C.line, paddingTop: i ? 8 : 0 }}>
+            <Field label={'Товар ' + (i + 1)} value={l.name} onChangeText={setLine(i, 'name')} placeholder="Кабель солнечный 6 мм²" />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1 }}><Field label="Количество" value={l.qty} onChangeText={setLine(i, 'qty')} keyboardType="decimal-pad" /></View>
+              <View style={{ flex: 1 }}><Field label="Ед." value={l.unit} onChangeText={setLine(i, 'unit')} placeholder="шт, м" /></View>
+            </View>
+            {lines.length > 1 ? <Btn kind="ghost" title="Убрать строку" onPress={() => setLines((p) => p.filter((_, j) => j !== i))} /> : null}
+          </View>
+        ))}
+        <Btn kind="ghost" title="+ Ещё товар" onPress={() => setLines((p) => [...p, { name: '', qty: '', unit: 'шт' }])} />
+        <Field label="Сумма по чеку, ֏" value={sum} onChangeText={setSum} keyboardType="number-pad" />
+      </Card>
+      <Btn title="Сохранить закупку" onPress={submit} busy={busy} big />
+      <CameraSheet visible={cam} title="Чек или накладная" onClose={() => setCam(false)} onShot={onShot} />
+    </Page>
+  );
+}
+
+function DeliverScreen({ ctx, id }) {
+  const { st, uid, load, nav } = ctx;
+  const b = st.buys.find((x) => x.id === id);
+  const t = b && b.dest === 'ticket' && b.status === 'bought' ? st.mine.find((x) => x.id === b.ticket_id) : null;
+  const toObject = !!(b && b.dest === 'ticket' && b.status === 'bought');
+  const [used, setUsed] = useState(() => (b ? (b.lines || []).map((l) => String(l.qty)) : []));
+  const [cam, setCam] = useState(false);
+  const [shot, setShot] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (!b) return <Page><Muted>Закупка уже сдана.</Muted><Btn kind="ghost" title="На главную" onPress={() => nav('home')} /></Page>;
+  const target = toObject
+    ? (t && t.lat != null ? { lat: t.lat, lng: t.lng } : null)
+    : st.cfg.warehouse_lat != null ? { lat: st.cfg.warehouse_lat, lng: st.cfg.warehouse_lng }
+    : st.cfg.office_lat != null ? { lat: st.cfg.office_lat, lng: st.cfg.office_lng } : null;
+  const lim = toObject ? st.cfg.client_radius || 200 : st.cfg.office_radius || 150;
+  const lines = b.status === 'partial' ? (b.left_lines || []).filter((l) => l.qty > 0) : b.lines || [];
+  const onShot = async (uri) => {
+    try {
+      const fix = await getFix();
+      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      const up = await uploadPhoto(uri, uid, toObject ? 'buy-site' : 'buy-store');
+      setShot({ ...up, fix, dist: distM(fix, target) }); setCam(false);
+    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+  };
+  const submit = async () => {
+    if (!shot) return Alert.alert('Фото', toObject ? 'Сфотографируйте материал на объекте' : 'Сфотографируйте товар на складе');
+    let pUsed = null;
+    if (toObject) {
+      pUsed = used.map((v) => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : -1; });
+      if (pUsed.some((n, i) => n < 0 || n > Number(b.lines[i].qty))) return Alert.alert('Использовано', 'Количество должно быть от 0 до купленного');
+    }
+    setBusy(true);
+    try {
+      const r = await rpc('deliver_purchase', { p_id: b.id, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_used: pUsed });
+      await load();
+      if (r && r.status === 'partial') Alert.alert('Остаток', 'Неиспользованный материал нужно сдать на склад. Он остался в списке «Не сдано».');
+      nav(toObject ? 'ticket' : 'home', toObject ? { id: b.ticket_id } : undefined);
+    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+  };
+  const far = shot && shot.dist != null && shot.dist > lim;
+  return (
+    <Page>
+      <Label>{buyWhere(b, st.mine)}</Label>
+      <H1>{toObject ? 'Материал на объекте' : 'Сдать на склад'}</H1>
+      <Card>
+        <T style={{ fontWeight: '700' }}>{b.supplier} · {money(b.amount)}</T>
+        <Muted>Куплено {new Date(b.created_at).toLocaleDateString('ru-RU')} в {hm(b.created_at)}</Muted>
+        {!toObject ? lines.map((l, i) => <T key={i}>{lineText(l)}</T>) : null}
+      </Card>
+      {toObject ? (
+        t && t.status === 'onsite' ? (
+          <Card>
+            <T style={{ fontWeight: '700' }}>Сколько использовано на объекте</T>
+            <Muted>Что осталось, нужно будет сдать на склад.</Muted>
+            {b.lines.map((l, i) => (
+              <Field key={i} label={l.name + ' (куплено ' + l.qty + (l.unit ? ' ' + l.unit : '') + ')'} value={used[i]}
+                onChangeText={(v) => setUsed((p) => p.map((x, j) => (j === i ? v : x)))} keyboardType="decimal-pad" />
+            ))}
+          </Card>
+        ) : <Flag kind="warn">Отметить материал можно, когда по заказу {t ? t.num : ''} нажато «Я на месте».</Flag>
+      ) : null}
+      {!toObject || (t && t.status === 'onsite') ? <>
+        <Card>
+          <T style={{ fontWeight: '700' }}>{toObject ? 'Фото материала на объекте' : 'Фото товара на складе'}</T>
+          <Muted>{toObject ? 'Снимите установленный или разложенный материал так, чтобы было видно место.' : 'Снимите товар на складе. Руководитель сверит количество при приёмке.'}</Muted>
+          {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} /> : null}
+          {shot ? (shot.dist == null ? <Flag kind="note">Координаты сохранены</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)} от {toObject ? 'объекта' : 'склада'}. Отметка будет записана с отклонением.</Flag> : <Flag kind="ok">На месте · {fDist(shot.dist)}</Flag>) : null}
+          <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать'} onPress={() => setCam(true)} />
+        </Card>
+        <Btn title={toObject ? 'Отметить на объекте' : 'Сдано на склад'} onPress={submit} busy={busy} big />
+      </> : null}
+      <CameraSheet visible={cam} title={toObject ? 'Материал на объекте' : 'Товар на складе'} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
