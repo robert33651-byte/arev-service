@@ -250,7 +250,7 @@ function allIssues(from){const out=[];const t0=dayStart(Date.now());
 const todayIssues=()=>approved().filter(m=>todayStatus(m).flags.length).length;
 
 /* ---------- общий интерфейс ---------- */
-const kpi=(v,l,alert)=>'<div class="kpi'+(alert?' alert':'')+'"><b class="num">'+v+'</b><span>'+l+'</span></div>';
+const kpi=(v,l,alert,go)=>go?'<button class="kpi go'+(alert?' alert':'')+'" data-act="kgo" data-v="'+h(go)+'"><b class="num">'+v+'</b><span>'+l+'</span><i class="kgo">открыть →</i></button>':'<div class="kpi'+(alert?' alert':'')+'"><b class="num">'+v+'</b><span>'+l+'</span></div>';
 const chip=st=>{const s=ST[st]||ST.new;return '<span class="chip '+s[1]+'">'+s[0]+'</span>'};
 const back=(l,to)=>'<button class="btn ghost sm" style="align-self:flex-start" data-act="nav" data-v="'+to+'">'+I.back+h(l)+'</button>';
 const atop=(t,r)=>'<div class="atop"><h1>'+t+'</h1>'+(r||'')+'</div>';
@@ -267,7 +267,7 @@ const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min
 const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
 
 const ANAV=[['a-dash','Сводка','chart'],['a-day','Маршрут дня','route'],['a-photos','Фото работ','camera'],['a-buys','Закупки','box'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
-function shell(body){const n=S.view.name;const cur={'a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
+function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
  const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  return '<div class="adm"><aside class="side"><div class="brand"><span class="sunmark" aria-hidden="true"></span><div style="min-width:0"><b>'+h(S.cfg.company||'Arev Service')+'</b><small>Контроль сотрудников</small></div></div><nav class="nav">'+ANAV.map(i=>'<button class="'+(cur===i[0]?'on':'')+'" data-act="nav" data-v="'+i[0]+'">'+I[i[2]]+'<span class="lbl">'+i[1]+'</span>'+(cnt[i[0]]?'<span class="cnt">'+cnt[i[0]]+'</span>':'')+'</button>').join('')+'</nav><div class="foot"><button class="lnk" style="color:inherit" data-act="reload">Обновить данные</button><br><button class="lnk" style="color:inherit" data-act="logout">Выйти</button></div></aside><main class="amain">'+body+'</main></div>'}
 
@@ -287,12 +287,12 @@ function vDash(){const now=Date.now(),t0=dayStart(now);const staff=approved();co
  const ph=[];S.shifts.filter(s=>s.startAt>=monthStart()).forEach(s=>{ph.push(s.start.photo);if(s.end)ph.push(s.end.photo)});S.fuel.filter(r=>r.at>=monthStart()).forEach(r=>ph.push(r.photo));const chk=ph.filter(p=>S.checks[p]).length;
  const bOpen=S.buys.filter(b=>['bought','partial'].includes(b.status));const bLate=bOpen.filter(b=>buyFlags(b).some(f=>/уже/.test(f.t))).length;
  let s=atop('Сводка','<span class="muted">'+fDay(now)+', '+fHM(now)+'</span>')+officeWarn();
- s+='<div class="kgrid">'+kpi(on+' из '+staff.length,'на смене сейчас')+kpi(lateAbs,'опоздали или не пришли',lateAbs>0)+kpi(act,'заказов в работе'+(nw?', '+nw+' новых':''))+kpi(bad,'серьёзных отклонений за 7 дней',bad>0)+kpi(money(fsum),'топливо за месяц'+(over?', перерасход у '+over:''),over>0)+kpi(bOpen.length,'закупок не сдано'+(bLate?', просрочено '+bLate:''),bLate>0)+'</div>';
- s+='<div class="cols2"><section class="card"><div class="row between"><h2>Сегодня</h2><span class="tiny muted">нажмите на сотрудника, чтобы открыть маршрут</span><span class="muted small">график '+h(String(S.cfg.work_start||'').slice(0,5))+'–'+h(String(S.cfg.work_end||'').slice(0,5))+'</span></div>'+
+ s+='<div class="kgrid">'+kpi(on+' из '+staff.length,'на смене сейчас',false,'a-staff')+kpi(lateAbs,'опоздали или не пришли',lateAbs>0,'a-shifts|today')+kpi(act,'заказов в работе'+(nw?', '+nw+' новых':''),false,'a-orders|active')+kpi(bad,'серьёзных отклонений за 7 дней',bad>0,'a-issues')+kpi(money(fsum),'топливо за месяц'+(over?', перерасход у '+over:''),over>0,'a-fuel|month')+kpi(bOpen.length,'закупок не сдано'+(bLate?', просрочено '+bLate:''),bLate>0,'a-buys|open')+'</div>';
+ s+='<div class="stack"><section class="card"><div class="row between"><h2>Сегодня</h2><span class="tiny muted">нажмите на сотрудника, чтобы открыть маршрут</span><span class="muted small">график '+h(String(S.cfg.work_start||'').slice(0,5))+'–'+h(String(S.cfg.work_end||'').slice(0,5))+'</span></div>'+
   '<div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Пришёл</th><th>Ушёл</th><th>Км по GPS</th><th>Долгие стоянки</th><th>Фото работ</th><th>Не сдано закупок</th><th class="l">Отклонения</th></tr></thead><tbody>'+
   (rows.length?rows.map(r=>'<tr class="click" data-act="day" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+(r.st.sh?fHM(r.st.sh.startAt):'<span class="chip '+r.st.chip+'">'+r.st.label+'</span>')+'</td><td>'+(r.st.sh&&r.st.sh.endAt?fHM(r.st.sh.endAt):'—')+'</td>'+dashCells(r.m,r.st.sh,t0)+'<td class="l wrapc">'+flagCell(r.st.flags)+'</td></tr>').join(''):'<tr><td colspan="8" class="l muted">Сотрудников пока нет. Они регистрируются сами в приложении.</td></tr>')+'</tbody></table></div>'+
   '<div class="prot"><span class="label">Перекрёстные проверки за месяц</span><div class="row wrapx" style="gap:8px"><span class="chip '+(chk===ph.length?'c-ok':'c-warn')+'">ИИ проверил '+chk+' из '+ph.length+' фото</span><span class="chip '+(tr?'c-ok':'c-warn')+'">'+(tr?'Выписка по картам: '+fDay(tr.from)+' – '+fDay(tr.to-1):'Выписка по картам не загружена')+'</span></div></div></section>'+
-  '<section class="card"><div class="row between"><h2>Требует внимания</h2><span class="muted small">7 дней</span></div>'+issueList(iss.slice(0,15))+'</section></div>';
+  '<section class="card"><div class="row between"><h2>Требует внимания</h2><span class="muted small">7 дней</span></div>'+issueList(iss.slice(0,15))+(iss.length>15?'<button class="btn ghost sm" style="align-self:flex-start" data-act="kgo" data-v="a-issues">Все отклонения ('+iss.length+')</button>':'')+'</section></div>';
  return s}
 
 function vStaff(){const pend=S.staff.filter(x=>x.status==='pending');const from=monthStart();
@@ -495,6 +495,9 @@ function vPhotos(){const from=perFrom(S.per);const list=S.wph.filter(w=>w.at>=fr
    (fl.length?'<div>'+flagCell(fl)+'</div>':'')+'<div class="pgrid">'+gr.slice().reverse().map(w=>'<figure>'+thumb(w.path,'thumb lg')+'<figcaption class="tiny muted">'+WK[w.kind]+' '+fHM(w.at)+'</figcaption></figure>').join('')+'</div>'+(gr.some(w=>w.note)?'<p class="small" style="margin:0">'+gr.filter(w=>w.note).map(w=>h(w.note)).join(' · ')+'</p>':'')+'</div>'}).join(''):'<div class="empty" style="padding:18px"><p>Фото работ за этот период нет.</p></div>')+'</section>';
  return s}
 
+function vIssues(){const lv=S.ilv||'bad';const from=dayStart(Date.now())-6*864e5;let a=allIssues(from).filter(i=>!S.empF||i.who===S.empF);const nb=a.filter(i=>i.lv==='bad').length;if(lv==='bad')a=a.filter(i=>i.lv==='bad');
+ return back('Сводка','a-dash')+atop('Отклонения за 7 дней','<div class="row wrapx">'+empSel()+'<div class="filters"><button class="'+(lv==='bad'?'on':'')+'" data-act="ilv" data-v="bad">Серьёзные ('+nb+')</button><button class="'+(lv==='all'?'on':'')+'" data-act="ilv" data-v="all">Все</button></div></div>')+'<section class="card">'+issueList(a)+'</section>'}
+
 function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.work_start=String(f.c.work_start||'09:00').slice(0,5);f.c.work_end=String(f.c.work_end||'18:00').slice(0,5)}const c=f.c;
  const inp=(k,l,t,extra)=>'<div class="field"><label for="g-'+k+'">'+l+'</label><input id="g-'+k+'" class="inp num" type="'+(t||'number')+'" data-c="'+k+'" value="'+h(c[k]==null?'':c[k])+'"'+(extra||'')+'></div>';
  let s=atop('Настройки','<button class="btn primary" data-act="savecfg">Сохранить</button>');
@@ -507,7 +510,7 @@ function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.wor
  return s}
 
 /* ---------- рендер ---------- */
-const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-photos':vPhotos,'a-settings':vSettings};
+const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-issues':vIssues,'a-photos':vPhotos,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else root.innerHTML=shell((VIEWS[S.view.name]||vDash)());
@@ -527,6 +530,8 @@ const ACT={
  per(d){S.per=d.v;LS.set('per',d.v);render(true)},
  filter(d){S.filter=d.v;render(true)},
  bfilter(d){S.bf=d.v;render(true)},
+ ilv(d){S.ilv=d.v;render(true)},
+ kgo(d){const [v,x]=String(d.v).split('|');if(v==='a-shifts'||v==='a-fuel'){if(x){S.per=x;LS.set('per',x)}S.empF=null}if(v==='a-orders'&&x)S.filter=x;if(v==='a-buys'&&x){S.bf=x;S.empF=null}if(v==='a-issues'){S.ilv='bad';S.empF=null}go(v)},
  day(d){S.dayEmp=d.id;S.dayDate=ymd(Date.now());go('a-day')},
  dayopen(d){S.dayEmp=d.id;S.dayDate=d.v;go('a-day')},
  dayshift(d){const t=ymdTs(S.dayDate||ymd(Date.now()))+(+d.v)*864e5+36e5;if(t>Date.now()+864e5)return;S.dayDate=ymd(t);render(true)},
