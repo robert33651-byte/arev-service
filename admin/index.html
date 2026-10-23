@@ -6,6 +6,7 @@
 <title>Arev Service · Админка</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 html,body{margin:0}
 
@@ -250,6 +251,21 @@ a.chip{text-decoration:none}
 .sheet{max-width:480px;border-radius:20px;margin-bottom:auto;margin-top:auto}
 .scrim{align-items:center}
 .field label{font-size:13px;font-weight:600}
+
+/* маршрут дня */
+.daymap{height:min(62vh,560px);border-radius:var(--r);border:1px solid var(--line);overflow:hidden;background:var(--surface-2)}
+.dlegend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.dlegend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.mk{display:flex;align-items:center;justify-content:center;border-radius:999px;font:600 11px/1 var(--f-body);color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;padding:0 6px;height:22px}
+.leaflet-popup-content{font:13px/1.4 var(--f-body);margin:10px 12px}
+.leaflet-popup-content img{display:block;max-width:220px;max-height:220px;border-radius:8px;margin-top:6px}
+.daybar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.daybar input[type=date]{width:auto;padding:9px 12px;font-size:14px}
+.tlrow td:first-child{white-space:nowrap}
+.pgrp{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-top:1px solid var(--line)}
+.pgrp:first-child{border-top:0}
+.pgrid{display:flex;flex-wrap:wrap;gap:10px}
+.pgrid figure{margin:0;display:flex;flex-direction:column;gap:3px;align-items:center}
 </style>
 </head>
 <body>
@@ -258,6 +274,7 @@ a.chip{text-decoration:none}
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

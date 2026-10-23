@@ -209,7 +209,8 @@ create table if not exists public.purchases(
   photo text not null,                                -- накладная или чек
   lat double precision, lng double precision, acc real, device text,
   shift_id uuid references public.shifts(id),
-  dest text not null default 'warehouse' check (dest in ('warehouse','ticket')),   -- куда везёт: на склад или на объект
+  dest text not null default 'warehouse',            -- куда везёт: warehouse склад, site объект, ticket объект по заказу
+  site text,                                          -- объект: клиент или адрес (если без заказа)
   ticket_id uuid references public.tickets(id),                                   -- для какого заказа (если на объект)
   status text not null default 'bought' check (status in ('bought','partial','delivered','accepted','cancelled')),
   delivered_at timestamptz, delivered_photo text,
@@ -222,6 +223,22 @@ create table if not exists public.purchases(
 create index if not exists purchases_staff_time on public.purchases(staff_id, created_at desc);
 create index if not exists purchases_status on public.purchases(status, created_at desc);
 create index if not exists purchases_ticket on public.purchases(ticket_id);
+
+-- ---------- фото проделанных работ (с заказом или без) ----------
+create table if not exists public.work_photos(
+  id uuid primary key default gen_random_uuid(),
+  staff_id uuid not null references public.staff(id) on delete cascade,
+  at timestamptz not null default now(),
+  path text not null,
+  kind text not null default 'other' check (kind in ('before','after','other')),
+  object text,                                        -- объект: клиент или адрес
+  note text,
+  ticket_id uuid references public.tickets(id),
+  shift_id uuid references public.shifts(id),
+  lat double precision, lng double precision, acc real, device text
+);
+create index if not exists work_photos_staff_time on public.work_photos(staff_id, at desc);
+alter table public.work_photos enable row level security;
 alter table public.purchases enable row level security;
 
 -- новые настройки и поля (для баз, созданных прошлой версией схемы)
@@ -231,6 +248,9 @@ alter table public.config add column if not exists purchase_max_hours int not nu
 alter table public.config add column if not exists long_stop_min int not null default 30;
 alter table public.config add column if not exists stop_min int not null default 20;
 alter table public.shifts add column if not exists gps_km numeric;
+alter table public.purchases add column if not exists site text;
+alter table public.purchases drop constraint if exists purchases_dest_check;
+alter table public.purchases add constraint purchases_dest_check check (dest in ('warehouse','site','ticket'));
 alter table public.ai_checks drop constraint if exists ai_checks_kind_check;
 alter table public.ai_checks add constraint ai_checks_kind_check check (kind in ('odo','receipt','purchase'));
 
@@ -266,6 +286,8 @@ do $$ begin
   drop policy if exists tickets_admin on public.tickets;
   create policy tickets_admin on public.tickets for all to authenticated using (public.is_admin()) with check (public.is_admin());
   -- только админ
+  drop policy if exists work_photos_read on public.work_photos;
+  create policy work_photos_read on public.work_photos for select to authenticated using (staff_id = auth.uid() or public.is_admin());
   drop policy if exists purchases_read on public.purchases;
   create policy purchases_read on public.purchases for select to authenticated using (staff_id = auth.uid() or public.is_admin());
   drop policy if exists purchases_admin on public.purchases;
@@ -300,7 +322,7 @@ end $$;
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname in ('_me','_staff','_guard','_check_photo','_check_mock','register','update_car',
-             'start_shift','end_shift','add_fuel','add_track','get_pool','take_ticket','refuse_ticket','ticket_step','add_ticket_photo','_route_km','_gps_km','add_purchase','deliver_purchase')
+             'start_shift','end_shift','add_fuel','add_track','get_pool','take_ticket','refuse_ticket','ticket_step','add_ticket_photo','_route_km','_gps_km','add_purchase','deliver_purchase','add_work_photo')
   loop execute 'drop function ' || f.sig; end loop;
 end $$;
 
@@ -572,9 +594,9 @@ end $$;
 -- закупка: что, где и за сколько купил (фото накладной или чека обязательно).
 -- p_ticket: если товар везут сразу на объект, указывается заказ (свой и ещё не завершённый).
 create function public.add_purchase(p_supplier text, p_lines jsonb, p_amount int, p_photo text, p_lat double precision,
-  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null)
+  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null, p_site text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; r public.purchases; e text; sh uuid;
+declare s public.staff; r public.purchases; e text; sh uuid; d text;
 begin
   s := public._staff();
   e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
@@ -590,10 +612,11 @@ begin
                                           and status in ('assigned','enroute','onsite')) then
     return jsonb_build_object('error','BAD_TICKET');
   end if;
+  d := case when p_ticket is not null then 'ticket' when coalesce(trim(p_site),'') <> '' then 'site' else 'warehouse' end;
   select id into sh from public.shifts where staff_id = s.id and end_at is null;
-  insert into public.purchases(staff_id, supplier, lines, amount, photo, lat, lng, acc, device, shift_id, dest, ticket_id)
-  values (s.id, trim(p_supplier), p_lines, p_amount, p_photo, p_lat, p_lng, p_acc, p_device, sh,
-          case when p_ticket is null then 'warehouse' else 'ticket' end, p_ticket) returning * into r;
+  insert into public.purchases(staff_id, supplier, lines, amount, photo, lat, lng, acc, device, shift_id, dest, ticket_id, site)
+  values (s.id, trim(p_supplier), p_lines, p_amount, p_photo, p_lat, p_lng, p_acc, p_device, sh, d, p_ticket, nullif(trim(p_site),''))
+  returning * into r;
   return to_jsonb(r);
 end $$;
 
@@ -630,9 +653,11 @@ begin
     return to_jsonb(r);
   end if;
 
-  select * into t from public.tickets where id = r.ticket_id;
-  if t.id is null or t.staff_id is distinct from s.id or t.status <> 'onsite' then
-    return jsonb_build_object('error','NOT_ONSITE');
+  if r.dest = 'ticket' then
+    select * into t from public.tickets where id = r.ticket_id;
+    if t.id is null or t.staff_id is distinct from s.id or t.status <> 'onsite' then
+      return jsonb_build_object('error','NOT_ONSITE');
+    end if;
   end if;
   -- использовано по строкам; если не передано, считаем, что использовано всё
   if p_used is null then
@@ -656,19 +681,41 @@ begin
     join jsonb_array_elements(used) with ordinality b(u, m) on n = m;
   update public.purchases set status = case when has_left then 'partial' else 'delivered' end,
          delivered_at = now(), delivered_photo = p_photo, delivered_lat = p_lat, delivered_lng = p_lng,
-         delivered_dist = public.dist_m(p_lat, p_lng, t.lat, t.lng),
+         delivered_dist = case when r.dest = 'ticket' then public.dist_m(p_lat, p_lng, t.lat, t.lng) end,
          used_lines = used, left_lines = case when has_left then lft end
    where id = r.id returning * into r;
+  return to_jsonb(r);
+end $$;
+
+-- фото проделанной работы: камера приложения, место и время пишет сервер
+create function public.add_work_photo(p_path text, p_kind text, p_object text, p_note text, p_lat double precision,
+  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; r public.work_photos; e text; sh uuid;
+begin
+  s := public._staff();
+  e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
+  e := public._check_photo(p_path);        if e is not null then return jsonb_build_object('error', e); end if;
+  select id into sh from public.shifts where staff_id = s.id and end_at is null;
+  if sh is null then return jsonb_build_object('error','NO_OPEN_SHIFT'); end if;
+  if coalesce(trim(p_object),'') = '' and p_ticket is null then return jsonb_build_object('error','NEED_OBJECT'); end if;
+  if p_ticket is not null and not exists(select 1 from public.tickets where id = p_ticket and staff_id = s.id) then
+    return jsonb_build_object('error','BAD_TICKET');
+  end if;
+  insert into public.work_photos(staff_id, path, kind, object, note, ticket_id, shift_id, lat, lng, acc, device)
+  values (s.id, p_path, case when p_kind in ('before','after') then p_kind else 'other' end, nullif(trim(p_object),''),
+          nullif(trim(p_note),''), p_ticket, sh, p_lat, p_lng, p_acc, p_device)
+  returning * into r;
   return to_jsonb(r);
 end $$;
 
 -- права на вызов функций
 revoke all on function public.register, public.update_car, public.start_shift, public.end_shift, public.add_fuel,
   public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo,
-  public.add_purchase, public.deliver_purchase from public, anon;
+  public.add_purchase, public.deliver_purchase, public.add_work_photo from public, anon;
 grant execute on function public.register, public.update_car, public.start_shift, public.end_shift, public.add_fuel,
   public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo,
-  public.add_purchase, public.deliver_purchase, public.is_admin to authenticated;
+  public.add_purchase, public.deliver_purchase, public.add_work_photo, public.is_admin to authenticated;
 revoke all on function public._staff, public._guard, public._check_photo, public._route_km, public._gps_km from public, anon, authenticated;
 
 -- =====================================================================

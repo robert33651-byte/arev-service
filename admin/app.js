@@ -16,6 +16,8 @@ const I={
  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
  back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+ camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+ route:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></svg>',
  box:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
  pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
@@ -47,7 +49,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('arevadm.'+k);return v==null
 
 /* ---------- состояние ---------- */
 const S={session:null,isAdmin:false,loaded:false,view:{name:'a-dash',p:{}},form:{},filter:'active',per:LS.get('per','week'),empF:null,
- cfg:{},staff:[],shifts:[],fuel:[],tickets:[],buys:[],bf:'open',tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
+ cfg:{},staff:[],shifts:[],fuel:[],tickets:[],buys:[],bf:'open',wph:[],dayEmp:null,dayDate:null,dayPts:{},dayLoading:null,map:null,dayCtx:null,tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
 const tech=id=>S.staff.find(m=>m.id===id);
 const approved=()=>S.staff.filter(m=>m.status==='approved');
 const T=id=>S.tickets.find(t=>t.id===id);
@@ -70,7 +72,8 @@ async function load(){
   pages(()=>sb.from('ai_checks').select('*').order('photo')),
   pages(()=>sb.from('card_tx').select('*').gte('at',from).order('at',{ascending:false})),
   pages(()=>sb.from('track_points').select('staff_id,at,device_at,lat,lng,acc,mocked').gte('at',from8).order('id')),
-  pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false}))
+  pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false})),
+  pages(()=>sb.from('work_photos').select('*').gte('at',from).order('at',{ascending:false}))
  ]);
  const err=q.find(r=>r&&r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
  S.cfg=q[0].data||{};S.staff=q[1].data||[];
@@ -86,6 +89,8 @@ async function load(){
  S.tx=(q[7].data||[]).map(x=>({...x,at:ms(x.at)}));
  S.track={};(q[8].data||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,acc:p.acc,at:ms(p.device_at||p.at),mocked:p.mocked,what:'трек'})});
  Object.values(S.track).forEach(a=>a.sort((x,y)=>x.at-y.at));
+ S.wph=(q[10].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
+ S.dayPts={};
  S.buys=(q[9].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.created_at),dAt:ms(x.delivered_at),lAt:ms(x.left_at),accAt:ms(x.accepted_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
  const ids=S.tickets.map(t=>t.id);S.tphotos={};
  if(ids.length){for(let i=0;i<ids.length;i+=150){const r=await sb.from('ticket_photos').select('*').in('ticket_id',ids.slice(i,i+150));(r.data||[]).forEach(p=>{(S.tphotos[p.ticket_id]=S.tphotos[p.ticket_id]||[]).push({...p,at:ms(p.at)})})}}
@@ -115,19 +120,20 @@ function aiRcpt(rec){const f=[];const ch=S.checks[rec.photo];if(!ch)return f;con
  if(r.nonFuel)f.push({lv:'warn',t:'ИИ: в чеке есть не только топливо'});return f}
 /* --- маршрут по GPS: километры и стоянки --- */
 const whPoint=()=>S.cfg.warehouse_lat!=null?{lat:S.cfg.warehouse_lat,lng:S.cfg.warehouse_lng}:office();
-function trackOf(id,a,b){return (S.track[id]||[]).filter(p=>p.at>=a&&p.at<=b&&!p.mocked&&(p.acc==null||p.acc<=100))}
-function gpsKm(id,a,b){const p=trackOf(id,a,b);if(p.length<2)return null;let d=0;for(let i=1;i<p.length;i++){const x=distM(p[i-1],p[i]),dt=(p[i].at-p[i-1].at)/1000;if(dt>0&&x/dt<55)d+=x}return d/1000}
+function trackOf(id,a,b,pts){return (pts||S.track[id]||[]).filter(p=>p.at>=a&&p.at<=b&&!p.mocked&&(p.acc==null||p.acc<=100))}
+function gpsKm(id,a,b,pts){const p=trackOf(id,a,b,pts);if(p.length<2)return null;let d=0;for(let i=1;i<p.length;i++){const x=distM(p[i-1],p[i]),dt=(p[i].at-p[i-1].at)/1000;if(dt>0&&x/dt<55)d+=x}return d/1000}
 const shiftGps=sh=>sh.gps_km!=null?+sh.gps_km:gpsKm(sh.masterId,sh.startAt,sh.endAt||Date.now());
 function placeOf(id,p){const o=office(),w=whPoint();
  if(o&&distM(p,o)<=Math.max(250,+S.cfg.office_radius||150))return{k:'office',t:'Офис'};
  if(w&&distM(p,w)<=250)return{k:'office',t:'Склад'};
  const t=S.tickets.find(t=>t.techId===id&&t.loc&&distM(p,t.loc)<=(+S.cfg.client_radius||200)+100);if(t)return{k:'client',t:'Клиент '+t.num};
+ const wf=S.wph.find(x=>x.masterId===id&&x.loc&&distM(p,x.loc)<=250);if(wf)return{k:'client',t:'Объект: '+(wf.object||'фото работ')};
  const b=S.buys.find(b=>b.masterId===id&&b.loc&&distM(p,b.loc)<=250);if(b)return{k:'shop',t:'Закупка: '+b.supplier};
  const r=S.fuel.find(r=>r.masterId===id&&r.loc&&distM(p,r.loc)<=250);if(r)return{k:'fuel',t:'Заправка'};
  return{k:'unknown',t:'Неизвестное место'}}
 // стоянка: подряд идущие точки в радиусе 200 м. Телефон не шлёт точки, пока машина стоит,
 // поэтому конец стоянки = время следующей точки минус время на дорогу до неё (~40 км/ч).
-function stopsOf(id,a,b){const p=trackOf(id,a,b);const out=[];const minMs=(+S.cfg.stop_min||20)*60000;let i=0;
+function stopsOf(id,a,b,pts){const p=trackOf(id,a,b,pts);const out=[];const minMs=(+S.cfg.stop_min||20)*60000;let i=0;
  while(i<p.length){const anc=p[i];let j=i;while(j+1<p.length&&distM(anc,p[j+1])<=200)j++;const nx=p[j+1];
   let end,gap=false;if(nx){const d=distM(p[j],nx)||0;end=Math.max(p[j].at,nx.at-d/11*1000);gap=d>3000&&nx.at-p[j].at>minMs}else end=Math.max(p[j].at,Math.min(b,Date.now()));
   if(end-anc.at>=minMs)out.push({at:anc.at,end,dur:end-anc.at,lat:anc.lat,lng:anc.lng,place:placeOf(id,anc),gap});i=j+1}
@@ -138,7 +144,7 @@ function longStops(sh){const lim=(+S.cfg.long_stop_min||30)*60000;return stopsOf
 const BST={bought:['Не сдано','c-warn'],partial:['Остаток не сдан','c-warn'],delivered:['Ждёт приёмки','c-info'],accepted:['Принято','c-ok'],cancelled:['Отменено','c-muted']};
 const lineTxt=l=>h(l.name)+' — '+n1(l.qty)+(l.unit?' '+h(l.unit):'');
 const leftLines=b=>(b.left_lines||[]).filter(l=>+l.qty>0);
-const acceptLines=b=>b.dest==='ticket'?leftLines(b):(b.lines||[]);
+const acceptLines=b=>b.dest!=='warehouse'?leftLines(b):(b.lines||[]);
 function aiBuy(b){const f=[];const ch=S.checks[b.photo];if(!ch)return f;const r=ch.result||{};
  if(r.isReceipt===false)f.push({lv:'bad',t:'ИИ: на фото не чек и не накладная'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
  if(r.handwritten)f.push({lv:'warn',t:'ИИ: документ написан от руки'});
@@ -146,12 +152,13 @@ function aiBuy(b){const f=[];const ch=S.checks[b.photo];if(!ch)return f;const r=
  if(r.date){const m=String(r.date).match(/(\d{1,2})\D(\d{1,2})\D(\d{2,4})/);if(m){const d=new Date(+(m[3].length===2?'20'+m[3]:m[3]),+m[2]-1,+m[1]).getTime();if(Math.abs(d-dayStart(b.at))>864e5)f.push({lv:'bad',t:'ИИ: чек от '+r.date+', а закупка внесена '+fDay(b.at)})}}
  if(r.note)f.push({lv:'warn',t:'ИИ: '+r.note});return f}
 function buyFlags(b){const c=S.cfg,f=[];if(b.status==='cancelled')return f;const now=Date.now();const maxH=(+c.purchase_max_hours||24)*36e5;const radO=+c.office_radius||150,radC=+c.client_radius||200;const t=b.ticket_id?T(b.ticket_id):null;
- if(b.status==='bought'&&now-b.at>maxH)f.push({lv:'bad',t:(b.dest==='ticket'?'Не отмечено на объекте':'Не сдано на склад')+' уже '+fDur(now-b.at)});
+ if(b.status==='bought'&&now-b.at>maxH)f.push({lv:'bad',t:(b.dest!=='warehouse'?'Не отмечено на объекте':'Не сдано на склад')+' уже '+fDur(now-b.at)});
  if(b.status==='partial'&&now-(b.dAt||b.at)>maxH)f.push({lv:'bad',t:'Остаток не сдан на склад уже '+fDur(now-(b.dAt||b.at))});
  if(b.delivered_dist!=null&&b.delivered_dist>(b.dest==='ticket'?radC:radO))f.push({lv:'bad',t:(b.dest==='ticket'?'На объекте отмечено в '+fDist(b.delivered_dist)+' от объекта':'Сдача отмечена в '+fDist(b.delivered_dist)+' от склада')});
  if(b.left_dist!=null&&b.left_dist>radO)f.push({lv:'bad',t:'Остаток сдан в '+fDist(b.left_dist)+' от склада'});
  if(t&&t.status==='cancelled')f.push({lv:'bad',t:'Заказ '+t.num+' отменён, а материал записан на него'});
  if(t&&t.rating===1&&/не было/.test(t.review||''))f.push({lv:'bad',t:'Клиент заказа '+t.num+' сказал, что мастера не было'});
+ if(b.dest==='site'&&b.delivered_lat!=null){const dl={lat:b.delivered_lat,lng:b.delivered_lng};if(!S.wph.some(w=>w.masterId===b.masterId&&w.loc&&Math.abs(w.at-b.dAt)<864e5&&distM(w.loc,dl)<=300))f.push({lv:'warn',t:'Материал отмечен там, где нет фото работ'})}
  if(b.shortage)f.push({lv:'bad',t:'Недостача при приёмке'+(b.accept_note?': '+b.accept_note:'')});
  if(b.status==='delivered'&&now-(b.lAt||b.dAt||b.at)>864e5)f.push({lv:'warn',t:'Ждёт приёмки больше суток'});
  if(!b.shift_id)f.push({lv:'warn',t:'Куплено вне смены'});
@@ -173,6 +180,7 @@ function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const
   const ok=odoKm(sh),rk=routeKm(sh),gk=shiftGps(sh);if(ok!=null&&ok>rk*1.3+10)f.push({lv:'bad',t:'Пробег за смену '+ok+' км, по заказам '+n1(rk)+' км'});
   if(ok!=null&&gk!=null&&gk>=1&&ok>gk*1.25+10)f.push({lv:'bad',t:'По одометру '+ok+' км, а по GPS '+n1(gk)+' км'});
   if(gk!=null&&gk>rk*1.5+15&&!(ok!=null&&ok>rk*1.3+10))f.push({lv:'warn',t:'По GPS '+n1(gk)+' км, по заказам '+n1(rk)+' км'});
+  if(sh.endAt-sh.startAt>3*36e5&&!S.wph.some(w=>w.masterId===sh.masterId&&w.at>=sh.startAt&&w.at<=sh.endAt)&&!Object.values(S.tphotos).some(a=>a.some(p=>p.staff_id===sh.masterId&&p.at>=sh.startAt&&p.at<=sh.endAt)))f.push({lv:'warn',t:'За смену нет фото работ'});
   f.push(...aiOdo(e));
  }else if(dayStart(sh.startAt)<dayStart(Date.now()))f.push({lv:'warn',t:'Смена не закрыта'});
  const tk=S.tickets.filter(t=>t.techId===sh.masterId&&t.times.enroute>=sh.startAt&&t.times.enroute<=(sh.endAt||Date.now())).sort((a,b)=>a.times.enroute-b.times.enroute);
@@ -204,7 +212,9 @@ function fuelBal(id,from){const m=tech(id);const norm=normOf(m);const sh=S.shift
  const rk=sh.reduce((a,s)=>a+routeKm(s),0);const ok=sh.reduce((a,s)=>{const k=odoKm(s);return a+(k>0?k:0)},0);
  const tx=txOf(id).filter(x=>x.at>=from);const useTx=tx.length>0;const fl=S.fuel.filter(r=>r.masterId===id&&r.at>=from&&!(useTx&&covered(r.at)));
  const filled=tx.reduce((a,x)=>a+(+x.liters||0),0)+fl.reduce((a,r)=>a+(+r.liters||0),0);const sum=tx.reduce((a,x)=>a+(+x.amount||0),0)+fl.reduce((a,r)=>a+(+r.sum||0),0);
- const allowed=rk*norm/100;const over=filled-allowed;return{rk,ok,allowed,filled,sum,over,bad:over>Math.max(5,allowed*0.2),norm,days:sh.length,unit:fuelUnit(m),src:useTx?'выписка':'приложение',normOk:!!(m&&m.norm_approved)}}
+ const gk=sh.reduce((a,s)=>{const g=shiftGps(s);return a+(g>0?g:0)},0);const base=sh.reduce((a,s)=>{const g=shiftGps(s);return a+(g!=null&&g>=1?g:routeKm(s))},0);
+ const ord=S.shifts.filter(s=>s.masterId===id).sort((a,b)=>a.startAt-b.startAt);let off=0;for(let i=1;i<ord.length;i++){const pv=ord[i-1],cu=ord[i];if(cu.startAt>=from&&pv.end&&pv.end.odo!=null&&cu.start.odo!=null&&cu.start.odo>pv.end.odo)off+=cu.start.odo-pv.end.odo}
+ const allowed=base*norm/100;const over=filled-allowed;return{gk,off,fact:ok>0?filled/ok*100:null,rk,ok,allowed,filled,sum,over,bad:over>Math.max(5,allowed*0.2),norm,days:sh.length,unit:fuelUnit(m),src:useTx?'выписка':'приложение',normOk:!!(m&&m.norm_approved)}}
 function ticketFlags(t){const f=[];const c=S.cfg;const g=t.gps,tm=t.times;const rad=+c.client_radius||200;
  if(g.onsite&&g.onsite.dist!=null&&g.onsite.dist>rad)f.push({lv:'bad',t:'«На месте» отмечено в '+fDist(g.onsite.dist)+' от объекта'});
  if(g.done&&g.done.dist!=null&&g.done.dist>rad)f.push({lv:'bad',t:'Работа завершена в '+fDist(g.done.dist)+' от объекта'});
@@ -256,7 +266,7 @@ const perSeg=()=>'<div class="seg" style="width:min(100%,360px)">'+PERS.map(x=>'
 const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min(100%,260px);padding:9px 12px;font-size:14px"><option value="">Все сотрудники</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(S.empF===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select>';
 const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
 
-const ANAV=[['a-dash','Сводка','chart'],['a-staff','Сотрудники','team'],['a-shifts','Смены','clock'],['a-fuel','Топливо','fuel'],['a-orders','Заявки','list'],['a-buys','Закупки','box'],['a-settings','Настройки','cog']];
+const ANAV=[['a-dash','Сводка','chart'],['a-day','Маршрут дня','route'],['a-photos','Фото работ','camera'],['a-buys','Закупки','box'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
  const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  return '<div class="adm"><aside class="side"><div class="brand"><span class="sunmark" aria-hidden="true"></span><div style="min-width:0"><b>'+h(S.cfg.company||'Arev Service')+'</b><small>Контроль сотрудников</small></div></div><nav class="nav">'+ANAV.map(i=>'<button class="'+(cur===i[0]?'on':'')+'" data-act="nav" data-v="'+i[0]+'">'+I[i[2]]+'<span class="lbl">'+i[1]+'</span>'+(cnt[i[0]]?'<span class="cnt">'+cnt[i[0]]+'</span>':'')+'</button>').join('')+'</nav><div class="foot"><button class="lnk" style="color:inherit" data-act="reload">Обновить данные</button><br><button class="lnk" style="color:inherit" data-act="logout">Выйти</button></div></aside><main class="amain">'+body+'</main></div>'}
@@ -267,6 +277,8 @@ function vLogin(){const f=S.form;return '<div class="loginwrap"><div class="card
  '<button class="btn primary block" data-act="login">Войти</button><button class="btn ghost block" data-act="signup">Создать аккаунт администратора</button></div></div>'}
 function vClaim(){return '<div class="loginwrap"><div class="card" style="max-width:460px"><h2>Нет прав администратора</h2><p class="small">Вы вошли как '+h(S.session.user.email)+'. Если вы владелец и это первый вход, нажмите кнопку ниже. Она сработает только один раз, пока в системе нет ни одного администратора.</p><button class="btn primary block" data-act="claim">Стать администратором</button><button class="btn ghost block" data-act="logout">Выйти</button></div></div>'}
 
+function dashCells(m,sh,t0){const gk=sh?shiftGps(sh):null;const ls=sh?longStops(sh):[];const wp=S.wph.filter(w=>w.masterId===m.id&&w.at>=t0).length;const nb=S.buys.filter(b=>b.masterId===m.id&&['bought','partial'].includes(b.status)).length;
+ return '<td>'+(gk!=null?n1(gk):'—')+'</td><td class="'+(ls.length?'over':'')+'">'+(ls.length?ls.length+' · '+fDur(ls.reduce((a,x)=>a+x.dur,0)):sh?'нет':'—')+'</td><td class="'+(sh&&!wp&&Date.now()-sh.startAt>3*36e5?'over':'')+'">'+(sh||wp?wp:'—')+'</td><td class="'+(nb?'over':'')+'">'+(nb||'—')+'</td>'}
 function vDash(){const now=Date.now(),t0=dayStart(now);const staff=approved();const rows=staff.map(m=>({m,st:todayStatus(m)}));
  const on=rows.filter(r=>r.st.code==='on').length;const lateAbs=rows.filter(r=>r.st.code==='absent'||r.st.flags.some(f=>/Опоздание/.test(f.t))).length;
  const act=S.tickets.filter(t=>['assigned','enroute','onsite'].includes(t.status)).length;const nw=S.tickets.filter(t=>t.status==='new').length;
@@ -276,9 +288,9 @@ function vDash(){const now=Date.now(),t0=dayStart(now);const staff=approved();co
  const bOpen=S.buys.filter(b=>['bought','partial'].includes(b.status));const bLate=bOpen.filter(b=>buyFlags(b).some(f=>/уже/.test(f.t))).length;
  let s=atop('Сводка','<span class="muted">'+fDay(now)+', '+fHM(now)+'</span>')+officeWarn();
  s+='<div class="kgrid">'+kpi(on+' из '+staff.length,'на смене сейчас')+kpi(lateAbs,'опоздали или не пришли',lateAbs>0)+kpi(act,'заказов в работе'+(nw?', '+nw+' новых':''))+kpi(bad,'серьёзных отклонений за 7 дней',bad>0)+kpi(money(fsum),'топливо за месяц'+(over?', перерасход у '+over:''),over>0)+kpi(bOpen.length,'закупок не сдано'+(bLate?', просрочено '+bLate:''),bLate>0)+'</div>';
- s+='<div class="cols2"><section class="card"><div class="row between"><h2>Сегодня</h2><span class="muted small">график '+h(String(S.cfg.work_start||'').slice(0,5))+'–'+h(String(S.cfg.work_end||'').slice(0,5))+'</span></div>'+
-  '<div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Пришёл</th><th>Ушёл</th><th class="l">Сейчас</th><th class="l">Отклонения</th></tr></thead><tbody>'+
-  (rows.length?rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+(r.st.sh?fHM(r.st.sh.startAt):'<span class="chip '+r.st.chip+'">'+r.st.label+'</span>')+'</td><td>'+(r.st.sh&&r.st.sh.endAt?fHM(r.st.sh.endAt):'—')+'</td><td class="l">'+h(nowDoing(r.m)||(r.st.code==='on'?'в офисе / свободен':''))+'</td><td class="l wrapc">'+flagCell(r.st.flags)+'</td></tr>').join(''):'<tr><td colspan="5" class="l muted">Сотрудников пока нет. Они регистрируются сами в приложении.</td></tr>')+'</tbody></table></div>'+
+ s+='<div class="cols2"><section class="card"><div class="row between"><h2>Сегодня</h2><span class="tiny muted">нажмите на сотрудника, чтобы открыть маршрут</span><span class="muted small">график '+h(String(S.cfg.work_start||'').slice(0,5))+'–'+h(String(S.cfg.work_end||'').slice(0,5))+'</span></div>'+
+  '<div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Пришёл</th><th>Ушёл</th><th>Км по GPS</th><th>Долгие стоянки</th><th>Фото работ</th><th>Не сдано закупок</th><th class="l">Отклонения</th></tr></thead><tbody>'+
+  (rows.length?rows.map(r=>'<tr class="click" data-act="day" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+(r.st.sh?fHM(r.st.sh.startAt):'<span class="chip '+r.st.chip+'">'+r.st.label+'</span>')+'</td><td>'+(r.st.sh&&r.st.sh.endAt?fHM(r.st.sh.endAt):'—')+'</td>'+dashCells(r.m,r.st.sh,t0)+'<td class="l wrapc">'+flagCell(r.st.flags)+'</td></tr>').join(''):'<tr><td colspan="8" class="l muted">Сотрудников пока нет. Они регистрируются сами в приложении.</td></tr>')+'</tbody></table></div>'+
   '<div class="prot"><span class="label">Перекрёстные проверки за месяц</span><div class="row wrapx" style="gap:8px"><span class="chip '+(chk===ph.length?'c-ok':'c-warn')+'">ИИ проверил '+chk+' из '+ph.length+' фото</span><span class="chip '+(tr?'c-ok':'c-warn')+'">'+(tr?'Выписка по картам: '+fDay(tr.from)+' – '+fDay(tr.to-1):'Выписка по картам не загружена')+'</span></div></div></section>'+
   '<section class="card"><div class="row between"><h2>Требует внимания</h2><span class="muted small">7 дней</span></div>'+issueList(iss.slice(0,15))+'</section></div>';
  return s}
@@ -332,9 +344,9 @@ function vFuel(){const from=perFrom(S.per);const staff=approved().filter(m=>!S.e
  let s=atop('Топливо','<div class="row wrapx">'+empSel()+perSeg()+'</div>');
  s+='<section class="card tight"><div class="row between wrapx"><div><b>Выписка по топливным картам</b><div class="small muted">'+(tr?'Загружено '+S.tx.length+' операций за '+fDay(tr.from)+' – '+fDay(tr.to-1)+'. Литры из выписки заменяют то, что вводят сотрудники.':'Главная защита от занижения литров. Загрузите выписку от поставщика карт (Excel или CSV) и укажите номер карты у каждого сотрудника.')+'</div></div><button class="btn dark sm" data-act="imppick">'+I.plus+'Загрузить выписку</button></div></section>';
  s+=impPanel()+aiBar();
- s+='<section class="card"><h2>Баланс</h2><div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Смен</th><th>Км по заказам</th><th>Км за смены</th><th>Расход</th><th>Положено</th><th>Залито</th><th>Разница</th><th>Сумма</th><th>Источник</th></tr></thead><tbody>'+
-  rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+r.days+'</td><td>'+n1(r.rk)+'</td><td>'+n1(r.ok)+'</td><td>'+(r.normOk?n1(r.norm)+' '+r.unit+'/100':'<span style="color:var(--warn)">не утверждён</span>')+'</td><td>'+n1(r.allowed)+' '+r.unit+'</td><td>'+n1(r.filled)+' '+r.unit+'</td><td class="'+(r.bad?'over':'okv')+'">'+(r.over>0?'+':'')+n1(r.over)+' '+r.unit+'</td><td>'+money(r.sum)+'</td><td>'+(r.src==='выписка'?'<span class="chip c-ok">выписка</span>':'<span class="chip c-warn">со слов</span>')+'</td></tr>').join('')+
-  '<tr class="tot"><td>Итого</td><td colspan="7"></td><td>'+money(tot)+'</td><td></td></tr></tbody></table></div><p class="tiny muted">Положено = км по заказам (офис → клиенты → офис × коэффициент дорог) × утверждённый расход.</p></section>';
+ s+='<section class="card"><h2>Баланс</h2><div class="tblw flat"><table class="tbl"><thead><tr><th>Сотрудник</th><th>Смен</th><th>Км по GPS</th><th>Км по одометру</th><th>Км вне смен</th><th>Расход</th><th>Факт. расход</th><th>Положено</th><th>Залито</th><th>Разница</th><th>Сумма</th><th>Источник</th></tr></thead><tbody>'+
+  rows.map(r=>'<tr class="click" data-act="ago" data-v="a-emp" data-id="'+h(r.m.id)+'"><td><b>'+h(r.m.name)+'</b></td><td>'+r.days+'</td><td>'+n1(r.gk)+'</td><td>'+n1(r.ok)+'</td><td class="'+(r.off>50?'over':'')+'">'+n1(r.off)+'</td><td>'+(r.normOk?n1(r.norm)+' '+r.unit+'/100':'<span style="color:var(--warn)">не утверждён</span>')+'</td><td>'+(r.fact!=null?n1(r.fact):'—')+'</td><td>'+n1(r.allowed)+' '+r.unit+'</td><td>'+n1(r.filled)+' '+r.unit+'</td><td class="'+(r.bad?'over':'okv')+'">'+(r.over>0?'+':'')+n1(r.over)+' '+r.unit+'</td><td>'+money(r.sum)+'</td><td>'+(r.src==='выписка'?'<span class="chip c-ok">выписка</span>':'<span class="chip c-warn">со слов</span>')+'</td></tr>').join('')+
+  '<tr class="tot"><td>Итого</td><td colspan="9"></td><td>'+money(tot)+'</td><td></td></tr></tbody></table></div><p class="tiny muted">Положено = км по GPS-треку смен × утверждённый расход (если трека нет — км по заказам). Км вне смен: разница одометра между вечером и следующим утром, это личные поездки. Факт. расход = залито / км по одометру × 100.</p></section>';
  const txl=[];staff.forEach(m=>txOf(m.id).filter(x=>x.at>=from).forEach(x=>{const f=txFlags(x,m.id);if(f.length)txl.push({x,m,f})}));txl.sort((a,b)=>b.x.at-a.x.at);
  if(tr)s+='<section class="card"><h2>Расхождения с выпиской</h2>'+(txl.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>Дата</th><th class="l">Сотрудник</th><th>Объём</th><th>Сумма</th><th class="l">АЗС</th><th class="l">Что не так</th></tr></thead><tbody>'+txl.map(r=>'<tr><td>'+fDay(r.x.at)+', '+fHM(r.x.at)+'</td><td class="l">'+h(r.m.name)+'</td><td>'+n1(r.x.liters)+' '+fuelUnit(r.m)+'</td><td>'+money(r.x.amount)+'</td><td class="l">'+h(r.x.station||'')+'</td><td class="l wrapc">'+flagCell(r.f)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small okv">Все операции по картам совпадают с приложением.</p>')+'</section>';
  const fl=S.fuel.filter(r=>r.at>=from&&staff.some(m=>m.id===r.masterId)).sort((a,b)=>b.at-a.at);
@@ -346,7 +358,7 @@ function vEmp(){const m=tech(S.view.p.id);if(!m)return back('Сотрудник�
  const sh=S.shifts.filter(x=>x.masterId===m.id&&x.startAt>=from).sort((a,b)=>b.startAt-a.startAt);const b=fuelBal(m.id,from);const st=todayStatus(m);
  const fl=sh.reduce((a,x)=>a.concat(shiftFlags(x)),[]);const tp=teleports(m.id).filter(x=>x.at>=from);const al=S.alerts.filter(a=>a.staff_id===m.id&&a.at>=from);const hours=sh.filter(x=>x.endAt).reduce((a,x)=>a+(x.endAt-x.startAt)/36e5,0);
  const orders=S.tickets.filter(t=>t.techId===m.id).slice(0,15);const fuel=S.fuel.filter(r=>r.masterId===m.id&&r.at>=from);
- let s=back('Сотрудники','a-staff')+'<div class="atop"><div class="row"><span class="avatar" style="width:52px;height:52px;font-size:18px">'+h(initials(m.name))+'</span><div><h1>'+h(m.name)+'</h1><div class="muted small"><span class="num" style="user-select:all">'+h(m.phone)+'</span> · '+h(m.car_model||'машина не указана')+(m.car_plate?' · '+h(m.car_plate):'')+(m.tank?' · бак '+m.tank:'')+'</div></div></div><div class="row wrapx"><span class="chip '+st.chip+'">Сегодня: '+st.label+'</span>'+(m.status==='approved'?'<button class="btn danger sm" data-act="block" data-id="'+h(m.id)+'">Приостановить</button>':'<button class="btn ghost sm" data-act="restore" data-id="'+h(m.id)+'">Вернуть</button>')+'</div></div>';
+ let s=back('Сотрудники','a-staff')+'<div class="atop"><div class="row"><span class="avatar" style="width:52px;height:52px;font-size:18px">'+h(initials(m.name))+'</span><div><h1>'+h(m.name)+'</h1><div class="muted small"><span class="num" style="user-select:all">'+h(m.phone)+'</span> · '+h(m.car_model||'машина не указана')+(m.car_plate?' · '+h(m.car_plate):'')+(m.tank?' · бак '+m.tank:'')+'</div></div></div><div class="row wrapx"><button class="btn dark sm" data-act="day" data-id="'+h(m.id)+'">'+I.route+'Маршрут за сегодня</button><span class="chip '+st.chip+'">Сегодня: '+st.label+'</span>'+(m.status==='approved'?'<button class="btn danger sm" data-act="block" data-id="'+h(m.id)+'">Приостановить</button>':'<button class="btn ghost sm" data-act="restore" data-id="'+h(m.id)+'">Вернуть</button>')+'</div></div>';
  s+='<div class="kgrid">'+kpi(sh.length,'смен в этом месяце')+kpi(n1(hours),'часов отработано')+kpi(fl.filter(x=>/Опоздание/.test(x.t)).length,'опозданий',fl.some(x=>/Опоздание/.test(x.t)))+kpi(fl.filter(x=>x.lv==='bad').length+tp.length+al.length,'серьёзных отклонений',fl.some(x=>x.lv==='bad')||tp.length||al.length)+kpi(n1(b.filled)+' / '+n1(b.allowed)+' '+b.unit,'топливо: залито / положено ('+b.src+')',b.bad)+'</div>';
  s+='<section class="card"><h2>Настройки контроля</h2><div class="cols"><div class="field"><label for="e-card">Последние 4 цифры топливной карты</label><div class="row"><input id="e-card" class="inp num" inputmode="numeric" maxlength="8" data-f="card" value="'+h(f.card!=null?f.card:(m.card_last4||''))+'" placeholder="1234"><button class="btn ghost sm" data-act="setcard" data-id="'+h(m.id)+'">Сохранить</button></div></div>'+
   '<div class="field"><label for="e-norm">Утверждённый расход, '+fuelUnit(m)+'/100 км</label><div class="row"><input id="e-norm" class="inp num" inputmode="decimal" data-f="norm" value="'+h(f.norm!=null?f.norm:(m.norm_approved||''))+'" placeholder="'+h(m.norm_claimed||'')+'"><button class="btn ghost sm" data-act="setnorm" data-id="'+h(m.id)+'">Утвердить</button></div>'+(m.norm_claimed&&+m.norm_claimed!==+m.norm_approved?'<p class="tiny" style="color:var(--warn)">Сотрудник указал '+n1(m.norm_claimed)+'. Сверьте с паспортной нормой модели.</p>':'')+'</div>'+
@@ -396,8 +408,8 @@ function vOrder(){const t=T(S.view.p.id);if(!t)return back('Заявки','a-ord
 
 const dChip=(lat,lng,dist,rad,what)=>lat==null?'<span class="chip c-warn">без координат</span>':'<a class="chip '+(dist==null?'c-muted':dist>rad?'c-bad':'c-ok')+'" href="'+mapUrl({lat,lng})+'" target="_blank" rel="noopener">'+(dist==null?'на карте':fDist(dist)+' от '+what)+'</a>';
 function buyDeliv(b){const c=S.cfg,radO=+c.office_radius||150,radC=+c.client_radius||200;let x='';
- if(b.dAt)x+='<div class="odo">'+thumb(b.delivered_photo)+'<div><span class="tiny">'+(b.dest==='ticket'?'на объекте':'на складе')+' '+fT(b.dAt)+'</span><br>'+dChip(b.delivered_lat,b.delivered_lng,b.delivered_dist,b.dest==='ticket'?radC:radO,b.dest==='ticket'?'объекта':'склада')+'</div></div>';
- if(b.dest==='ticket'&&b.used_lines&&leftLines(b).length)x+='<div class="tiny muted">использовано: '+(b.lines||[]).map((l,i)=>h(l.name)+' '+n1(b.used_lines[i])+' из '+n1(l.qty)).join(', ')+'</div>';
+ if(b.dAt)x+='<div class="odo">'+thumb(b.delivered_photo)+'<div><span class="tiny">'+(b.dest!=='warehouse'?'на объекте':'на складе')+' '+fT(b.dAt)+'</span><br>'+dChip(b.delivered_lat,b.delivered_lng,b.delivered_dist,b.dest==='ticket'?radC:radO,b.dest==='ticket'?'объекта':'склада')+'</div></div>';
+ if(b.dest!=='warehouse'&&b.used_lines&&leftLines(b).length)x+='<div class="tiny muted">использовано: '+(b.lines||[]).map((l,i)=>h(l.name)+' '+n1(b.used_lines[i])+' из '+n1(l.qty)).join(', ')+'</div>';
  if(b.lAt)x+='<div class="odo">'+thumb(b.left_photo)+'<div><span class="tiny">остаток на складе '+fT(b.lAt)+'</span><br>'+dChip(b.left_lat,b.left_lng,b.left_dist,radO,'склада')+'</div></div>';
  else if(b.status==='partial')x+='<div class="tiny" style="color:var(--warn)">Остаток к сдаче: '+leftLines(b).map(lineTxt).join(', ')+'</div>';
  return x||'—'}
@@ -405,8 +417,8 @@ function buyRows(list,showName){return '<div class="tblw flat"><table class="tbl
  (list.length?list.map(b=>{const m=tech(b.masterId);const t=b.ticket_id?T(b.ticket_id):null;const st=BST[b.status]||BST.bought;
   return '<tr><td>'+fT(b.at)+'<br>'+(b.loc?'<a class="tiny" href="'+mapUrl(b.loc)+'" target="_blank" rel="noopener">где купил</a>':'')+'</td>'+(showName?'<td class="l"><button class="lnk" data-act="ago" data-v="a-emp" data-id="'+h(b.masterId)+'">'+h(m?m.name:'—')+'</button></td>':'')+
   '<td class="l wrapc"><b>'+h(b.supplier)+'</b><div class="small">'+(b.lines||[]).map(lineTxt).join('<br>')+'</div></td><td class="num">'+money(b.amount)+'</td><td>'+thumb(b.photo)+'</td>'+
-  '<td class="l">'+(b.dest==='ticket'?(t?'<button class="lnk" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'">Объект '+h(t.num)+'</button><div class="tiny muted">'+h(t.address)+'</div>':'Объект'):'Склад')+'</td>'+
-  '<td class="l wrapc">'+buyDeliv(b)+'</td><td class="l"><span class="chip '+st[1]+'">'+(b.status==='delivered'&&b.dest==='ticket'&&!leftLines(b).length?'Ждёт проверки':st[0])+'</span>'+(b.accepted_lines&&b.status==='accepted'?'<div class="tiny muted">принято: '+b.accepted_lines.map(lineTxt).join(', ')+'</div>':'')+'</td>'+
+  '<td class="l">'+(b.dest==='ticket'?(t?'<button class="lnk" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'">Объект '+h(t.num)+'</button><div class="tiny muted">'+h(t.address)+'</div>':'Объект'):b.dest==='site'?'Объект<div class="tiny muted">'+h(b.site||'')+'</div>':'Склад')+'</td>'+
+  '<td class="l wrapc">'+buyDeliv(b)+'</td><td class="l"><span class="chip '+st[1]+'">'+(b.status==='delivered'&&b.dest!=='warehouse'&&!leftLines(b).length?'Ждёт проверки':st[0])+'</span>'+(b.accepted_lines&&b.status==='accepted'?'<div class="tiny muted">принято: '+b.accepted_lines.map(lineTxt).join(', ')+'</div>':'')+'</td>'+
   '<td class="l wrapc">'+flagCell(buyFlags(b))+'</td><td><div class="row" style="justify-content:flex-end;gap:6px">'+(b.status==='delivered'?'<button class="btn primary sm" data-act="buyacc" data-id="'+h(b.id)+'">'+(acceptLines(b).length?'Принять':'Подтвердить')+'</button>':'')+(['bought','partial','delivered'].includes(b.status)?'<button class="btn ghost sm" data-act="buycancel" data-id="'+h(b.id)+'">Отменить</button>':'')+'</div></td></tr>'}).join(''):'<tr><td colspan="10" class="l muted">Закупок нет</td></tr>')+'</tbody></table></div>'}
 function vBuys(){const f=S.bf;let list=S.buys.filter(b=>!S.empF||b.masterId===S.empF);
  if(f==='open')list=list.filter(b=>['bought','partial'].includes(b.status));else if(f==='accept')list=list.filter(b=>b.status==='delivered');else if(f==='flags')list=list.filter(b=>buyFlags(b).length);
@@ -417,6 +429,71 @@ function vBuys(){const f=S.bf;let list=S.buys.filter(b=>!S.empF||b.masterId===S.
   '<div class="kgrid">'+kpi(money(sumOpen),'куплено и не сдано',sumOpen>0)+kpi(S.buys.filter(b=>b.status==='delivered').length,'ждут приёмки')+kpi(money(sumMonth),'закупок за месяц')+kpi(S.buys.filter(b=>b.shortage&&b.accAt>=monthStart()).length,'недостач за месяц',S.buys.some(b=>b.shortage&&b.accAt>=monthStart()))+'</div>'+
   '<div class="card tight"><p class="small" style="margin:0">Каждая покупка должна дойти до склада или до объекта. Сотрудник отмечает это фото на месте, телефон записывает координаты. Материал на объект нельзя отметить, пока сотрудник не нажал «Я на месте», а заказ не закроется, пока материал не отмечен. Остаток после объекта сотрудник обязан сдать на склад. При приёмке пересчитайте товар: недостача будет видна в отклонениях. Материал на объекте сверьте по фото и при звонке клиенту.</p></div>'+
   aiBar()+buyRows(list,true)}
+
+/* ---------- маршрут дня ---------- */
+const ymd=ts=>{const d=new Date(ts);return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
+const ymdTs=v=>{const a=String(v).split('-').map(Number);return new Date(a[0],a[1]-1,a[2]).getTime()};
+const WK={before:'до',after:'после',other:'работа'};
+async function loadDayPts(id,date){const key=id+'|'+date;if(S.dayPts[key]||S.dayLoading===key)return;S.dayLoading=key;const a=ymdTs(date),b=a+864e5;
+ const r=await pages(()=>sb.from('track_points').select('at,device_at,lat,lng,acc,mocked').eq('staff_id',id).gte('at',new Date(a-36e5).toISOString()).lt('at',new Date(b+36e5).toISOString()).order('id'));
+ if(r.error)toast('Маршрут не загрузился: '+r.error.message);
+ S.dayPts[key]=(r.data||[]).map(p=>({lat:p.lat,lng:p.lng,acc:p.acc,mocked:p.mocked,at:ms(p.device_at||p.at)})).filter(p=>p.at>=a&&p.at<b).sort((x,y)=>x.at-y.at);
+ S.dayLoading=null;if(S.view.name==='a-day')render(true)}
+function dayEvents(id,a,b,pts,shs){const ev=[];const add=(at,lat,lng,c,lbl,t,extra)=>{if(at&&at>=a&&at<b)ev.push(Object.assign({at,lat,lng,c,lbl,t},extra||{}))};
+ const lim=(+S.cfg.long_stop_min||30)*60000;
+ shs.forEach(sh=>{add(sh.startAt,sh.start.lat,sh.start.lng,'#123a33','Н','Начало смены, одометр '+sh.start.odo+(sh.start.dist!=null?', '+fDist(sh.start.dist)+' от офиса':''),{photo:sh.start.photo});
+  if(sh.endAt)add(sh.endAt,sh.end.lat,sh.end.lng,'#123a33','К','Конец смены, одометр '+sh.end.odo+(sh.end.dist!=null?', '+fDist(sh.end.dist)+' от офиса':''),{photo:sh.end.photo});
+  stopsOf(id,sh.startAt,sh.endAt||Date.now(),pts).forEach(z=>{const bad=z.place.k==='unknown'&&z.dur>=lim;add(z.at,z.lat,z.lng,bad?'#c23d2c':z.place.k==='unknown'?'#b86d06':'#7c8a85',fDur(z.dur).replace(' мин','м').replace(' ч ','ч'),'Стоянка '+fDur(z.dur)+' ('+fHM(z.at)+'–'+fHM(z.end)+'): '+z.place.t+(z.gap?', возможно, пропал сигнал':''),{stop:1,bad})})});
+ S.wph.filter(w=>w.masterId===id).forEach(w=>add(w.at,w.lat,w.lng,'#2c8a57','Ф','Фото работ ('+WK[w.kind]+'): '+(w.object||'')+(w.note?' — '+w.note:''),{photo:w.path}));
+ S.buys.filter(x=>x.masterId===id).forEach(x=>{add(x.at,x.lat,x.lng,'#2c67a6','З','Закупка: '+x.supplier+', '+money(x.amount)+' → '+(x.dest==='warehouse'?'склад':'объект'+(x.site?' '+x.site:'')),{photo:x.photo});
+  if(x.dAt)add(x.dAt,x.delivered_lat,x.delivered_lng,'#2c67a6','С',(x.dest==='warehouse'?'Сдано на склад: ':'Материал на объекте: ')+x.supplier,{photo:x.delivered_photo});
+  if(x.lAt)add(x.lAt,x.left_lat,x.left_lng,'#2c67a6','С','Остаток сдан на склад: '+x.supplier,{photo:x.left_photo})});
+ S.fuel.filter(r=>r.masterId===id).forEach(r=>add(r.at,r.loc&&r.loc.lat,r.loc&&r.loc.lng,'#8a4fd8','А','Заправка '+n1(r.liters)+' '+fuelUnit(tech(id))+', '+money(r.sum),{photo:r.photo}));
+ S.tickets.filter(t=>t.techId===id).forEach(t=>{const g=t.gps;if(g.onsite)add(t.times.onsite,g.onsite.lat,g.onsite.lng,'#e9a11b','№','Заказ '+t.num+': на месте');if(g.done)add(t.times.done,g.done.lat,g.done.lng,'#e9a11b','✓','Заказ '+t.num+': завершён')});
+ S.alerts.filter(x=>x.staff_id===id).forEach(x=>add(x.at,null,null,'#c23d2c','!',x.message,{bad:1}));
+ return ev.sort((x,y)=>x.at-y.at)}
+function vDay(){const list=approved();const emp=S.dayEmp&&tech(S.dayEmp)?S.dayEmp:(list[0]||{}).id;const date=S.dayDate||ymd(Date.now());S.dayEmp=emp;S.dayDate=date;
+ const bar='<div class="daybar"><select class="inp" data-act="dayemp" style="width:auto;padding:9px 12px;font-size:14px">'+list.map(m=>'<option value="'+h(m.id)+'"'+(m.id===emp?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select><button class="btn ghost sm" data-act="dayshift" data-v="-1" aria-label="Предыдущий день">←</button><input type="date" class="inp" data-act="daydate" value="'+h(date)+'" max="'+ymd(Date.now())+'"><button class="btn ghost sm" data-act="dayshift" data-v="1" aria-label="Следующий день"'+(date>=ymd(Date.now())?' disabled':'')+'>→</button></div>';
+ let s=atop('Маршрут дня',bar);if(!emp)return s+'<div class="empty">Сотрудников пока нет</div>';
+ const key=emp+'|'+date;const pts=S.dayPts[key];if(!pts){loadDayPts(emp,date);S.dayCtx=null;return s+'<div class="empty">Загружаю маршрут…</div>'}
+ const a=ymdTs(date),b=a+864e5;const m=tech(emp);const shs=S.shifts.filter(x=>x.masterId===emp&&x.startAt>=a&&x.startAt<b).sort((x,y)=>x.startAt-y.startAt);
+ const ev=dayEvents(emp,a,b,pts,shs);S.dayCtx={pts:pts.filter(p=>!p.mocked&&(p.acc==null||p.acc<=100)),bad:pts.filter(p=>p.mocked),ev};
+ const gk=shs.length?shs.reduce((x,sh)=>x+(gpsKm(emp,sh.startAt,sh.endAt||Date.now(),pts)||0),0):gpsKm(emp,a,b,pts);const ok=shs.reduce((x,sh)=>x+(odoKm(sh)>0?odoKm(sh):0),0);
+ const stops=ev.filter(e=>e.stop);const longs=stops.filter(e=>e.bad||/#b86d06/.test(e.c));const wp=S.wph.filter(w=>w.masterId===emp&&w.at>=a&&w.at<b);
+ const by=S.buys.filter(x=>x.masterId===emp&&x.at>=a&&x.at<b);const nb=S.buys.filter(x=>x.masterId===emp&&['bought','partial'].includes(x.status));const fu=S.fuel.filter(r=>r.masterId===emp&&r.at>=a&&r.at<b);
+ const hrs=shs.reduce((x,sh)=>x+((sh.endAt||Date.now())-sh.startAt),0);
+ s+='<div class="kgrid">'+kpi(shs.length?fHM(shs[0].startAt)+'–'+(shs[shs.length-1].endAt?fHM(shs[shs.length-1].endAt):'идёт'):'нет смены','смена'+(hrs?', '+fDur(hrs):''),!shs.length&&![0,6].includes(new Date(a).getDay()))+
+  kpi(gk!=null?n1(gk)+' км':'—','по GPS'+(ok?', по одометру '+ok+' км':''),ok&&gk!=null&&gk>=1&&ok>gk*1.25+10)+
+  kpi(longs.length,'долгих стоянок в неизвестных местах',longs.length>0)+kpi(wp.length,'фото работ',shs.length&&!wp.length)+
+  kpi(by.length+(nb.length?' · '+nb.length+' не сдано':''),'закупок',nb.some(x=>buyFlags(x).some(f=>f.lv==='bad')))+kpi(fu.length?n1(fu.reduce((x,r)=>x+(+r.liters||0),0))+' '+fuelUnit(m)+' · '+money(fu.reduce((x,r)=>x+(+r.sum||0),0)):'—','заправки')+'</div>';
+ if(!pts.length)s+='<div class="flag warn">'+I.alert+'<span>'+(shs.length?'Маршрут за этот день не записан: у сотрудника нет разрешения на местоположение «всегда», выключен GPS или телефон был без интернета весь день.':'В этот день смены не было.')+'</span></div>';
+ s+='<section class="card tight"><div id="daymap" class="daymap" role="img" aria-label="Карта маршрута"></div><div class="dlegend"><span><i style="background:#2c67a6"></i>маршрут, закупки и сдача</span><span><i style="background:#c23d2c"></i>долгая стоянка в неизвестном месте</span><span><i style="background:#b86d06"></i>стоянка в неизвестном месте</span><span><i style="background:#7c8a85"></i>стоянка в известном месте</span><span><i style="background:#2c8a57"></i>фото работ</span><span><i style="background:#8a4fd8"></i>заправка</span><span><i style="background:#123a33"></i>начало и конец смены</span></div></section>';
+ const fl=shs.reduce((x,sh)=>x.concat(shiftFlags(sh)),[]);if(fl.length)s+='<section class="card tight"><span class="label">Отклонения</span>'+fl.map(f=>'<div class="flag '+f.lv+'">'+I.alert+'<span>'+h(f.t)+'</span></div>').join('')+'</section>';
+ s+='<section class="card"><h2>Хронология</h2>'+(ev.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>Время</th><th class="l">Что</th><th>Фото</th><th>Где</th></tr></thead><tbody>'+ev.map(e=>'<tr class="tlrow"><td>'+fHM(e.at)+'</td><td class="l wrapc"'+(e.bad?' style="color:var(--bad)"':'')+'><span class="mk" style="display:inline-flex;background:'+e.c+';margin-right:8px">'+h(e.lbl)+'</span>'+h(e.t)+'</td><td>'+(e.photo?thumb(e.photo):'')+'</td><td>'+(e.lat!=null?'<button class="lnk" data-act="dayfly" data-lat="'+e.lat+'" data-lng="'+e.lng+'">на карте</button>':'—')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Событий нет.</p>')+'</section>';
+ return s}
+function initDayMap(){const el=document.getElementById('daymap');if(S.map){try{S.map.remove()}catch(e){}S.map=null}if(!el||!S.dayCtx)return;
+ if(typeof L==='undefined'){el.innerHTML='<div class="empty">Карта не загрузилась. Обновите страницу.</div>';return}
+ const c=S.dayCtx;const map=L.map(el,{scrollWheelZoom:true});S.map=map;
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+ const ll=[];if(c.pts.length>1){const line=c.pts.map(p=>[p.lat,p.lng]);L.polyline(line,{color:'#2c67a6',weight:4,opacity:.75}).addTo(map);ll.push(...line)}
+ c.bad.forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,color:'#c23d2c',fillOpacity:.8}).bindTooltip('Подмена GPS, '+fHM(p.at)).addTo(map));
+ c.ev.filter(e=>e.lat!=null).forEach(e=>{const mk=L.marker([e.lat,e.lng],{icon:L.divIcon({className:'',html:'<div class="mk" style="background:'+e.c+'">'+h(e.lbl)+'</div>',iconSize:null,iconAnchor:[11,11]}),zIndexOffset:e.bad?1000:e.stop?500:0}).addTo(map);
+  mk.bindPopup(()=>'<b>'+fHM(e.at)+'</b> '+h(e.t)+(e.photo&&S.urls[e.photo]?'<img src="'+h(S.urls[e.photo])+'" alt="Фото">':''));ll.push([e.lat,e.lng])});
+ if(ll.length)map.fitBounds(ll,{padding:[30,30],maxZoom:16});else{const o=office();map.setView(o?[o.lat,o.lng]:[40.18,44.51],12)}}
+
+/* ---------- фото работ ---------- */
+function vPhotos(){const from=perFrom(S.per);const list=S.wph.filter(w=>w.at>=from&&(!S.empF||w.masterId===S.empF)).sort((a,b)=>b.at-a.at);
+ const g={};list.forEach(w=>{const k=w.masterId+'|'+dayStart(w.at)+'|'+String(w.object||'').trim().toLowerCase();(g[k]=g[k]||[]).push(w)});
+ const groups=Object.values(g).sort((a,b)=>b[0].at-a[0].at);
+ const shs=S.shifts.filter(x=>x.startAt>=from&&x.endAt&&(!S.empF||x.masterId===S.empF)&&x.endAt-x.startAt>3*36e5);const empty=shs.filter(sh=>!S.wph.some(w=>w.masterId===sh.masterId&&w.at>=sh.startAt&&w.at<=sh.endAt));
+ let s=atop('Фото работ','<div class="row wrapx">'+empSel()+perSeg()+'</div>');
+ s+='<div class="kgrid">'+kpi(list.length,'фото')+kpi(groups.length,'объектов по дням')+kpi(empty.length,'смен без фото работ',empty.length>0)+kpi(groups.filter(x=>!x.some(w=>w.kind==='after')).length,'объектов без фото «после»',groups.some(x=>!x.some(w=>w.kind==='after')))+'</div>';
+ if(empty.length)s+='<section class="card tight"><span class="label">Смены без фото работ</span>'+empty.map(sh=>'<div class="row between"><span class="small">'+h((tech(sh.masterId)||{}).name||'—')+' · '+fDay(sh.startAt)+' '+fHM(sh.startAt)+'–'+fHM(sh.endAt)+'</span><button class="lnk" data-act="dayopen" data-id="'+h(sh.masterId)+'" data-v="'+ymd(sh.startAt)+'">маршрут</button></div>').join('')+'</section>';
+ s+='<section class="card">'+(groups.length?groups.map(gr=>{const w0=gr[gr.length-1];const m=tech(w0.masterId);const pts=gr.filter(w=>w.loc);let spread=0;pts.forEach(x=>pts.forEach(y=>{const d=distM(x.loc,y.loc);if(d>spread)spread=d}));
+  const fl=[];if(!gr.some(w=>w.kind==='after'))fl.push({lv:'warn',t:'Нет фото «после»'});if(!gr.some(w=>w.kind==='before'))fl.push({lv:'warn',t:'Нет фото «до»'});if(spread>500)fl.push({lv:'bad',t:'Фото одного объекта сделаны в местах, далёких друг от друга ('+fDist(spread)+')'});
+  return '<div class="pgrp"><div class="row between wrapx"><div><b>'+h(w0.object||'Без названия')+'</b><div class="tiny muted">'+h(m?m.name:'—')+' · '+fDay(w0.at)+', '+fHM(w0.at)+'–'+fHM(gr[0].at)+' · '+gr.length+' фото</div></div><div class="row wrapx">'+(w0.loc?'<a class="chip c-muted" href="'+mapUrl(w0.loc)+'" target="_blank" rel="noopener">на карте</a>':'')+'<button class="btn ghost sm" data-act="dayopen" data-id="'+h(w0.masterId)+'" data-v="'+ymd(w0.at)+'">Маршрут дня</button></div></div>'+
+   (fl.length?'<div>'+flagCell(fl)+'</div>':'')+'<div class="pgrid">'+gr.slice().reverse().map(w=>'<figure>'+thumb(w.path,'thumb lg')+'<figcaption class="tiny muted">'+WK[w.kind]+' '+fHM(w.at)+'</figcaption></figure>').join('')+'</div>'+(gr.some(w=>w.note)?'<p class="small" style="margin:0">'+gr.filter(w=>w.note).map(w=>h(w.note)).join(' · ')+'</p>':'')+'</div>'}).join(''):'<div class="empty" style="padding:18px"><p>Фото работ за этот период нет.</p></div>')+'</section>';
+ return s}
 
 function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.work_start=String(f.c.work_start||'09:00').slice(0,5);f.c.work_end=String(f.c.work_end||'18:00').slice(0,5)}const c=f.c;
  const inp=(k,l,t,extra)=>'<div class="field"><label for="g-'+k+'">'+l+'</label><input id="g-'+k+'" class="inp num" type="'+(t||'number')+'" data-c="'+k+'" value="'+h(c[k]==null?'':c[k])+'"'+(extra||'')+'></div>';
@@ -430,11 +507,11 @@ function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.wor
  return s}
 
 /* ---------- рендер ---------- */
-const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-settings':vSettings};
+const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-photos':vPhotos,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else root.innerHTML=shell((VIEWS[S.view.name]||vDash)());
- if(keep)window.scrollTo(0,y);signPending()}
+ if(keep)window.scrollTo(0,y);signPending();if(S.view.name==='a-day'&&S.loaded&&S.isAdmin)initDayMap();else if(S.map){try{S.map.remove()}catch(e){}S.map=null}}
 function go(name,p){S.view={name,p:p||{}};S.form={};render();window.scrollTo(0,0)}
 let toastT;function toast(m){let el=document.getElementById('toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';document.body.appendChild(el)}el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{el.hidden=true},3500)}
 let sheetRes=null;function sheet(html){closeSheet(null);return new Promise(r=>{sheetRes=r;const s=document.createElement('div');s.className='scrim';s.id='scrim';s.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';s.addEventListener('click',e=>{if(e.target===s)closeSheet(null)});document.body.appendChild(s);const i=s.querySelector('input,button');if(i)i.focus()})}
@@ -450,6 +527,10 @@ const ACT={
  per(d){S.per=d.v;LS.set('per',d.v);render(true)},
  filter(d){S.filter=d.v;render(true)},
  bfilter(d){S.bf=d.v;render(true)},
+ day(d){S.dayEmp=d.id;S.dayDate=ymd(Date.now());go('a-day')},
+ dayopen(d){S.dayEmp=d.id;S.dayDate=d.v;go('a-day')},
+ dayshift(d){const t=ymdTs(S.dayDate||ymd(Date.now()))+(+d.v)*864e5+36e5;if(t>Date.now()+864e5)return;S.dayDate=ymd(t);render(true)},
+ dayfly(d){if(S.map){S.map.setView([+d.lat,+d.lng],17);document.getElementById('daymap').scrollIntoView({behavior:'smooth',block:'center'})}},
  async buyacc(d){const b=S.buys.find(x=>x.id===d.id);if(!b)return;const L=acceptLines(b);
   const v=await sheet('<h2>'+(L.length?'Приёмка на складе':'Подтвердить материал на объекте')+'</h2><p class="small">'+h(b.supplier)+' · '+money(b.amount)+' · '+h((tech(b.masterId)||{}).name||'')+'</p>'+
    (L.length?'<p class="small">Пересчитайте товар и впишите, сколько фактически пришло.</p>'+L.map((l,i)=>'<div class="field"><label for="ba'+i+'">'+h(l.name)+': ожидается '+n1(l.qty)+(l.unit?' '+h(l.unit):'')+'</label><input id="ba'+i+'" class="inp num" inputmode="decimal" value="'+h(l.qty)+'"></div>').join(''):'<p class="small">Проверьте фото материала на объекте и спросите клиента при звонке, что материал установлен.</p>')+
@@ -496,8 +577,8 @@ const ACT={
    warehouse_lat:wm?+wm[1].replace(',','.'):null,warehouse_lng:wm?+wm[2].replace(',','.'):null,purchase_max_hours:num('purchase_max_hours')||24,stop_min:num('stop_min')||20,long_stop_min:num('long_stop_min')||30,updated_at:new Date().toISOString()};
   const r=await sb.from('config').update(patch).eq('id',1);if(r.error)return toast('Ошибка: '+r.error.message);toast('Настройки сохранены');S.form={};await load()}
 };
-document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});
-document.addEventListener('change',e=>{const el=e.target;const a=el.dataset.act;if(a==='assign')ACT.assign(el.dataset,el);if(a==='emp'){S.empF=el.value||null;render(true)}if(a==='impmap'&&S.imp){S.imp.map[el.dataset.k]=+el.value;render(true)}if(a==='urg')S.form.urgent=el.checked;if(el.dataset.f&&el.tagName==='SELECT')S.form[el.dataset.f]=el.value});
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg','dayemp','daydate'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});
+document.addEventListener('change',e=>{const el=e.target;const a=el.dataset.act;if(a==='assign')ACT.assign(el.dataset,el);if(a==='emp'){S.empF=el.value||null;render(true)}if(a==='impmap'&&S.imp){S.imp.map[el.dataset.k]=+el.value;render(true)}if(a==='urg')S.form.urgent=el.checked;if(a==='dayemp'){S.dayEmp=el.value;render(true)}if(a==='daydate'&&el.value){S.dayDate=el.value;render(true)}if(el.dataset.f&&el.tagName==='SELECT')S.form[el.dataset.f]=el.value});
 document.addEventListener('input',e=>{const el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value;if(el.dataset.c!=null)S.form.c[el.dataset.c]=el.value});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!S.session&&e.target.matches('#l-pw'))ACT.login()});
 document.getElementById('fileSheet').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;try{S.imp=await readSheet(file);render(true)}catch(err){toast('Не удалось прочитать файл. Нужен Excel (.xlsx) или CSV')}});
@@ -506,6 +587,6 @@ document.getElementById('fileSheet').addEventListener('change',async e=>{const f
 async function onSession(s){S.session=s;S.isAdmin=false;S.loaded=false;if(s){const r=await sb.rpc('is_admin');S.isAdmin=!!r.data;if(S.isAdmin)await load()}render()}
 sb.auth.getSession().then(({data})=>onSession(data.session||null));
 sb.auth.onAuthStateChange((ev,s)=>{if(ev==='SIGNED_IN'||ev==='SIGNED_OUT')onSession(s||null)});
-setInterval(()=>{if(S.isAdmin&&!document.hidden&&!S.busy&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
+setInterval(()=>{if(S.isAdmin&&!document.hidden&&!S.busy&&S.view.name!=='a-day'&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
 render();
 })();

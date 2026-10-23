@@ -106,13 +106,15 @@ function Main({ session }) {
 
   const load = useCallback(async () => {
     try {
-      const [staffR, cfgR, shiftR, myR, poolR, buyR] = await Promise.all([
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
         supabase.from('tickets').select('*').eq('staff_id', uid).order('created_at', { ascending: false }).limit(30),
         supabase.rpc('get_pool'),
         supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
+        supabase.from('work_photos').select('id,at,kind,object,note,path').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
       ]);
       const shifts = shiftR.data || [];
       setSt({
@@ -124,6 +126,7 @@ function Main({ session }) {
         mine: myR.data || [],
         pool: poolR.data || [],
         buys: buyR.data || [],
+        wph: wpR.data || [],
         err: staffR.error ? errText(staffR.error) : null,
       });
     } catch (e) {
@@ -157,6 +160,7 @@ function Main({ session }) {
   else if (view.name === 'profile') body = <Profile ctx={ctx} />;
   else if (view.name === 'purchase') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} />;
   else if (view.name === 'deliver') body = <DeliverScreen ctx={ctx} id={view.id} />;
+  else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
   else body = <Home ctx={ctx} />;
   return (
     <>
@@ -320,11 +324,17 @@ function Home({ ctx }) {
           <View><Label>Смена</Label><Text style={{ fontSize: 20, fontWeight: '700', color: C.ink }}>с {hm(sh.start_at)} <Text style={{ fontSize: 14, color: C.muted, fontWeight: '400' }}>{dur(Date.now() - new Date(sh.start_at).getTime())}</Text></Text></View>
           <Chip kind="ok">идёт</Chip>
         </View>
+        <Btn title="Фото работ" big onPress={() => nav('work')} />
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Btn kind="ghost" title="Заправка" onPress={() => nav('fuel')} style={{ flex: 1 }} />
-          <Btn kind="ghost" title="Закупка" onPress={() => nav('purchase')} style={{ flex: 1 }} />
+          <Btn kind="dark" title="Закупка" onPress={() => nav('purchase')} style={{ flex: 1 }} />
+          <Btn kind="dark" title="Заправка" onPress={() => nav('fuel')} style={{ flex: 1 }} />
         </View>
         <Btn kind="ghost" title="Закончить смену" onPress={() => nav('shift')} />
+      </Card>
+      <Card>
+        <Label>Сегодня</Label>
+        <T>Фото работ: {st.wph.length}{st.wph[0] && st.wph[0].object ? ' · последний объект: ' + st.wph[0].object : ''}</T>
+        {!st.wph.length ? <Muted>Снимайте каждую работу до и после. Без фото работа не засчитывается.</Muted> : null}
       </Card>
       <BuyList ctx={ctx} items={st.buys} />
       {mine.length ? <H2>{mine.length > 1 ? 'Мои заказы' : 'Мой заказ'}</H2> : null}
@@ -338,7 +348,7 @@ function Home({ ctx }) {
           </Card>
         </Pressable>
       ))}
-      <H2>Новые заказы {st.pool.length ? '(' + st.pool.length + ')' : ''}</H2>
+      {st.pool.length ? <H2>Новые заказы ({st.pool.length})</H2> : null}
       {st.pool.length ? st.pool.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id, pooled: t })}>
           <Card>
@@ -347,7 +357,7 @@ function Home({ ctx }) {
             {t.est_min ? <T>{money(t.est_min)} – {money(t.est_max)}</T> : null}
           </Card>
         </Pressable>
-      )) : <Muted>Свободных заказов нет. Потяните экран вниз, чтобы обновить.</Muted>}
+      )) : null}
     </Page>
   );
 }
@@ -381,6 +391,10 @@ function ShiftScreen({ ctx }) {
     const v = parseInt(String(odo).replace(/\D/g, ''), 10);
     if (!shot) return Alert.alert('Фото', 'Сфотографируйте одометр');
     if (!v) return Alert.alert('Одометр', 'Введите показания одометра');
+    if (ending && force !== true && force !== 'photos' && !st.wph.length) {
+      return Alert.alert('Нет фото работ', 'За сегодня не загружено ни одного фото проделанной работы. Руководитель увидит это. Закончить смену всё равно?',
+        [{ text: 'Сначала сниму' }, { text: 'Закончить', onPress: () => submit(st.buys.length ? 'photos' : true) }]);
+    }
     if (ending && force !== true && st.buys.length) {
       return Alert.alert('Не сдана закупка', 'Есть купленный товар, который не сдан на склад или на объект (' + st.buys.length + '). Руководитель увидит это. Закончить смену всё равно?',
         [{ text: 'Сначала сдам' }, { text: 'Закончить', onPress: () => submit(true) }]);
@@ -582,6 +596,7 @@ const lineText = (l) => l.name + ' — ' + l.qty + (l.unit ? ' ' + l.unit : '');
 const buyWhere = (b, mine) => {
   if (b.status === 'partial') return 'Остаток → на склад';
   if (b.dest === 'ticket') { const t = (mine || []).find((x) => x.id === b.ticket_id); return 'На объект' + (t ? ' · ' + t.num : ''); }
+  if (b.dest === 'site') return 'На объект · ' + (b.site || '');
   return 'На склад';
 };
 
@@ -634,6 +649,7 @@ function PurchaseScreen({ ctx, ticket }) {
   const { st, uid, load, nav } = ctx;
   const active = st.mine.filter((t) => ['assigned', 'enroute', 'onsite'].includes(t.status));
   const [dest, setDest] = useState(ticket || 'warehouse');
+  const [site, setSite] = useState((st.wph[0] && st.wph[0].object) || '');
   const [supplier, setSupplier] = useState('');
   const [lines, setLines] = useState([{ name: '', qty: '', unit: 'шт' }]);
   const [sum, setSum] = useState('');
@@ -656,11 +672,12 @@ function PurchaseScreen({ ctx, ticket }) {
     if (!supplier.trim()) return Alert.alert('Где купили', 'Укажите магазин или поставщика');
     if (!clean.length || clean.some((l) => !l.name || !l.qty)) return Alert.alert('Товар', 'Для каждой строки укажите название и количество');
     if (!a) return Alert.alert('Сумма', 'Укажите сумму из чека');
+    if (dest === 'site' && !site.trim()) return Alert.alert('Объект', 'Укажите, для какого объекта: клиент или адрес');
     setBusy(true);
     try {
-      await rpc('add_purchase', { p_supplier: supplier, p_lines: clean, p_amount: a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' ? null : dest });
+      await rpc('add_purchase', { p_supplier: supplier, p_lines: clean, p_amount: a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' || dest === 'site' ? null : dest, p_site: dest === 'site' ? site : null });
       await load();
-      nav(dest === 'warehouse' ? 'home' : 'ticket', dest === 'warehouse' ? undefined : { id: dest });
+      if (dest === 'warehouse' || dest === 'site') nav('home'); else nav('ticket', { id: dest });
     } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
   };
   return (
@@ -671,10 +688,12 @@ function PurchaseScreen({ ctx, ticket }) {
         <T style={{ fontWeight: '700' }}>1. Куда везёте</T>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           <Btn kind={dest === 'warehouse' ? 'dark' : 'ghost'} title="На склад" onPress={() => setDest('warehouse')} />
-          {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={'Объект ' + t.num} onPress={() => setDest(t.id)} />)}
+          <Btn kind={dest === 'site' ? 'dark' : 'ghost'} title="Сразу на объект" onPress={() => setDest('site')} />
+          {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={'Заказ ' + t.num} onPress={() => setDest(t.id)} />)}
         </View>
-        {dest !== 'warehouse' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
-        {!active.length ? <Muted>Чтобы везти сразу на объект, сначала возьмите заказ.</Muted> : null}
+        {dest === 'site' ? <Field label="Объект: клиент или адрес" value={site} onChangeText={setSite} placeholder="Ашот, Абовян, ул. ..." /> : null}
+        {dest === 'site' ? <Muted>На объекте отметите материал фото. Остаток нужно будет сдать на склад.</Muted> : null}
+        {dest !== 'warehouse' && dest !== 'site' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
       </Card>
       <Card>
         <T style={{ fontWeight: '700' }}>2. Фото чека или накладной</T>
@@ -707,7 +726,8 @@ function DeliverScreen({ ctx, id }) {
   const { st, uid, load, nav } = ctx;
   const b = st.buys.find((x) => x.id === id);
   const t = b && b.dest === 'ticket' && b.status === 'bought' ? st.mine.find((x) => x.id === b.ticket_id) : null;
-  const toObject = !!(b && b.dest === 'ticket' && b.status === 'bought');
+  const toObject = !!(b && (b.dest === 'ticket' || b.dest === 'site') && b.status === 'bought');
+  const ready = toObject && (b.dest === 'site' || (t && t.status === 'onsite'));
   const [used, setUsed] = useState(() => (b ? (b.lines || []).map((l) => String(l.qty)) : []));
   const [cam, setCam] = useState(false);
   const [shot, setShot] = useState(null);
@@ -739,7 +759,7 @@ function DeliverScreen({ ctx, id }) {
       const r = await rpc('deliver_purchase', { p_id: b.id, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_used: pUsed });
       await load();
       if (r && r.status === 'partial') Alert.alert('Остаток', 'Неиспользованный материал нужно сдать на склад. Он остался в списке «Не сдано».');
-      nav(toObject ? 'ticket' : 'home', toObject ? { id: b.ticket_id } : undefined);
+      if (b.dest === 'ticket' && toObject) nav('ticket', { id: b.ticket_id }); else nav('home');
     } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
   };
   const far = shot && shot.dist != null && shot.dist > lim;
@@ -753,7 +773,7 @@ function DeliverScreen({ ctx, id }) {
         {!toObject ? lines.map((l, i) => <T key={i}>{lineText(l)}</T>) : null}
       </Card>
       {toObject ? (
-        t && t.status === 'onsite' ? (
+        ready ? (
           <Card>
             <T style={{ fontWeight: '700' }}>Сколько использовано на объекте</T>
             <Muted>Что осталось, нужно будет сдать на склад.</Muted>
@@ -764,7 +784,7 @@ function DeliverScreen({ ctx, id }) {
           </Card>
         ) : <Flag kind="warn">Отметить материал можно, когда по заказу {t ? t.num : ''} нажато «Я на месте».</Flag>
       ) : null}
-      {!toObject || (t && t.status === 'onsite') ? <>
+      {!toObject || ready ? <>
         <Card>
           <T style={{ fontWeight: '700' }}>{toObject ? 'Фото материала на объекте' : 'Фото товара на складе'}</T>
           <Muted>{toObject ? 'Снимите установленный или разложенный материал так, чтобы было видно место.' : 'Снимите товар на складе. Руководитель сверит количество при приёмке.'}</Muted>
@@ -775,6 +795,58 @@ function DeliverScreen({ ctx, id }) {
         <Btn title={toObject ? 'Отметить на объекте' : 'Сдано на склад'} onPress={submit} busy={busy} big />
       </> : null}
       <CameraSheet visible={cam} title={toObject ? 'Материал на объекте' : 'Товар на складе'} onClose={() => setCam(false)} onShot={onShot} />
+    </Page>
+  );
+}
+
+/* ---------------- фото работ ---------------- */
+const KINDS = [['before', 'До работы'], ['after', 'После работы'], ['other', 'Другое']];
+function WorkScreen({ ctx, ticket }) {
+  const { st, uid, load } = ctx;
+  const tk = ticket ? st.mine.find((x) => x.id === ticket) : null;
+  const [object, setObject] = useState(tk ? tk.client_name + ', ' + tk.address : (st.wph[0] && st.wph[0].object) || '');
+  const [kind, setKind] = useState('before');
+  const [note, setNote] = useState('');
+  const [cam, setCam] = useState(false);
+  const [mine, setMine] = useState([]); // снятые сейчас: {uri, kind}
+  const open = () => {
+    if (!object.trim()) return Alert.alert('Объект', 'Укажите объект: имя клиента или адрес');
+    setCam(true);
+  };
+  const onShot = async (uri) => {
+    try {
+      const fix = await getFix();
+      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      const up = await uploadPhoto(uri, uid, 'work-' + kind);
+      await rpc('add_work_photo', { p_path: up.path, p_kind: kind, p_object: object, p_note: note, p_lat: fix.lat, p_lng: fix.lng, p_acc: fix.acc, p_mocked: fix.mocked, p_device: deviceId(), p_ticket: tk ? tk.id : null });
+      setMine((p) => [{ uri: up.uri, kind }, ...p]);
+      setCam(false); load();
+    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+  };
+  const today = st.wph.filter((p) => !object.trim() || p.object === object.trim());
+  return (
+    <Page>
+      <H1>Фото работ</H1>
+      <Muted>Снимайте каждую работу до и после. Место и время записываются автоматически, фото из галереи не принимаются.</Muted>
+      <Card>
+        <Field label="Объект: клиент или адрес" value={object} onChangeText={setObject} placeholder="Ашот, Абовян, ул. ..." />
+        <Label>Что на фото</Label>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {KINDS.map(([k, l]) => <Btn key={k} kind={kind === k ? 'dark' : 'ghost'} title={l} onPress={() => setKind(k)} />)}
+        </View>
+        <Field label="Комментарий (не обязательно)" value={note} onChangeText={setNote} placeholder="Заменил 2 коннектора МС4" />
+      </Card>
+      <Btn title="Сфотографировать" big onPress={open} />
+      {mine.length ? (
+        <Card>
+          <T style={{ fontWeight: '700' }}>Снято сейчас: {mine.length}</T>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {mine.map((p, i) => <Image key={i} source={{ uri: p.uri }} style={{ width: 96, height: 96, borderRadius: 8 }} />)}
+          </View>
+        </Card>
+      ) : null}
+      <Muted style={{ textAlign: 'center' }}>За сегодня {object.trim() ? 'по этому объекту ' : ''}загружено: {today.length}</Muted>
+      <CameraSheet visible={cam} title={KINDS.find((x) => x[0] === kind)[1]} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
