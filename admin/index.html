@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Arev Service · Админка</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#123a33">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Arev Admin">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -270,6 +278,40 @@ a.chip{text-decoration:none}
 .pgrp:first-child{border-top:0}
 .pgrid{display:flex;flex-wrap:wrap;gap:10px}
 .pgrid figure{margin:0;display:flex;flex-direction:column;gap:3px;align-items:center}
+
+/* телефон: верхняя панель, карточки, нижнее меню */
+.mtop,.mnav,.only-m{display:none}
+.mcards{flex-direction:column;gap:10px}
+.mcard{display:flex;flex-direction:column;gap:10px;text-align:left;width:100%;font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px 14px;cursor:pointer}
+.mcard.bad{border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
+.mrow{display:flex;align-items:center;gap:10px}
+.mrow .grow{display:flex;flex-direction:column;min-width:0}.mrow small{color:var(--muted);font-size:12.5px}
+.mgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;text-align:center}
+.mc{background:var(--surface-2);border-radius:10px;padding:7px 4px;display:flex;flex-direction:column}
+.mc b{font-size:15px}.mc small{font-size:10.5px;color:var(--muted)}
+.mc.w{background:var(--warn-soft)}.mc.w b{color:var(--warn)}.mc.b{background:var(--bad-soft)}.mc.b b{color:var(--bad)}
+.mflags{display:flex;flex-direction:column;gap:3px;font-size:12.5px}.mflags .bad{color:var(--bad)}.mflags .warn{color:var(--warn)}
+.mmore{display:flex;flex-direction:column;gap:8px}.mmore .btn{justify-content:flex-start;gap:10px}.mmore svg{width:19px;height:19px}
+@media (max-width:760px){
+ .side{display:none}
+ .mtop{display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:30;background:var(--pine);color:var(--pine-ink);padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 10px max(14px,env(safe-area-inset-left,0px))}
+ .mtop b{font-family:var(--f-display);font-size:17px}
+ .mtbtn{border:0;background:rgba(255,255,255,.1);color:inherit;border-radius:10px;min-height:40px;padding:0 12px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+ .mtbtn.ic{width:44px;padding:0;display:flex;align-items:center;justify-content:center}.mtbtn svg{width:20px;height:20px}
+ .mnav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--line);padding:6px 4px calc(8px + env(safe-area-inset-bottom,0px))}
+ .mnav button{position:relative;border:0;background:none;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px;font:inherit;font-size:11px;padding:4px 0;min-height:48px;cursor:pointer}
+ .mnav button svg{width:24px;height:24px}
+ .mnav button.on{color:var(--pine);font-weight:700}
+ :root[data-theme="dark"] .mnav button.on{color:var(--sun)}
+ .mnav i{position:absolute;top:0;left:calc(50% + 6px);background:var(--bad);color:#fff;border-radius:9px;font-style:normal;font-size:10px;font-weight:700;padding:1px 5px}
+ .amain{padding-bottom:calc(90px + env(safe-area-inset-bottom,0px))}
+ .only-d{display:none}.only-m{display:flex}
+ .kgrid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+ .kgrid .kpi{padding:10px}.kgrid .kpi b{font-size:17px}.kgrid .kpi span{font-size:11px}
+ .atop h1{font-size:20px}
+ .daymap{height:46vh}
+}
+@media (max-width:760px) and (prefers-color-scheme:dark){:root:not([data-theme="light"]) .mnav button.on{color:var(--sun)}}
 </style>
 </head>
 <body>
@@ -280,5 +322,6 @@ a.chip{text-decoration:none}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="app.js"></script>
+<script>if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
 </body>
 </html>

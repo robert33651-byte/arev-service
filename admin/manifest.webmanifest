@@ -1,0 +1,17 @@
+{
+  "name": "Arev Admin — контроль сотрудников",
+  "short_name": "Arev Admin",
+  "description": "Смены, маршруты, закупки, фото работ и топливо сотрудников Arev Service",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#123a33",
+  "theme_color": "#123a33",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
