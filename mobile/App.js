@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { SafeAreaView, ScrollView, View, Text, Pressable, RefreshControl, Image, Alert, Linking, StatusBar as RNStatusBar, AppState } from 'react-native';
+import { SafeAreaView, ScrollView, View, Text, Pressable, RefreshControl, Image, Alert, Linking, StatusBar as RNStatusBar, AppState, BackHandler, Modal } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+import * as Application from 'expo-application';
 import { StatusBar } from 'expo-status-bar';
 import { supabase, rpc, errText, phoneEmail, normPhone } from './src/supabase';
 import { deviceId, getFix, officeWifiOk, distM, permStatus, askPermissions } from './src/device';
 import { startTrack, stopTrack, flushTrack } from './src/track';
-import { CameraSheet, uploadPhoto } from './src/photo';
-import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip } from './src/ui';
+import { CameraSheet, uploadPhoto, preparePhoto, uploadPrepared } from './src/photo';
+import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, Action, Row, Check, TabBar } from './src/ui';
+import { setupNotify, planReminders, notifyGranted } from './src/notify';
+import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
 
 const CATS = { inverter: 'Не работает инвертор', output: 'Упала выработка', panel: 'Повреждена панель', wiring: 'Проводка и разъёмы', battery: 'Аккумулятор', cleaning: 'Чистка панелей', checkup: 'Плановый техосмотр', expand: 'Расширение или чужая станция', other: 'Другое' };
 const ST = { new: ['Новый', 'info'], assigned: ['Взят', 'info'], enroute: ['В пути', 'warn'], onsite: ['На месте', 'warn'], done: ['Выполнен', 'ok'], closed: ['Закрыт', 'note'], cancelled: ['Отменён', 'note'] };
@@ -14,6 +19,11 @@ const hm = (ts) => { if (!ts) return '—'; const d = new Date(ts); return p2(d.
 const dur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' мин' : Math.floor(m / 60) + ' ч ' + p2(m % 60) + ' мин'; };
 const money = (n) => (n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ֏');
 const fDist = (m) => (m == null ? '—' : m < 1000 ? m + ' м' : (m / 1000).toFixed(1).replace('.', ',') + ' км');
+const ymd = (d) => d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+const MONTHS_G = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const initials = (n) => String(n || '?').split(/\s+/).map((x) => x[0]).slice(0, 2).join('').toUpperCase();
+const mapsTo = (lat, lng, q) => Linking.openURL(lat != null ? 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lng : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q || ''));
 
 export default function App() {
   const [session, setSession] = useState(undefined);
@@ -34,13 +44,21 @@ function Splash() {
   return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: C.pineInk, fontSize: 22, fontWeight: '700' }}>Arev Service</Text></View>;
 }
 
-function Header({ title, sub, right }) {
+function Header({ title, sub, right, onBack }) {
   return (
     <View style={{ backgroundColor: C.pine, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: C.sun }} />
+      {onBack ? (
+        <Pressable onPress={onBack} hitSlop={12} accessibilityLabel="Назад" style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="arrow-back" size={24} color={C.pineInk} />
+        </Pressable>
+      ) : (
+        <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: C.sun, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="sunny" size={18} color={C.pine} />
+        </View>
+      )}
       <View style={{ flex: 1 }}>
-        <Text style={{ color: C.pineInk, fontWeight: '700', fontSize: 16 }}>{title}</Text>
-        {sub ? <Text style={{ color: C.pineInk, opacity: 0.7, fontSize: 12 }}>{sub}</Text> : null}
+        <Text style={{ color: C.pineInk, fontWeight: '700', fontSize: 17 }} numberOfLines={1}>{title}</Text>
+        {sub ? <Text style={{ color: C.pineInk, opacity: 0.7, fontSize: 12 }} numberOfLines={1}>{sub}</Text> : null}
       </View>
       {right}
     </View>
@@ -97,17 +115,22 @@ function Auth() {
 }
 
 /* ---------------- основное приложение ---------------- */
+const TAB_TITLE = { home: 'Arev Service', day: 'Мой день', history: 'История', profile: 'Профиль' };
+const SUB_TITLE = { shift: 'Смена', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
+
 function Main({ session }) {
   const uid = session.user.id;
   const [st, setSt] = useState({ loading: true });
+  const [tab, setTab] = useState('home');
   const [view, setView] = useState({ name: 'home' });
   const [refreshing, setRefreshing] = useState(false);
+  const [boxN, setBoxN] = useState(0);
   const timer = useRef(null);
 
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, tkR, fuR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -115,10 +138,12 @@ function Main({ session }) {
         supabase.rpc('get_pool'),
         supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
         supabase.from('work_photos').select('id,at,kind,object,note,path').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
-        supabase.from('places').select('id,name,kind,lat,lng').eq('active', true).order('name'),
+        supabase.from('places').select('id,name,kind,lat,lng,radius').eq('active', true).order('name'),
+        supabase.from('tasks').select('*').eq('staff_id', uid).eq('day', ymd(new Date())).neq('status', 'cancelled').order('ord').order('created_at'),
+        supabase.from('fuel').select('liters,amount,at').eq('staff_id', uid).gte('at', d0.toISOString()),
       ]);
       const shifts = shiftR.data || [];
-      setSt({
+      const next = {
         loading: false,
         staff: staffR.data || null,
         cfg: cfgR.data || {},
@@ -129,51 +154,125 @@ function Main({ session }) {
         buys: buyR.data || [],
         wph: wpR.data || [],
         places: plR.data || [],
+        tasks: tkR.data || [],
+        fuelToday: fuR.data || [],
         err: staffR.error ? errText(staffR.error) : null,
-      });
+      };
+      setSt(next);
+      if (next.staff && next.staff.status === 'approved') {
+        // офис, склад и поставщики — там напоминание «долго стоите без фото» не нужно
+        const c = next.cfg;
+        const known = [];
+        if (c.office_lat != null) known.push({ lat: c.office_lat, lng: c.office_lng, r: Math.max(250, c.office_radius || 150) });
+        if (c.warehouse_lat != null) known.push({ lat: c.warehouse_lat, lng: c.warehouse_lng, r: 250 });
+        next.places.filter((p) => p.kind === 'warehouse' || p.kind === 'supplier').forEach((p) => known.push({ lat: p.lat, lng: p.lng, r: p.radius || 200 }));
+        AsyncStorage.setItem('arev.known', JSON.stringify(known)).catch(() => {});
+        planReminders({
+          cfg: c, open: next.open, buys: next.buys, wphCount: next.wph.length,
+          startedToday: shifts.some((x) => new Date(x.start_at) >= d0),
+          tasksLeft: next.tasks.filter((t) => t.status === 'new').length,
+        });
+      }
     } catch (e) {
       setSt((p) => ({ ...p, loading: false, err: errText(e) }));
     }
   }, [uid]);
 
+  const syncBox = useCallback(async () => {
+    try {
+      const r = await flushBox(uid);
+      setBoxN(r.left);
+      if (r.sent) load();
+    } catch (e) {}
+  }, [uid, load]);
+
   useEffect(() => {
     load();
+    syncBox();
+    boxCount().then(setBoxN);
     timer.current = setInterval(load, 30000);
-    const sub = AppState.addEventListener('change', (a) => { if (a === 'active') { load(); flushTrack().catch(() => {}); } });
-    return () => { clearInterval(timer.current); sub.remove(); };
-  }, [load]);
+    const sub = AppState.addEventListener('change', (a) => { if (a === 'active') { load(); flushTrack().catch(() => {}); syncBox(); } });
+    const net = NetInfo.addEventListener((n) => { if (n.isConnected) syncBox(); });
+    return () => { clearInterval(timer.current); sub.remove(); net(); };
+  }, [load, syncBox]);
+
+  const approved = st.staff && st.staff.status === 'approved';
+  useEffect(() => { if (approved) setupNotify(); }, [approved]);
 
   // если смена открыта, но запись маршрута остановилась (перезагрузка телефона) — включаем снова
   useEffect(() => { if (st.open) startTrack(); }, [st.open && st.open.id]);
 
-  const refresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
+  // кнопка «назад» на телефоне возвращает на вкладку
+  useEffect(() => {
+    const h = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (view.name !== 'home') { setView({ name: 'home' }); return true; }
+      if (tab !== 'home') { setTab('home'); return true; }
+      return false;
+    });
+    return () => h.remove();
+  }, [view.name, tab]);
+
+  const refresh = async () => { setRefreshing(true); await load(); await syncBox(); setRefreshing(false); };
   const nav = (name, p) => setView({ name, ...(p || {}) });
-  const ctx = { uid, phone: String(session.user.email || '').split('@')[0], st, load, nav, refreshing, refresh };
+  const goTab = (t) => { setTab(t); setView({ name: 'home' }); };
+  const ctx = { uid, phone: String(session.user.email || '').split('@')[0], st, load, nav, goTab, refreshing, refresh, boxN, setBoxN, syncBox };
 
   if (st.loading) return <Splash />;
   if (!st.staff) return <Register ctx={ctx} />;
   if (st.staff.status !== 'approved') return <Waiting ctx={ctx} />;
 
-  const sub = st.staff.name;
+  if (view.name !== 'home') {
+    let body = null;
+    if (view.name === 'shift') body = <ShiftScreen ctx={ctx} />;
+    else if (view.name === 'fuel') body = <FuelScreen ctx={ctx} />;
+    else if (view.name === 'ticket') body = <TicketScreen ctx={ctx} id={view.id} pooled={view.pooled} />;
+    else if (view.name === 'purchase') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} />;
+    else if (view.name === 'take') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} source="warehouse" />;
+    else if (view.name === 'deliver') body = <DeliverScreen ctx={ctx} id={view.id} />;
+    else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
+    else if (view.name === 'task') body = <TaskScreen ctx={ctx} id={view.id} />;
+    else if (view.name === 'help') body = <Help ctx={ctx} />;
+    else if (view.name === 'perms') body = <Page><PermCard always /><NotifyCard /></Page>;
+    return (
+      <>
+        <Header title={SUB_TITLE[view.name] || 'Arev Service'} sub={st.staff.name} onBack={() => nav('home')} />
+        {body}
+      </>
+    );
+  }
   let body;
-  if (view.name === 'shift') body = <ShiftScreen ctx={ctx} />;
-  else if (view.name === 'fuel') body = <FuelScreen ctx={ctx} />;
-  else if (view.name === 'ticket') body = <TicketScreen ctx={ctx} id={view.id} pooled={view.pooled} />;
-  else if (view.name === 'profile') body = <Profile ctx={ctx} />;
-  else if (view.name === 'purchase') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} />;
-  else if (view.name === 'deliver') body = <DeliverScreen ctx={ctx} id={view.id} />;
-  else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
+  if (tab === 'day') body = <MyDay ctx={ctx} />;
+  else if (tab === 'history') body = <History ctx={ctx} />;
+  else if (tab === 'profile') body = <Profile ctx={ctx} />;
   else body = <Home ctx={ctx} />;
+  const left = st.buys.length + st.tasks.filter((t) => t.status === 'new').length;
   return (
     <>
-      <Header title="Arev Service" sub={sub} right={view.name === 'home'
-        ? <Pressable onPress={() => nav('profile')} style={{ padding: 6 }}><Text style={{ color: C.pineInk }}>Профиль</Text></Pressable>
-        : <Pressable onPress={() => nav('home')} style={{ padding: 6 }}><Text style={{ color: C.pineInk }}>Назад</Text></Pressable>} />
+      <Header title={TAB_TITLE[tab]} sub={st.staff.name} right={st.cfg.office_phone ? (
+        <Pressable onPress={() => callOffice(st.cfg)} hitSlop={10} accessibilityLabel="Позвонить в офис" style={{ padding: 4 }}>
+          <Icon name="call" size={22} color={C.pineInk} />
+        </Pressable>
+      ) : null} />
       {body}
+      <TabBar tab={tab} onTab={goTab} badges={{ home: st.open && left ? left : null }} />
     </>
   );
 }
 
+const callOffice = (cfg) => { if (cfg && cfg.office_phone) Linking.openURL('tel:' + String(cfg.office_phone).replace(/[^\d+]/g, '')); };
+
+function NotifyCard() {
+  const [ok, setOk] = useState(true);
+  useEffect(() => { notifyGranted().then(setOk); }, []);
+  if (ok) return null;
+  return (
+    <Card style={{ borderLeftWidth: 4, borderLeftColor: C.warn }}>
+      <H2>Уведомления выключены</H2>
+      <Muted>Без них приложение не напомнит начать смену, сдать закупку или снять фото работ.</Muted>
+      <Btn kind="ghost" title="Открыть настройки" onPress={() => Linking.openSettings()} />
+    </Card>
+  );
+}
 
 /* ---------------- разрешения ---------------- */
 function PermCard({ always }) {
@@ -303,42 +402,97 @@ function Waiting({ ctx }) {
 function Home({ ctx }) {
   const { st, nav } = ctx;
   const sh = st.open;
-  const greet = (() => { const h = new Date().getHours(); return h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; })();
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
+  const first = String(st.staff.name).split(' ')[0];
+  const greet = (() => { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; })();
   const mine = st.mine.filter((t) => ['assigned', 'enroute', 'onsite'].includes(t.status));
+  const tasks = st.tasks;
+  const tLeft = tasks.filter((t) => t.status === 'new').length;
+  const fuelL = st.fuelToday.reduce((a, r) => a + (+r.liters || 0), 0);
+  const unit = st.staff.fuel_type === 'gas' ? 'м³' : 'л';
+
   if (!sh) {
     const last = st.shifts.find((x) => x.end_at);
+    const doneToday = last && new Date(last.start_at).toDateString() === new Date().toDateString();
     return (
       <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
         <PermCard />
-        <View style={{ backgroundColor: C.pine, borderRadius: 18, padding: 20, gap: 12 }}>
-          <Text style={{ color: C.pineInk, fontSize: 21, fontWeight: '700' }}>{greet}, {String(st.staff.name).split(' ')[0]}</Text>
-          <Text style={{ color: C.pineInk, opacity: 0.8 }}>Начните смену в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.</Text>
-          <Btn title="Начать смену" onPress={() => nav('shift')} big />
+        <NotifyCard />
+        <View style={{ backgroundColor: C.pine, borderRadius: 20, padding: 20, gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: C.sun, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: C.pine, fontWeight: '800', fontSize: 17 }}>{initials(st.staff.name)}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.pineInk, fontSize: 21, fontWeight: '700' }}>{greet}, {first}</Text>
+              <Text style={{ color: C.pineInk, opacity: 0.75 }}>{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+            </View>
+          </View>
+          {doneToday ? (
+            <Text style={{ color: C.pineInk, opacity: 0.85 }}>Смена на сегодня закончена в {hm(last.end_at)}. Хорошего вечера!</Text>
+          ) : (
+            <Text style={{ color: C.pineInk, opacity: 0.85 }}>Начните смену в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.</Text>
+          )}
+          <Btn title={doneToday ? 'Начать ещё одну смену' : 'Начать смену'} onPress={() => nav('shift')} big />
         </View>
-        {last ? <Muted style={{ textAlign: 'center' }}>Прошлая смена: {new Date(last.start_at).toLocaleDateString('ru-RU')} {hm(last.start_at)}–{hm(last.end_at)} · одометр {last.end_odo} км</Muted> : null}
+        {tasks.length ? <TaskList ctx={ctx} tasks={tasks} preview /> : null}
+        {st.buys.length ? <BuyList ctx={ctx} items={st.buys} /> : null}
+        {last ? (
+          <Card>
+            <Label>Прошлая смена</Label>
+            <Row icon="time" title={new Date(last.start_at).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }) + ', ' + hm(last.start_at) + '–' + hm(last.end_at)}
+              sub={'Одометр ' + last.end_odo + ' км' + (last.gps_km != null ? ' · по GPS ' + String(last.gps_km).replace('.', ',') + ' км' : '')} last />
+          </Card>
+        ) : null}
+        <CallOffice cfg={st.cfg} />
       </Page>
     );
   }
+  const mins = Math.max(0, Math.round((Date.now() - new Date(sh.start_at).getTime()) / 60000));
+  const checks = [
+    { done: true, text: 'Смена начата', sub: 'в ' + hm(sh.start_at) },
+    tasks.length ? { done: !tLeft, text: 'Задачи на сегодня', sub: (tasks.length - tLeft) + ' из ' + tasks.length + ' выполнено' } : null,
+    { done: st.wph.length > 0, text: 'Фото работ', sub: st.wph.length ? 'снято ' + st.wph.length : 'снимайте до и после каждой работы' },
+    { done: !st.buys.length, text: 'Закупки и материал сданы', sub: st.buys.length ? 'не сдано: ' + st.buys.length : 'всё сдано' },
+    { done: false, text: 'Закончить смену в офисе', sub: 'фото одометра' },
+  ].filter(Boolean);
   return (
     <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
-      <Card style={{ borderLeftWidth: 4, borderLeftColor: C.ok }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View><Label>Смена</Label><Text style={{ fontSize: 20, fontWeight: '700', color: C.ink }}>с {hm(sh.start_at)} <Text style={{ fontSize: 14, color: C.muted, fontWeight: '400' }}>{dur(Date.now() - new Date(sh.start_at).getTime())}</Text></Text></View>
-          <Chip kind="ok">идёт</Chip>
+      <PermCard />
+      <NotifyCard />
+      <View style={{ backgroundColor: C.pine, borderRadius: 20, padding: 20, flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#53c085' }} />
+            <Text style={{ color: C.pineInk, opacity: 0.8, fontSize: 13 }}>Смена идёт · с {hm(sh.start_at)}</Text>
+          </View>
+          <Text style={{ color: C.pineInk, fontSize: 44, fontWeight: '800', letterSpacing: 1 }}>{Math.floor(mins / 60)}:{p2(mins % 60)}</Text>
+          <Text style={{ color: C.pineInk, opacity: 0.75, fontSize: 13 }}>{greet}, {first}</Text>
         </View>
-        <Btn title="Фото работ" big onPress={() => nav('work')} />
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Btn kind="dark" title="Закупка" onPress={() => nav('purchase')} style={{ flex: 1 }} />
-          <Btn kind="dark" title="Заправка" onPress={() => nav('fuel')} style={{ flex: 1 }} />
+        <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: C.sun, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="sunny" size={34} color={C.pine} />
         </View>
-        <Btn kind="ghost" title="Закончить смену" onPress={() => nav('shift')} />
-      </Card>
-      <Card>
-        <Label>Сегодня</Label>
-        <T>Фото работ: {st.wph.length}{st.wph[0] && st.wph[0].object ? ' · последний объект: ' + st.wph[0].object : ''}</T>
-        {!st.wph.length ? <Muted>Снимайте каждую работу до и после. Без фото работа не засчитывается.</Muted> : null}
-      </Card>
+      </View>
+      {ctx.boxN ? <Flag kind="warn">Без интернета сохранено фото: {ctx.boxN}. Они отправятся сами, когда появится связь.</Flag> : null}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        <Tile icon="camera" value={st.wph.length} label="фото работ" tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />
+        <Tile icon="checkbox" value={tasks.length ? (tasks.length - tLeft) + '/' + tasks.length : '—'} label="задачи" tone={tasks.length && !tLeft ? 'ok' : 'note'} />
+        <Tile icon="cube" value={st.buys.length} label="не сдано" tone={st.buys.length ? 'bad' : 'ok'} />
+        <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label="заправка сегодня" />
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        <Action icon="camera" title="Фото работ" sub="до и после" kind="primary" onPress={() => nav('work')} />
+        <Action icon="cart" title="Закупка" sub="купил в магазине" onPress={() => nav('purchase')} />
+        <Action icon="archive" title="Со склада" sub="взял материал" onPress={() => nav('take')} />
+        <Action icon="water" title="Заправка" sub="чек АЗС" onPress={() => nav('fuel')} />
+      </View>
+      {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
       <BuyList ctx={ctx} items={st.buys} />
+      <Card>
+        <H2>План на день</H2>
+        {checks.map((c, i) => <Check key={i} done={c.done} text={c.text} sub={c.sub} />)}
+      </Card>
       {mine.length ? <H2>{mine.length > 1 ? 'Мои заказы' : 'Мой заказ'}</H2> : null}
       {mine.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id })}>
@@ -351,7 +505,7 @@ function Home({ ctx }) {
         </Pressable>
       ))}
       {st.pool.length ? <H2>Новые заказы ({st.pool.length})</H2> : null}
-      {st.pool.length ? st.pool.map((t) => (
+      {st.pool.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id, pooled: t })}>
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><T style={{ fontWeight: '700', flex: 1 }}>{CATS[t.category] || t.category}</T>{t.urgent ? <Chip kind="bad">срочно</Chip> : null}</View>
@@ -359,7 +513,106 @@ function Home({ ctx }) {
             {t.est_min ? <T>{money(t.est_min)} – {money(t.est_max)}</T> : null}
           </Card>
         </Pressable>
-      )) : null}
+      ))}
+      <Btn kind="dark" title="Закончить смену" big onPress={() => nav('shift')} />
+      <CallOffice cfg={st.cfg} />
+    </Page>
+  );
+}
+
+function CallOffice({ cfg }) {
+  if (!cfg || !cfg.office_phone) return null;
+  return (
+    <Pressable onPress={() => callOffice(cfg)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10 }}>
+      <Icon name="call" size={18} color={C.info} />
+      <Text style={{ color: C.info, fontSize: 15, fontWeight: '600' }}>Позвонить в офис</Text>
+    </Pressable>
+  );
+}
+
+/* ---------------- задачи на день ---------------- */
+function TaskList({ ctx, tasks, preview }) {
+  const { st, nav } = ctx;
+  const done = tasks.filter((t) => t.status === 'done').length;
+  const placeName = (t) => { const p = st.places.find((x) => x.id === t.place_id); return p ? p.name : ''; };
+  return (
+    <Card>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <H2>Задачи на сегодня</H2>
+        <Chip kind={done === tasks.length ? 'ok' : 'info'}>{done} из {tasks.length}</Chip>
+      </View>
+      {tasks.map((t, i) => (
+        <View key={t.id} style={{ gap: 8, borderTopWidth: i ? 1 : 0, borderTopColor: C.line, paddingTop: i ? 10 : 0 }}>
+          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+            <Icon name={t.status === 'done' ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={t.status === 'done' ? C.ok : C.muted} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 15.5, fontWeight: '700', color: t.status === 'done' ? C.muted : C.ink }}>{t.title}</Text>
+              {placeName(t) ? <Muted>{placeName(t)}</Muted> : null}
+              {t.note ? <Muted>{t.note}</Muted> : null}
+              {t.status === 'done' ? <Text style={{ color: C.ok, fontSize: 13 }}>Выполнено в {hm(t.done_at)}</Text> : null}
+            </View>
+          </View>
+          {t.status === 'new' && !preview ? (
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Btn kind="ghost" title="Маршрут" onPress={() => mapsTo(t.lat, t.lng, placeName(t) || t.title)} style={{ flex: 1 }} />
+              <Btn kind="dark" title="Выполнено" onPress={() => nav('task', { id: t.id })} style={{ flex: 1 }} />
+            </View>
+          ) : null}
+        </View>
+      ))}
+      {preview ? <Muted>Отмечать задачи можно после начала смены.</Muted> : null}
+    </Card>
+  );
+}
+
+function TaskScreen({ ctx, id }) {
+  const { st, uid, load, nav } = ctx;
+  const t = st.tasks.find((x) => x.id === id);
+  const [cam, setCam] = useState(false);
+  const [shot, setShot] = useState(null);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!t) return <Page><Muted>Задача не найдена или уже выполнена.</Muted><Btn kind="ghost" title="На главную" onPress={() => nav('home')} /></Page>;
+  const place = st.places.find((x) => x.id === t.place_id);
+  const target = t.lat != null ? { lat: t.lat, lng: t.lng } : null;
+  const lim = (place && place.radius) || st.cfg.client_radius || 200;
+  const onShot = async (uri) => {
+    try {
+      const fix = await getFix();
+      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      const up = await uploadPhoto(uri, uid, 'task');
+      setShot({ ...up, fix, dist: distM(fix, target) }); setCam(false);
+    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+  };
+  const submit = async () => {
+    if (!shot) return Alert.alert('Фото', 'Сфотографируйте выполненную работу на месте');
+    setBusy(true);
+    try {
+      await rpc('complete_task', { p_id: t.id, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_note: note });
+      AsyncStorage.setItem('arev.lastWork', String(Date.now())).catch(() => {});
+      await load();
+      nav('home');
+    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+  };
+  const far = shot && shot.dist != null && shot.dist > lim;
+  return (
+    <Page>
+      <Label>Задача на сегодня</Label>
+      <H1>{t.title}</H1>
+      <Card>
+        {place ? <Row icon="location" title={place.name} sub={t.note || undefined} last /> : t.note ? <T>{t.note}</T> : null}
+        <Btn kind="ghost" title="Маршрут в Google Maps" onPress={() => mapsTo(t.lat, t.lng, (place && place.name) || t.title)} />
+      </Card>
+      <Card>
+        <T style={{ fontWeight: '700' }}>Фото выполненной работы</T>
+        <Muted>Снимите на месте. Фото попадёт и в «Фото работ».</Muted>
+        {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} /> : null}
+        {shot ? (shot.dist == null ? <Flag kind="note">Координаты сохранены</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)} от точки задачи. Отметка будет записана с отклонением.</Flag> : <Flag kind="ok">На месте · {fDist(shot.dist)}</Flag>) : null}
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать'} onPress={() => setCam(true)} />
+        <Field label="Комментарий (не обязательно)" value={note} onChangeText={setNote} placeholder="Почистил 24 панели" />
+      </Card>
+      <Btn title="Задача выполнена" big busy={busy} onPress={submit} />
+      <CameraSheet visible={cam} title="Работа выполнена" onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -598,7 +851,7 @@ const lineText = (l) => l.name + ' — ' + l.qty + (l.unit ? ' ' + l.unit : '');
 const buyWhere = (b, mine) => {
   if (b.status === 'partial') return 'Остаток → на склад';
   if (b.dest === 'ticket') { const t = (mine || []).find((x) => x.id === b.ticket_id); return 'На объект' + (t ? ' · ' + t.num : ''); }
-  if (b.dest === 'site') return 'На объект · ' + (b.site || '');
+  if (b.dest === 'site') return (b.source === 'warehouse' ? 'Со склада → ' : 'На объект · ') + (b.site || '');
   return 'На склад';
 };
 
@@ -619,7 +872,7 @@ function BuyList({ ctx, items }) {
                 <Label>{buyWhere(b, ctx.st.mine)}</Label>
                 {late ? <Chip kind="bad">просрочено</Chip> : <Chip kind="warn">{hm(b.created_at)}</Chip>}
               </View>
-              <T style={{ fontWeight: '700' }}>{b.supplier} · {money(b.amount)}</T>
+              <T style={{ fontWeight: '700' }}>{b.source === 'warehouse' ? 'Материал со склада' : b.supplier + ' · ' + money(b.amount)}</T>
               <Muted>{lines.map(lineText).join(', ')}</Muted>
             </Card>
           </Pressable>
@@ -647,10 +900,11 @@ function TicketBuys({ ctx, t }) {
   );
 }
 
-function PurchaseScreen({ ctx, ticket }) {
+function PurchaseScreen({ ctx, ticket, source }) {
   const { st, uid, load, nav } = ctx;
+  const wh = source === 'warehouse';
   const active = st.mine.filter((t) => ['assigned', 'enroute', 'onsite'].includes(t.status));
-  const [dest, setDest] = useState(ticket || 'warehouse');
+  const [dest, setDest] = useState(ticket || (wh ? 'site' : 'warehouse'));
   const [site, setSite] = useState((st.wph[0] && st.wph[0].object) || '');
   const [supplier, setSupplier] = useState('');
   const [lines, setLines] = useState([{ name: '', qty: '', unit: 'шт' }]);
@@ -663,34 +917,34 @@ function PurchaseScreen({ ctx, ticket }) {
     try {
       const fix = await getFix();
       if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
-      const up = await uploadPhoto(uri, uid, 'buy');
+      const up = await uploadPhoto(uri, uid, wh ? 'take' : 'buy');
       setShot({ ...up, fix }); setCam(false);
     } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
   };
   const submit = async () => {
     const clean = lines.map((l) => ({ name: String(l.name).trim(), qty: num(l.qty), unit: String(l.unit || '').trim() })).filter((l) => l.name || l.qty);
     const a = parseInt(String(sum).replace(/\D/g, ''), 10);
-    if (!shot) return Alert.alert('Чек', 'Сфотографируйте чек или накладную');
-    if (!supplier.trim()) return Alert.alert('Где купили', 'Укажите магазин или поставщика');
+    if (!shot) return Alert.alert('Фото', wh ? 'Сфотографируйте материал на складе' : 'Сфотографируйте чек или накладную');
+    if (!wh && !supplier.trim()) return Alert.alert('Где купили', 'Укажите магазин или поставщика');
     if (!clean.length || clean.some((l) => !l.name || !l.qty)) return Alert.alert('Товар', 'Для каждой строки укажите название и количество');
-    if (!a) return Alert.alert('Сумма', 'Укажите сумму из чека');
+    if (!wh && !a) return Alert.alert('Сумма', 'Укажите сумму из чека');
     if (dest === 'site' && !site.trim()) return Alert.alert('Объект', 'Укажите, для какого объекта: клиент или адрес');
     setBusy(true);
     try {
-      await rpc('add_purchase', { p_supplier: supplier, p_lines: clean, p_amount: a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' || dest === 'site' ? null : dest, p_site: dest === 'site' ? site : null });
+      await rpc('add_purchase', { p_source: wh ? 'warehouse' : 'shop', p_supplier: wh ? '' : supplier, p_lines: clean, p_amount: wh ? 0 : a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' || dest === 'site' ? null : dest, p_site: dest === 'site' ? site : null });
       await load();
       if (dest === 'warehouse' || dest === 'site') nav('home'); else nav('ticket', { id: dest });
     } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
   };
   return (
     <Page>
-      <H1>Закупка</H1>
-      <Muted>Каждая покупка должна дойти до склада или до объекта. Там вы отметите её фото, место проверит телефон.</Muted>
+      <H1>{wh ? 'Взять со склада' : 'Закупка'}</H1>
+      <Muted>{wh ? 'Запишите материал, который берёте со склада на объект. На объекте отметите его фото, остаток верните на склад.' : 'Каждая покупка должна дойти до склада или до объекта. Там вы отметите её фото, место проверит телефон.'}</Muted>
       <Card>
         <T style={{ fontWeight: '700' }}>1. Куда везёте</T>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          <Btn kind={dest === 'warehouse' ? 'dark' : 'ghost'} title="На склад" onPress={() => setDest('warehouse')} />
-          <Btn kind={dest === 'site' ? 'dark' : 'ghost'} title="Сразу на объект" onPress={() => setDest('site')} />
+          {!wh ? <Btn kind={dest === 'warehouse' ? 'dark' : 'ghost'} title="На склад" onPress={() => setDest('warehouse')} /> : null}
+          <Btn kind={dest === 'site' ? 'dark' : 'ghost'} title={wh ? 'На объект' : 'Сразу на объект'} onPress={() => setDest('site')} />
           {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={'Заказ ' + t.num} onPress={() => setDest(t.id)} />)}
         </View>
         {dest === 'site' ? <Field label="Объект: клиент или адрес" value={site} onChangeText={setSite} placeholder="Ашот, Абовян, ул. ..." /> : null}
@@ -699,13 +953,13 @@ function PurchaseScreen({ ctx, ticket }) {
         {dest !== 'warehouse' && dest !== 'site' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
       </Card>
       <Card>
-        <T style={{ fontWeight: '700' }}>2. Фото чека или накладной</T>
+        <T style={{ fontWeight: '700' }}>{wh ? '2. Фото материала на складе' : '2. Фото чека или накладной'}</T>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 10 }} /> : null}
-        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать чек'} onPress={() => setCam(true)} />
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : wh ? 'Сфотографировать материал' : 'Сфотографировать чек'} onPress={() => setCam(true)} />
       </Card>
       <Card>
-        <T style={{ fontWeight: '700' }}>3. Что купили, как в чеке</T>
-        <Field label="Магазин или поставщик" value={supplier} onChangeText={setSupplier} placeholder="Электротовары, ул. ..." />
+        <T style={{ fontWeight: '700' }}>{wh ? '3. Что берёте' : '3. Что купили, как в чеке'}</T>
+        {!wh ? <Field label="Магазин или поставщик" value={supplier} onChangeText={setSupplier} placeholder="Электротовары, ул. ..." /> : null}
         {lines.map((l, i) => (
           <View key={i} style={{ gap: 6, borderTopWidth: i ? 1 : 0, borderTopColor: C.line, paddingTop: i ? 8 : 0 }}>
             <Field label={'Товар ' + (i + 1)} value={l.name} onChangeText={setLine(i, 'name')} placeholder="Кабель солнечный 6 мм²" />
@@ -717,10 +971,10 @@ function PurchaseScreen({ ctx, ticket }) {
           </View>
         ))}
         <Btn kind="ghost" title="+ Ещё товар" onPress={() => setLines((p) => [...p, { name: '', qty: '', unit: 'шт' }])} />
-        <Field label="Сумма по чеку, ֏" value={sum} onChangeText={setSum} keyboardType="number-pad" />
+        {!wh ? <Field label="Сумма по чеку, ֏" value={sum} onChangeText={setSum} keyboardType="number-pad" /> : null}
       </Card>
-      <Btn title="Сохранить закупку" onPress={submit} busy={busy} big />
-      <CameraSheet visible={cam} title="Чек или накладная" onClose={() => setCam(false)} onShot={onShot} />
+      <Btn title={wh ? 'Записать' : 'Сохранить закупку'} onPress={submit} busy={busy} big />
+      <CameraSheet visible={cam} title={wh ? 'Материал на складе' : 'Чек или накладная'} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -771,8 +1025,8 @@ function DeliverScreen({ ctx, id }) {
       <Label>{buyWhere(b, st.mine)}</Label>
       <H1>{toObject ? 'Материал на объекте' : 'Сдать на склад'}</H1>
       <Card>
-        <T style={{ fontWeight: '700' }}>{b.supplier} · {money(b.amount)}</T>
-        <Muted>Куплено {new Date(b.created_at).toLocaleDateString('ru-RU')} в {hm(b.created_at)}</Muted>
+        <T style={{ fontWeight: '700' }}>{b.source === 'warehouse' ? 'Материал со склада' : b.supplier + ' · ' + money(b.amount)}</T>
+        <Muted>{b.source === 'warehouse' ? 'Взято' : 'Куплено'} {new Date(b.created_at).toLocaleDateString('ru-RU')} в {hm(b.created_at)}</Muted>
         {!toObject ? lines.map((l, i) => <T key={i}>{lineText(l)}</T>) : null}
       </Card>
       {toObject ? (
@@ -781,7 +1035,7 @@ function DeliverScreen({ ctx, id }) {
             <T style={{ fontWeight: '700' }}>Сколько использовано на объекте</T>
             <Muted>Что осталось, нужно будет сдать на склад.</Muted>
             {b.lines.map((l, i) => (
-              <Field key={i} label={l.name + ' (куплено ' + l.qty + (l.unit ? ' ' + l.unit : '') + ')'} value={used[i]}
+              <Field key={i} label={l.name + (b.source === 'warehouse' ? ' (взято ' : ' (куплено ') + l.qty + (l.unit ? ' ' + l.unit : '') + ')'} value={used[i]}
                 onChangeText={(v) => setUsed((p) => p.map((x, j) => (j === i ? v : x)))} keyboardType="decimal-pad" />
             ))}
           </Card>
@@ -833,14 +1087,31 @@ function WorkScreen({ ctx, ticket }) {
     setCam(true);
   };
   const onShot = async (uri) => {
+    let img = null, fix = null;
+    const takenAt = Date.now();
     try {
-      const fix = await getFix();
+      fix = await getFix();
       if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
-      const up = await uploadPhoto(uri, uid, 'work-' + kind);
+      img = await preparePhoto(uri);
+      AsyncStorage.setItem('arev.lastWork', String(takenAt)).catch(() => {});
+      const net = await NetInfo.fetch();
+      if (net.isConnected === false) throw new Error('Network request failed');
+      const up = await uploadPrepared(img, uid, 'work-' + kind);
       await rpc('add_work_photo', { p_path: up.path, p_kind: kind, p_object: object, p_note: note, p_lat: fix.lat, p_lng: fix.lng, p_acc: fix.acc, p_mocked: fix.mocked, p_device: deviceId(), p_ticket: tk ? tk.id : null });
       setMine((p) => [{ uri: up.uri, kind }, ...p]);
       setCam(false); load();
-    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) {
+      setCam(false);
+      if (img && fix && isNetErr(e)) {
+        // нет связи: сохраняем в телефоне, отправится само
+        try {
+          const n = await addToBox({ uri: img.uri, kind, object, note, ticket: tk ? tk.id : null, fix, takenAt });
+          ctx.setBoxN(n);
+          setMine((p) => [{ uri: img.uri, kind, offline: true }, ...p]);
+          Alert.alert('Сохранено без интернета', 'Фото сохранено в телефоне и отправится само, когда появится связь. Время и место съёмки записаны.');
+        } catch (x) { Alert.alert('Не получилось', 'Нет интернета, и фото не удалось сохранить. Попробуйте ещё раз.'); }
+      } else Alert.alert('Не получилось', errText(e));
+    }
   };
   const today = st.wph.filter((p) => !object.trim() || p.object === object.trim());
   return (
@@ -861,12 +1132,236 @@ function WorkScreen({ ctx, ticket }) {
         <Card>
           <T style={{ fontWeight: '700' }}>Снято сейчас: {mine.length}</T>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {mine.map((p, i) => <Image key={i} source={{ uri: p.uri }} style={{ width: 96, height: 96, borderRadius: 8 }} />)}
+            {mine.map((p, i) => (
+              <View key={i}>
+                <Image source={{ uri: p.uri }} style={{ width: 96, height: 96, borderRadius: 8 }} />
+                {p.offline ? <View style={{ position: 'absolute', right: 4, bottom: 4, backgroundColor: C.warn, borderRadius: 10, padding: 3 }}><Icon name="cloud-offline" size={14} color="#fff" /></View> : null}
+              </View>
+            ))}
           </View>
         </Card>
       ) : null}
       <Muted style={{ textAlign: 'center' }}>За сегодня {object.trim() ? 'по этому объекту ' : ''}загружено: {today.length}</Muted>
       <CameraSheet visible={cam} title={KINDS.find((x) => x[0] === kind)[1]} onClose={() => setCam(false)} onShot={onShot} />
+    </Page>
+  );
+}
+
+/* ---------------- мой день ---------------- */
+const KIND_RU = { before: 'до работы', after: 'после работы', other: 'работа' };
+function MyDay({ ctx }) {
+  const { st, uid } = ctx;
+  const [ev, setEv] = useState(null);
+  const [urls, setUrls] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [big, setBig] = useState(null);
+  const get = useCallback(async () => {
+    setBusy(true);
+    try {
+      const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      const iso = d0.toISOString();
+      const [wp, bu, fu, tk] = await Promise.all([
+        supabase.from('work_photos').select('*').eq('staff_id', uid).gte('at', iso).order('at'),
+        supabase.from('purchases').select('*').eq('staff_id', uid).or('created_at.gte.' + iso + ',delivered_at.gte.' + iso + ',left_at.gte.' + iso),
+        supabase.from('fuel').select('*').eq('staff_id', uid).gte('at', iso),
+        supabase.from('tasks').select('*').eq('staff_id', uid).eq('status', 'done').gte('done_at', iso),
+      ]);
+      const out = [];
+      const add = (at, icon, color, title, sub, photo) => { if (at && new Date(at) >= d0) out.push({ at: new Date(at).getTime(), icon, color, title, sub, photo }); };
+      st.shifts.forEach((x) => {
+        add(x.start_at, 'play-circle', C.pine, 'Начало смены', 'Одометр ' + x.start_odo + ' км');
+        if (x.end_at) add(x.end_at, 'stop-circle', C.pine, 'Конец смены', 'Одометр ' + x.end_odo + ' км');
+      });
+      (wp.data || []).forEach((w) => add(w.at, 'camera', C.ok, 'Фото работ · ' + KIND_RU[w.kind], [w.object, w.note].filter(Boolean).join(' · '), w.path));
+      (bu.data || []).forEach((b) => {
+        const what = (b.lines || []).map(lineText).join(', ');
+        add(b.created_at, b.source === 'warehouse' ? 'archive' : 'cart', C.info, b.source === 'warehouse' ? 'Взял со склада' : 'Закупка · ' + b.supplier, what + (b.source === 'warehouse' ? '' : ' · ' + money(b.amount)), b.photo);
+        if (b.delivered_at) add(b.delivered_at, 'checkmark-done', C.info, b.dest === 'warehouse' ? 'Сдал на склад' : 'Материал на объекте', what, b.delivered_photo);
+        if (b.left_at) add(b.left_at, 'return-down-back', C.info, 'Остаток сдан на склад', '', b.left_photo);
+      });
+      (fu.data || []).forEach((r) => add(r.at, 'water', '#8a4fd8', 'Заправка', String(r.liters).replace('.', ',') + (st.staff.fuel_type === 'gas' ? ' м³' : ' л') + ' · ' + money(r.amount), r.photo));
+      (tk.data || []).forEach((t) => add(t.done_at, 'checkbox', C.ok, 'Задача выполнена', t.title));
+      out.sort((a, b) => a.at - b.at);
+      setEv(out);
+      const paths = out.map((e) => e.photo).filter(Boolean);
+      if (paths.length) {
+        const r = await supabase.storage.from('photos').createSignedUrls(paths, 3600);
+        const m = {}; (r.data || []).forEach((x) => { if (x.signedUrl) m[x.path] = x.signedUrl; });
+        setUrls(m);
+      }
+    } catch (e) { setEv((p) => p || []); } finally { setBusy(false); }
+  }, [uid, st.shifts]);
+  useEffect(() => { get(); }, [get]);
+  const today = st.shifts.filter((x) => new Date(x.start_at).toDateString() === new Date().toDateString());
+  const mins = today.reduce((a, x) => a + ((x.end_at ? new Date(x.end_at) : new Date()) - new Date(x.start_at)) / 60000, 0);
+  const n = (ic) => (ev || []).filter((e) => e.icon === ic).length;
+  return (
+    <Page onRefresh={get} refreshing={busy}>
+      <Text style={{ fontSize: 15, color: C.muted }}>{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        <Tile icon="time" value={mins ? Math.floor(mins / 60) + ':' + p2(Math.round(mins % 60)) : '—'} label="на смене" />
+        <Tile icon="camera" value={n('camera')} label="фото работ" tone={n('camera') ? 'ok' : 'note'} />
+        <Tile icon="cart" value={n('cart') + n('archive')} label="закупки и склад" />
+        <Tile icon="water" value={n('water')} label="заправки" />
+      </View>
+      {ctx.boxN ? <Flag kind="warn">Ждут отправки: {ctx.boxN} фото. В ленте появятся после отправки.</Flag> : null}
+      <Card>
+        <H2>Лента дня</H2>
+        {ev == null ? <Muted>Загружаю…</Muted> : !ev.length ? <Muted>Сегодня пока ничего не отмечено.</Muted> : ev.map((e, i) => (
+          <View key={i} style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ alignItems: 'center', width: 40 }}>
+              <Text style={{ fontSize: 12.5, color: C.muted, fontWeight: '600' }}>{hm(e.at)}</Text>
+              <View style={{ width: 2, flex: 1, backgroundColor: i < ev.length - 1 ? C.line : 'transparent', marginTop: 4 }} />
+            </View>
+            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name={e.icon} size={18} color={e.color} />
+            </View>
+            <View style={{ flex: 1, paddingBottom: 14, gap: 4 }}>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: C.ink }}>{e.title}</Text>
+              {e.sub ? <Text style={{ fontSize: 13, color: C.muted }}>{e.sub}</Text> : null}
+              {e.photo && urls[e.photo] ? (
+                <Pressable onPress={() => setBig(urls[e.photo])}>
+                  <Image source={{ uri: urls[e.photo] }} style={{ width: 120, height: 90, borderRadius: 8, backgroundColor: C.surface2 }} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ))}
+      </Card>
+      <Muted style={{ textAlign: 'center' }}>Руководитель видит этот же день в своей программе.</Muted>
+      <Modal visible={!!big} transparent animationType="fade" onRequestClose={() => setBig(null)}>
+        <Pressable onPress={() => setBig(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center' }}>
+          {big ? <Image source={{ uri: big }} style={{ width: '100%', height: '80%' }} resizeMode="contain" /> : null}
+        </Pressable>
+      </Modal>
+    </Page>
+  );
+}
+
+/* ---------------- история ---------------- */
+function History({ ctx }) {
+  const { uid } = ctx;
+  const [m, setM] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [data, setData] = useState(null);
+  const [sel, setSel] = useState(new Date().getDate());
+  const [busy, setBusy] = useState(false);
+  const get = useCallback(async () => {
+    setBusy(true);
+    try {
+      const a = m.toISOString(), b = new Date(m.getFullYear(), m.getMonth() + 1, 1).toISOString();
+      const [sh, wp, bu, fu, tk] = await Promise.all([
+        supabase.from('shifts').select('*').eq('staff_id', uid).gte('start_at', a).lt('start_at', b).order('start_at'),
+        supabase.from('work_photos').select('at').eq('staff_id', uid).gte('at', a).lt('at', b).limit(5000),
+        supabase.from('purchases').select('created_at,amount,source,status').eq('staff_id', uid).gte('created_at', a).lt('created_at', b),
+        supabase.from('fuel').select('at,liters,amount').eq('staff_id', uid).gte('at', a).lt('at', b),
+        supabase.from('tasks').select('day,status').eq('staff_id', uid).gte('day', ymd(m)).lt('day', ymd(new Date(m.getFullYear(), m.getMonth() + 1, 1))),
+      ]);
+      setData({ sh: sh.data || [], wp: wp.data || [], bu: bu.data || [], fu: fu.data || [], tk: tk.data || [] });
+    } catch (e) { setData({ sh: [], wp: [], bu: [], fu: [], tk: [] }); } finally { setBusy(false); }
+  }, [m, uid]);
+  useEffect(() => { setData(null); get(); }, [get]);
+  const days = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+  const off = (m.getDay() + 6) % 7;
+  const now = new Date();
+  const isCur = m.getFullYear() === now.getFullYear() && m.getMonth() === now.getMonth();
+  const dayOf = (ts) => new Date(ts).getDate();
+  const D = {};
+  for (let d = 1; d <= days; d++) D[d] = { min: 0, km: 0, odo: 0, sh: [], ph: 0, bu: 0, fl: 0, fs: 0, tk: 0, td: 0 };
+  if (data) {
+    data.sh.forEach((x) => { const d = D[dayOf(x.start_at)]; d.sh.push(x); d.min += ((x.end_at ? new Date(x.end_at) : new Date()) - new Date(x.start_at)) / 60000; d.km += +x.gps_km || 0; if (x.end_odo) d.odo += x.end_odo - x.start_odo; });
+    data.wp.forEach((x) => { D[dayOf(x.at)].ph++; });
+    data.bu.forEach((x) => { D[dayOf(x.created_at)].bu++; });
+    data.fu.forEach((x) => { const d = D[dayOf(x.at)]; d.fl += +x.liters || 0; d.fs += +x.amount || 0; });
+    data.tk.forEach((x) => { const d = D[+String(x.day).slice(8, 10)]; if (d) { d.tk++; if (x.status === 'done') d.td++; } });
+  }
+  const tot = Object.values(D).reduce((a, d) => ({ sh: a.sh + d.sh.length, min: a.min + d.min, km: a.km + d.km, ph: a.ph + d.ph }), { sh: 0, min: 0, km: 0, ph: 0 });
+  const cells = [];
+  for (let i = 0; i < off; i++) cells.push(null);
+  for (let d = 1; d <= days; d++) cells.push(d);
+  const S = D[sel] || null;
+  const hh = (min) => Math.floor(min / 60) + ' ч ' + p2(Math.round(min % 60)) + ' мин';
+  return (
+    <Page onRefresh={get} refreshing={busy}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Pressable onPress={() => { setM(new Date(m.getFullYear(), m.getMonth() - 1, 1)); setSel(1); }} hitSlop={12} style={{ padding: 6 }} accessibilityLabel="Предыдущий месяц"><Icon name="chevron-back" size={24} color={C.pine} /></Pressable>
+        <Text style={{ fontSize: 19, fontWeight: '700', color: C.ink }}>{MONTHS[m.getMonth()]} {m.getFullYear()}</Text>
+        <Pressable disabled={isCur} onPress={() => { setM(new Date(m.getFullYear(), m.getMonth() + 1, 1)); setSel(1); }} hitSlop={12} style={{ padding: 6, opacity: isCur ? 0.3 : 1 }} accessibilityLabel="Следующий месяц"><Icon name="chevron-forward" size={24} color={C.pine} /></Pressable>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        <Tile icon="calendar" value={tot.sh} label="смен" />
+        <Tile icon="time" value={Math.round(tot.min / 60)} label="часов" />
+        <Tile icon="navigate" value={Math.round(tot.km)} label="км по GPS" />
+        <Tile icon="camera" value={tot.ph} label="фото работ" />
+      </View>
+      <Card style={{ padding: 10 }}>
+        <View style={{ flexDirection: 'row' }}>
+          {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((w) => <Text key={w} style={{ width: '14.285%', textAlign: 'center', fontSize: 12, color: C.muted, fontWeight: '700' }}>{w}</Text>)}
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          {cells.map((d, i) => {
+            if (!d) return <View key={i} style={{ width: '14.285%', aspectRatio: 1 }} />;
+            const x = D[d];
+            const has = x.sh.length > 0;
+            const isToday = isCur && d === now.getDate();
+            const future = isCur && d > now.getDate();
+            return (
+              <Pressable key={i} onPress={() => setSel(d)} style={{ width: '14.285%', aspectRatio: 1, padding: 2 }}>
+                <View style={{ flex: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: has ? C.okSoft : 'transparent', borderWidth: sel === d ? 2 : isToday ? 1 : 0, borderColor: sel === d ? C.sun : C.pine, opacity: future ? 0.4 : 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: has ? '700' : '400', color: has ? C.ok : C.ink }}>{d}</Text>
+                  {has ? <Text style={{ fontSize: 10, color: C.ok }}>{Math.round(x.min / 60)} ч</Text> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </Card>
+      {data && S ? (
+        <Card>
+          <H2>{sel} {MONTHS_G[m.getMonth()]}</H2>
+          {!S.sh.length ? <Muted>Смены не было.</Muted> : (
+            <>
+              {S.sh.map((x) => <Row key={x.id} icon="time" title={hm(x.start_at) + ' – ' + (x.end_at ? hm(x.end_at) : 'идёт')} sub={'Одометр ' + x.start_odo + (x.end_odo ? ' → ' + x.end_odo : '')} />)}
+              <Row icon="hourglass" title={hh(S.min)} sub="на смене" />
+              <Row icon="navigate" title={(Math.round(S.km * 10) / 10).toString().replace('.', ',') + ' км по GPS'} sub={S.odo ? 'по одометру ' + S.odo + ' км' : undefined} />
+              <Row icon="camera" title={'Фото работ: ' + S.ph} />
+              {S.tk ? <Row icon="checkbox" title={'Задачи: ' + S.td + ' из ' + S.tk} /> : null}
+              {S.bu ? <Row icon="cart" title={'Закупки и склад: ' + S.bu} /> : null}
+              <Row icon="water" title={S.fl ? 'Заправка: ' + (Math.round(S.fl * 10) / 10).toString().replace('.', ',') + ' · ' + money(S.fs) : 'Заправок не было'} last />
+            </>
+          )}
+        </Card>
+      ) : null}
+    </Page>
+  );
+}
+
+/* ---------------- помощь ---------------- */
+function Help({ ctx }) {
+  const items = [
+    ['play-circle', 'Начало смены', 'Утром в офисе нажмите «Начать смену», сфотографируйте одометр и введите показания. Включится запись маршрута — это уведомление «Идёт смена».'],
+    ['camera', 'Фото работ', 'На каждом объекте снимайте «до» и «после». Выберите объект из списка или впишите имя клиента. Без интернета фото сохранится и отправится само.'],
+    ['checkbox', 'Задачи', 'Задачи на день ставит руководитель. Нажмите «Маршрут», чтобы доехать, и «Выполнено» на месте — с фото.'],
+    ['cart', 'Закупка', 'Купили что-то — сразу внесите: фото чека, что купили и сумма. Потом отметьте фото там, куда привезли: на складе или на объекте.'],
+    ['archive', 'Со склада', 'Берёте материал со склада на объект — запишите это. На объекте отметьте фото, остаток верните на склад.'],
+    ['water', 'Заправка', 'После каждой заправки — фото чека, литры и сумма. Всё сверяется с выпиской по топливной карте.'],
+    ['stop-circle', 'Конец смены', 'Вечером в офисе нажмите «Закончить смену» и сфотографируйте одометр. Перед этим сдайте закупки.'],
+    ['notifications', 'Напоминания', 'Приложение напомнит начать и закончить смену, сдать закупку и снять фото работ.'],
+    ['shield-checkmark', 'Что записывается', 'Только во время смены: маршрут, время и место отметок. Вне смены местоположение не записывается.'],
+  ];
+  return (
+    <Page>
+      <Card>
+        {items.map(([ic, t, d], i) => (
+          <View key={i} style={{ flexDirection: 'row', gap: 12, paddingVertical: 10, borderBottomWidth: i < items.length - 1 ? 1 : 0, borderBottomColor: C.line }}>
+            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name={ic} size={20} color={C.pine} /></View>
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={{ fontSize: 15.5, fontWeight: '700', color: C.ink }}>{t}</Text>
+              <Text style={{ fontSize: 14, color: C.muted, lineHeight: 19 }}>{d}</Text>
+            </View>
+          </View>
+        ))}
+      </Card>
+      <CallOffice cfg={ctx.st.cfg} />
     </Page>
   );
 }
@@ -887,9 +1382,17 @@ function Profile({ ctx }) {
   };
   return (
     <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
-      <Card>
-        <H2>{s.name}</H2>
+      <View style={{ alignItems: 'center', gap: 6, paddingVertical: 8 }}>
+        <View style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: C.pine, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: C.sun, fontSize: 28, fontWeight: '800' }}>{initials(s.name)}</Text>
+        </View>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: C.ink }}>{s.name}</Text>
         <Muted>+{String(s.phone).replace(/\D/g, '')}</Muted>
+      </View>
+      <Card style={{ paddingVertical: 4 }}>
+        {st.cfg.office_phone ? <Row icon="call" title="Позвонить в офис" sub={st.cfg.office_phone} onPress={() => callOffice(st.cfg)} /> : null}
+        <Row icon="help-circle" title="Как пользоваться" onPress={() => ctx.nav('help')} />
+        <Row icon="shield-checkmark" title="Разрешения и уведомления" onPress={() => ctx.nav('perms')} last />
       </Card>
       {!edit ? (
         <Card>
@@ -918,6 +1421,7 @@ function Profile({ ctx }) {
         )) : <Muted>Смен пока нет.</Muted>}
       </Card>
       {!st.open ? <Btn kind="ghost" title="Выйти из аккаунта" onPress={() => supabase.auth.signOut()} /> : <Muted style={{ textAlign: 'center' }}>Выйти можно после окончания смены.</Muted>}
+      <Muted style={{ textAlign: 'center', fontSize: 12 }}>Arev Service · версия {Application.nativeApplicationVersion || '—'}</Muted>
     </Page>
   );
 }

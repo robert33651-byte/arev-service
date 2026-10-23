@@ -7,8 +7,16 @@ import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { C } from './ui';
 
+// Сжать снимок (без интернета тоже работает)
+export function preparePhoto(uri) {
+  return manipulateAsync(uri, [{ resize: { width: 1600 } }], { compress: 0.75, format: SaveFormat.JPEG, base64: true });
+}
+
 export async function uploadPhoto(uri, userId, kind) {
-  const img = await manipulateAsync(uri, [{ resize: { width: 1600 } }], { compress: 0.75, format: SaveFormat.JPEG, base64: true });
+  return uploadPrepared(await preparePhoto(uri), userId, kind);
+}
+
+export async function uploadPrepared(img, userId, kind) {
   const path = userId + '/' + kind + '-' + Date.now() + '.jpg';
   const { error } = await supabase.storage.from('photos').upload(path, decode(img.base64), { contentType: 'image/jpeg', upsert: false });
   if (error) throw error;

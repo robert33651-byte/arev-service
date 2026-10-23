@@ -238,6 +238,23 @@ create table if not exists public.places(
 );
 alter table public.places enable row level security;
 
+-- ---------- задачи на день от руководителя ----------
+create table if not exists public.tasks(
+  id uuid primary key default gen_random_uuid(),
+  staff_id uuid not null references public.staff(id) on delete cascade,
+  day date not null default current_date,
+  place_id uuid references public.places(id) on delete set null,
+  title text not null,
+  note text,
+  lat double precision, lng double precision,
+  ord int not null default 0,
+  status text not null default 'new' check (status in ('new','done','cancelled')),
+  created_at timestamptz not null default now(),
+  done_at timestamptz, done_photo text, done_lat double precision, done_lng double precision, done_dist int, done_note text
+);
+create index if not exists tasks_staff_day on public.tasks(staff_id, day);
+alter table public.tasks enable row level security;
+
 -- ---------- фото проделанных работ (с заказом или без) ----------
 create table if not exists public.work_photos(
   id uuid primary key default gen_random_uuid(),
@@ -263,6 +280,11 @@ alter table public.config add column if not exists long_stop_min int not null de
 alter table public.config add column if not exists stop_min int not null default 20;
 alter table public.shifts add column if not exists gps_km numeric;
 alter table public.purchases add column if not exists site text;
+alter table public.purchases add column if not exists source text not null default 'shop';
+alter table public.purchases drop constraint if exists purchases_source_check;
+alter table public.purchases add constraint purchases_source_check check (source in ('shop','warehouse'));
+alter table public.config add column if not exists office_phone text;
+alter table public.work_photos add column if not exists taken_at timestamptz;
 alter table public.purchases drop constraint if exists purchases_dest_check;
 alter table public.purchases add constraint purchases_dest_check check (dest in ('warehouse','site','ticket'));
 alter table public.ai_checks drop constraint if exists ai_checks_kind_check;
@@ -300,6 +322,10 @@ do $$ begin
   drop policy if exists tickets_admin on public.tickets;
   create policy tickets_admin on public.tickets for all to authenticated using (public.is_admin()) with check (public.is_admin());
   -- только админ
+  drop policy if exists tasks_read on public.tasks;
+  create policy tasks_read on public.tasks for select to authenticated using (staff_id = auth.uid() or public.is_admin());
+  drop policy if exists tasks_admin on public.tasks;
+  create policy tasks_admin on public.tasks for all to authenticated using (public.is_admin()) with check (public.is_admin());
   drop policy if exists places_read on public.places;
   create policy places_read on public.places for select to authenticated using (true);
   drop policy if exists places_admin on public.places;
@@ -340,7 +366,7 @@ end $$;
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname in ('_me','_staff','_guard','_check_photo','_check_mock','register','update_car',
-             'start_shift','end_shift','add_fuel','add_track','get_pool','take_ticket','refuse_ticket','ticket_step','add_ticket_photo','_route_km','_gps_km','add_purchase','deliver_purchase','add_work_photo')
+             'start_shift','end_shift','add_fuel','add_track','get_pool','take_ticket','refuse_ticket','ticket_step','add_ticket_photo','_route_km','_gps_km','add_purchase','deliver_purchase','add_work_photo','complete_task')
   loop execute 'drop function ' || f.sig; end loop;
 end $$;
 
@@ -612,28 +638,32 @@ end $$;
 -- закупка: что, где и за сколько купил (фото накладной или чека обязательно).
 -- p_ticket: если товар везут сразу на объект, указывается заказ (свой и ещё не завершённый).
 create function public.add_purchase(p_supplier text, p_lines jsonb, p_amount int, p_photo text, p_lat double precision,
-  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null, p_site text default null)
+  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null, p_site text default null,
+  p_source text default 'shop')
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; r public.purchases; e text; sh uuid; d text;
+declare s public.staff; r public.purchases; e text; sh uuid; d text; src text;
 begin
   s := public._staff();
   e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
   e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
-  if coalesce(trim(p_supplier),'') = '' then return jsonb_build_object('error','NEED_SUPPLIER'); end if;
+  src := case when p_source = 'warehouse' then 'warehouse' else 'shop' end;
+  if src = 'shop' and coalesce(trim(p_supplier),'') = '' then return jsonb_build_object('error','NEED_SUPPLIER'); end if;
+  if src = 'warehouse' and p_ticket is null and coalesce(trim(p_site),'') = '' then return jsonb_build_object('error','NEED_OBJECT'); end if;
   if jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then return jsonb_build_object('error','NEED_LINES'); end if;
   if exists(select 1 from jsonb_array_elements(p_lines) x
              where coalesce(trim(x->>'name'),'') = '' or coalesce((x->>'qty')::numeric, 0) <= 0) then
     return jsonb_build_object('error','NEED_LINES');
   end if;
-  if coalesce(p_amount,0) <= 0 then return jsonb_build_object('error','NEED_AMOUNT'); end if;
+  if src = 'shop' and coalesce(p_amount,0) <= 0 then return jsonb_build_object('error','NEED_AMOUNT'); end if;
   if p_ticket is not null and not exists(select 1 from public.tickets where id = p_ticket and staff_id = s.id
                                           and status in ('assigned','enroute','onsite')) then
     return jsonb_build_object('error','BAD_TICKET');
   end if;
   d := case when p_ticket is not null then 'ticket' when coalesce(trim(p_site),'') <> '' then 'site' else 'warehouse' end;
   select id into sh from public.shifts where staff_id = s.id and end_at is null;
-  insert into public.purchases(staff_id, supplier, lines, amount, photo, lat, lng, acc, device, shift_id, dest, ticket_id, site)
-  values (s.id, trim(p_supplier), p_lines, p_amount, p_photo, p_lat, p_lng, p_acc, p_device, sh, d, p_ticket, nullif(trim(p_site),''))
+  insert into public.purchases(staff_id, supplier, lines, amount, photo, lat, lng, acc, device, shift_id, dest, ticket_id, site, source)
+  values (s.id, case when src = 'warehouse' then 'Склад' else trim(p_supplier) end, p_lines, coalesce(p_amount,0), p_photo,
+          p_lat, p_lng, p_acc, p_device, sh, d, p_ticket, nullif(trim(p_site),''), src)
   returning * into r;
   return to_jsonb(r);
 end $$;
@@ -707,33 +737,59 @@ end $$;
 
 -- фото проделанной работы: камера приложения, место и время пишет сервер
 create function public.add_work_photo(p_path text, p_kind text, p_object text, p_note text, p_lat double precision,
-  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null)
+  p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null, p_taken_at timestamptz default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; r public.work_photos; e text; sh uuid;
+declare s public.staff; r public.work_photos; e text; sh uuid; tk timestamptz;
 begin
   s := public._staff();
   e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
   e := public._check_photo(p_path);        if e is not null then return jsonb_build_object('error', e); end if;
-  select id into sh from public.shifts where staff_id = s.id and end_at is null;
+  -- снято без интернета: время съёмки с телефона, не старше 48 часов и не из будущего
+  tk := least(coalesce(p_taken_at, now()), now());
+  if tk < now() - interval '48 hours' then return jsonb_build_object('error','PHOTO_TOO_OLD'); end if;
+  select id into sh from public.shifts where staff_id = s.id and start_at <= tk + interval '5 minutes'
+     and (end_at is null or end_at >= tk) order by start_at desc limit 1;
   if sh is null then return jsonb_build_object('error','NO_OPEN_SHIFT'); end if;
   if coalesce(trim(p_object),'') = '' and p_ticket is null then return jsonb_build_object('error','NEED_OBJECT'); end if;
   if p_ticket is not null and not exists(select 1 from public.tickets where id = p_ticket and staff_id = s.id) then
     return jsonb_build_object('error','BAD_TICKET');
   end if;
-  insert into public.work_photos(staff_id, path, kind, object, note, ticket_id, shift_id, lat, lng, acc, device)
+  insert into public.work_photos(staff_id, path, kind, object, note, ticket_id, shift_id, lat, lng, acc, device, taken_at)
   values (s.id, p_path, case when p_kind in ('before','after') then p_kind else 'other' end, nullif(trim(p_object),''),
-          nullif(trim(p_note),''), p_ticket, sh, p_lat, p_lng, p_acc, p_device)
+          nullif(trim(p_note),''), p_ticket, sh, p_lat, p_lng, p_acc, p_device, case when p_taken_at is not null then tk end)
   returning * into r;
   return to_jsonb(r);
+end $$;
+
+-- задача выполнена: фото на месте, расстояние до точки задачи считает сервер; фото попадает и в «Фото работ»
+create function public.complete_task(p_id uuid, p_photo text, p_lat double precision, p_lng double precision,
+  p_acc real, p_mocked boolean, p_device text, p_note text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; t public.tasks; e text; sh uuid; pname text;
+begin
+  s := public._staff();
+  e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
+  e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
+  select id into sh from public.shifts where staff_id = s.id and end_at is null;
+  if sh is null then return jsonb_build_object('error','NO_OPEN_SHIFT'); end if;
+  select * into t from public.tasks where id = p_id and staff_id = s.id for update;
+  if t.id is null or t.status <> 'new' then return jsonb_build_object('error','CANNOT_COMPLETE'); end if;
+  select name into pname from public.places where id = t.place_id;
+  update public.tasks set status = 'done', done_at = now(), done_photo = p_photo, done_lat = p_lat, done_lng = p_lng,
+         done_dist = public.dist_m(p_lat, p_lng, t.lat, t.lng), done_note = nullif(trim(p_note),'')
+   where id = t.id returning * into t;
+  insert into public.work_photos(staff_id, path, kind, object, note, shift_id, lat, lng, acc, device)
+  values (s.id, p_photo, 'after', coalesce(pname, t.title), coalesce(nullif(trim(p_note),''), t.title), sh, p_lat, p_lng, p_acc, p_device);
+  return to_jsonb(t);
 end $$;
 
 -- права на вызов функций
 revoke all on function public.register, public.update_car, public.start_shift, public.end_shift, public.add_fuel,
   public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo,
-  public.add_purchase, public.deliver_purchase, public.add_work_photo from public, anon;
+  public.add_purchase, public.deliver_purchase, public.add_work_photo, public.complete_task from public, anon;
 grant execute on function public.register, public.update_car, public.start_shift, public.end_shift, public.add_fuel,
   public.add_track, public.get_pool, public.take_ticket, public.refuse_ticket, public.ticket_step, public.add_ticket_photo,
-  public.add_purchase, public.deliver_purchase, public.add_work_photo, public.is_admin to authenticated;
+  public.add_purchase, public.deliver_purchase, public.add_work_photo, public.complete_task, public.is_admin to authenticated;
 revoke all on function public._staff, public._guard, public._check_photo, public._route_km, public._gps_km from public, anon, authenticated;
 
 -- =====================================================================

@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, StyleSheet } from 'react-native';
 
@@ -67,4 +68,94 @@ export const s = StyleSheet.create({
   flabel: { fontSize: 13, fontWeight: '600', color: C.ink },
   inp: { borderWidth: 1, borderColor: C.line, backgroundColor: C.surface2, borderRadius: 11, paddingHorizontal: 13, paddingVertical: 12, fontSize: 16, color: C.ink },
   flag: { borderRadius: 11, padding: 12 },
+});
+
+/* ---------- иконки, плитки, нижнее меню ---------- */
+export const Icon = ({ name, size = 22, color = C.ink, style }) => <Ionicons name={name} size={size} color={color} style={style} />;
+
+// Плитка с цифрой: «Фото работ 3»
+export function Tile({ icon, value, label, tone = 'note', onPress }) {
+  const fg = { ok: C.ok, warn: C.warn, bad: C.bad, info: C.info, note: C.ink }[tone];
+  const bg = { ok: C.okSoft, warn: C.warnSoft, bad: C.badSoft, info: C.infoSoft, note: C.surface }[tone];
+  return (
+    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [u.tile, { backgroundColor: bg, opacity: pressed ? 0.85 : 1 }]}>
+      <Icon name={icon} size={20} color={fg} />
+      <Text style={{ fontSize: 22, fontWeight: '800', color: fg, marginTop: 6 }} numberOfLines={1}>{value}</Text>
+      <Text style={{ fontSize: 12.5, color: C.muted }} numberOfLines={2}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// Большая кнопка действия с иконкой
+export function Action({ icon, title, sub, onPress, kind = 'plain' }) {
+  const primary = kind === 'primary';
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [u.action, primary && { backgroundColor: C.sun, borderColor: C.sun }, { opacity: pressed ? 0.85 : 1 }]}>
+      <View style={[u.actIc, { backgroundColor: primary ? 'rgba(255,255,255,0.35)' : C.surface2 }]}>
+        <Icon name={icon} size={24} color={primary ? C.sunInk : C.pine} />
+      </View>
+      <Text style={{ fontSize: 15.5, fontWeight: '700', color: primary ? C.sunInk : C.ink }}>{title}</Text>
+      {sub ? <Text style={{ fontSize: 12, color: primary ? C.sunInk : C.muted, opacity: 0.85 }} numberOfLines={1}>{sub}</Text> : null}
+    </Pressable>
+  );
+}
+
+// Строка списка с иконкой слева
+export function Row({ icon, iconColor = C.pine, title, sub, right, onPress, last }) {
+  return (
+    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [u.row, !last && { borderBottomWidth: 1, borderBottomColor: C.line }, { opacity: pressed ? 0.7 : 1 }]}>
+      <View style={[u.rowIc, { backgroundColor: C.surface2 }]}><Icon name={icon} size={18} color={iconColor} /></View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ fontSize: 15, color: C.ink, fontWeight: '600' }}>{title}</Text>
+        {sub ? <Text style={{ fontSize: 13, color: C.muted }}>{sub}</Text> : null}
+      </View>
+      {right}
+      {onPress && !right ? <Icon name="chevron-forward" size={18} color={C.muted} /> : null}
+    </Pressable>
+  );
+}
+
+// Пункт чек-листа
+export function Check({ done, text, sub }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', paddingVertical: 4 }}>
+      <Icon name={done ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={done ? C.ok : C.muted} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 15, color: done ? C.muted : C.ink, textDecorationLine: done ? 'line-through' : 'none' }}>{text}</Text>
+        {sub ? <Text style={{ fontSize: 12.5, color: C.muted }}>{sub}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+export const TABS = [['home', 'Главная', 'home'], ['day', 'Мой день', 'today'], ['history', 'История', 'calendar'], ['profile', 'Профиль', 'person']];
+export function TabBar({ tab, onTab, badges }) {
+  return (
+    <View style={u.tabs}>
+      {TABS.map(([k, l, ic]) => {
+        const on = tab === k;
+        const b = badges && badges[k];
+        return (
+          <Pressable key={k} onPress={() => onTab(k)} style={u.tab} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+            <View>
+              <Icon name={on ? ic : ic + '-outline'} size={24} color={on ? C.pine : C.muted} />
+              {b ? <View style={u.badge}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{b}</Text></View> : null}
+            </View>
+            <Text style={{ fontSize: 11.5, color: on ? C.pine : C.muted, fontWeight: on ? '700' : '500' }}>{l}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const u = StyleSheet.create({
+  tile: { flex: 1, minWidth: '46%', borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 12 },
+  action: { flex: 1, minWidth: '46%', backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 14, gap: 4 },
+  actIc: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
+  rowIc: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  tabs: { flexDirection: 'row', backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6, paddingBottom: 10 },
+  tab: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 2 },
+  badge: { position: 'absolute', top: -4, right: -10, backgroundColor: C.bad, borderRadius: 9, minWidth: 18, height: 18, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
 });

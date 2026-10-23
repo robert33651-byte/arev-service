@@ -49,7 +49,7 @@ const LS={get(k,d){try{const v=localStorage.getItem('arevadm.'+k);return v==null
 
 /* ---------- состояние ---------- */
 const S={session:null,isAdmin:false,loaded:false,view:{name:'a-dash',p:{}},form:{},filter:'active',per:LS.get('per','week'),empF:null,
- cfg:{},staff:[],shifts:[],fuel:[],tickets:[],buys:[],bf:'open',wph:[],places:[],dayEmp:null,dayDate:null,dayPts:{},dayLoading:null,map:null,dayCtx:null,tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
+ cfg:{},staff:[],shifts:[],fuel:[],tickets:[],buys:[],bf:'open',wph:[],places:[],tasks:[],taskDate:null,dayEmp:null,dayDate:null,dayPts:{},dayLoading:null,map:null,dayCtx:null,tphotos:{},alerts:[],checks:{},tx:[],track:{},urls:{},imp:null,busy:false};
 const tech=id=>S.staff.find(m=>m.id===id);
 const approved=()=>S.staff.filter(m=>m.status==='approved');
 const T=id=>S.tickets.find(t=>t.id===id);
@@ -74,7 +74,8 @@ async function load(){
   pages(()=>sb.from('track_points').select('staff_id,at,device_at,lat,lng,acc,mocked').gte('at',from8).order('id')),
   pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false})),
   pages(()=>sb.from('work_photos').select('*').gte('at',from).order('at',{ascending:false})),
-  pages(()=>sb.from('places').select('*').order('name'))
+  pages(()=>sb.from('places').select('*').order('name')),
+  pages(()=>sb.from('tasks').select('*').gte('day',from.slice(0,10)).order('day').order('ord').order('created_at'))
  ]);
  const err=q.find(r=>r&&r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
  S.cfg=q[0].data||{};S.staff=q[1].data||[];
@@ -90,7 +91,8 @@ async function load(){
  S.tx=(q[7].data||[]).map(x=>({...x,at:ms(x.at)}));
  S.track={};(q[8].data||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,acc:p.acc,at:ms(p.device_at||p.at),mocked:p.mocked,what:'трек'})});
  Object.values(S.track).forEach(a=>a.sort((x,y)=>x.at-y.at));
- S.wph=(q[10].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
+ S.wph=(q[10].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.taken_at||x.at),sentAt:ms(x.at),offline:!!x.taken_at&&ms(x.at)-ms(x.taken_at)>10*60000,loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
+ S.tasks=(q[12].data||[]).map(x=>({...x,masterId:x.staff_id,dAt:ms(x.done_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
  S.places=(q[11].data||[]).filter(x=>x.active!==false);
  S.dayPts={};
  S.buys=(q[9].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.created_at),dAt:ms(x.delivered_at),lAt:ms(x.left_at),accAt:ms(x.accepted_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
@@ -165,12 +167,16 @@ function buyFlags(b){const c=S.cfg,f=[];if(b.status==='cancelled')return f;const
  if(b.dest==='site'&&b.delivered_lat!=null){const dl={lat:b.delivered_lat,lng:b.delivered_lng};if(!S.wph.some(w=>w.masterId===b.masterId&&w.loc&&Math.abs(w.at-b.dAt)<864e5&&distM(w.loc,dl)<=300))f.push({lv:'warn',t:'Материал отмечен там, где нет фото работ'})}
  if(b.shortage)f.push({lv:'bad',t:'Недостача при приёмке'+(b.accept_note?': '+b.accept_note:'')});
  if(b.status==='delivered'&&now-(b.lAt||b.dAt||b.at)>864e5)f.push({lv:'warn',t:'Ждёт приёмки больше суток'});
- if(!b.shift_id)f.push({lv:'warn',t:'Куплено вне смены'});
+ if(!b.shift_id)f.push({lv:'warn',t:(b.source==='warehouse'?'Взято':'Куплено')+' вне смены'});
+ if(b.source==='warehouse'&&b.loc){const w=whPoint();const d=w?distM(b.loc,w):null;if(d!=null&&d>300)f.push({lv:'bad',t:'Отмечено «со склада», а снято в '+fDist(d)+' от склада'})}
  if(!b.loc)f.push({lv:'warn',t:'Чек без координат'});
  const dup=S.buys.find(x=>x.id!==b.id&&x.status!=='cancelled'&&x.amount===b.amount&&Math.abs(x.at-b.at)<3*864e5&&String(x.supplier).trim().toLowerCase()===String(b.supplier).trim().toLowerCase());
  if(dup)f.push({lv:'warn',t:'Похожая закупка на ту же сумму '+fDay(dup.at)+(dup.masterId!==b.masterId?' у другого сотрудника':'')});
- f.push(...aiBuy(b));return f}
+ if(b.source!=='warehouse')f.push(...aiBuy(b));return f}
 
+function taskFlags(t){const f=[];if(t.status==='cancelled')return f;const pl=S.places.find(p=>p.id===t.place_id);const lim=(pl&&pl.radius)||+S.cfg.client_radius||200;
+ if(t.status==='done'&&t.done_dist!=null&&t.done_dist>lim)f.push({lv:'bad',t:'Задача «'+t.title+'» отмечена в '+fDist(t.done_dist)+' от места'});
+ if(t.status==='new'&&ymdTs(t.day)+864e5<=Date.now())f.push({lv:'warn',t:'Задача «'+t.title+'» не выполнена'});return f}
 function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const g=+c.grace_min||0;const rad=+c.office_radius||150;
  const late=Math.round((sh.startAt-hmToTs(sh.startAt,c.work_start))/60000);if(late>g)f.push({lv:'warn',t:'Опоздание '+fDur(late*60000)});
  if(s.dist!=null&&s.dist>rad)f.push({lv:'bad',t:'Приход отмечен в '+fDist(s.dist)+' от офиса'});else if(s.lat==null)f.push({lv:'warn',t:'Приход без координат'});
@@ -248,6 +254,7 @@ function allIssues(from){const out=[];const t0=dayStart(Date.now());
   if(m.norm_claimed&&+m.norm_claimed!==+m.norm_approved)out.push({lv:'warn',t:'Расход машины ждёт утверждения: '+n1(m.norm_claimed),who:m.id,at:ms(m.created_at),kind:'Профиль',go:['a-emp',m.id]})});
  S.shifts.filter(s=>s.startAt>=from).forEach(s=>shiftFlags(s).forEach(f=>out.push({lv:f.lv,t:f.t,who:s.masterId,at:s.startAt,kind:'Смена',go:['a-emp',s.masterId]})));
  S.fuel.filter(r=>r.at>=from).forEach(r=>fuelFlags(r).forEach(f=>out.push({lv:f.lv,t:f.t,who:r.masterId,at:r.at,kind:'Заправка',go:['a-fuel','']})));
+ S.tasks.filter(t=>ymdTs(t.day)>=dayStart(from)).forEach(t=>taskFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t,who:t.masterId,at:t.dAt||ymdTs(t.day)+18*36e5,kind:'Задача',go:['a-tasks','']})));
  S.buys.filter(b=>b.at>=from||['bought','partial','delivered'].includes(b.status)).forEach(b=>buyFlags(b).forEach(f=>out.push({lv:f.lv,t:f.t+' ('+b.supplier+', '+money(b.amount)+')',who:b.masterId,at:b.at,kind:'Закупка',go:['a-buys','']})));
  S.tickets.filter(t=>(t.createdAt>=from||(t.times.done>=from))&&t.status!=='cancelled').forEach(t=>ticketFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t,who:t.techId,at:t.times.done||t.times.onsite||t.createdAt,kind:'Заказ '+t.num,go:['a-order',t.id]})));
  const seen={};return out.filter(x=>{const k=x.who+'|'+x.t+'|'+dayStart(x.at);return seen[k]?false:(seen[k]=1)}).sort((a,b)=>((a.lv==='bad'?0:1)-(b.lv==='bad'?0:1))||(b.at-a.at))}
@@ -270,7 +277,7 @@ const perSeg=()=>'<div class="seg" style="width:min(100%,360px)">'+PERS.map(x=>'
 const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min(100%,260px);padding:9px 12px;font-size:14px"><option value="">Все сотрудники</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(S.empF===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select>';
 const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
 
-const ANAV=[['a-dash','Сводка','chart'],['a-day','Маршрут дня','route'],['a-photos','Фото работ','camera'],['a-buys','Закупки','box'],['a-places','Места','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
+const ANAV=[['a-dash','Сводка','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-buys','Закупки','box'],['a-places','Места','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
  const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  return '<div class="adm"><aside class="side"><div class="brand"><span class="sunmark" aria-hidden="true"></span><div style="min-width:0"><b>'+h(S.cfg.company||'Arev Service')+'</b><small>Контроль сотрудников</small></div></div><nav class="nav">'+ANAV.map(i=>'<button class="'+(cur===i[0]?'on':'')+'" data-act="nav" data-v="'+i[0]+'">'+I[i[2]]+'<span class="lbl">'+i[1]+'</span>'+(cnt[i[0]]?'<span class="cnt">'+cnt[i[0]]+'</span>':'')+'</button>').join('')+'</nav><div class="foot"><button class="lnk" style="color:inherit" data-act="reload">Обновить данные</button><br><button class="lnk" style="color:inherit" data-act="logout">Выйти</button></div></aside><main class="amain">'+body+'</main></div>'}
@@ -420,7 +427,7 @@ function buyDeliv(b){const c=S.cfg,radO=+c.office_radius||150,radC=+c.client_rad
 function buyRows(list,showName){return '<div class="tblw flat"><table class="tbl"><thead><tr><th>Куплено</th>'+(showName?'<th class="l">Сотрудник</th>':'')+'<th class="l">Где и что</th><th>Сумма</th><th>Чек</th><th class="l">Куда</th><th class="l">Сдача</th><th class="l">Статус</th><th class="l">Отклонения</th><th></th></tr></thead><tbody>'+
  (list.length?list.map(b=>{const m=tech(b.masterId);const t=b.ticket_id?T(b.ticket_id):null;const st=BST[b.status]||BST.bought;
   return '<tr><td>'+fT(b.at)+'<br>'+(b.loc?'<a class="tiny" href="'+mapUrl(b.loc)+'" target="_blank" rel="noopener">где купил</a>':'')+'</td>'+(showName?'<td class="l"><button class="lnk" data-act="ago" data-v="a-emp" data-id="'+h(b.masterId)+'">'+h(m?m.name:'—')+'</button></td>':'')+
-  '<td class="l wrapc"><b>'+h(b.supplier)+'</b><div class="small">'+(b.lines||[]).map(lineTxt).join('<br>')+'</div></td><td class="num">'+money(b.amount)+'</td><td>'+thumb(b.photo)+'</td>'+
+  '<td class="l wrapc"><b>'+(b.source==='warehouse'?'<span class="chip c-info">Со склада</span>':h(b.supplier))+'</b><div class="small">'+(b.lines||[]).map(lineTxt).join('<br>')+'</div></td><td class="num">'+(b.source==='warehouse'?'—':money(b.amount))+'</td><td>'+thumb(b.photo)+'</td>'+
   '<td class="l">'+(b.dest==='ticket'?(t?'<button class="lnk" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'">Объект '+h(t.num)+'</button><div class="tiny muted">'+h(t.address)+'</div>':'Объект'):b.dest==='site'?'Объект<div class="tiny muted">'+h(b.site||'')+'</div>':'Склад')+'</td>'+
   '<td class="l wrapc">'+buyDeliv(b)+'</td><td class="l"><span class="chip '+st[1]+'">'+(b.status==='delivered'&&b.dest!=='warehouse'&&!leftLines(b).length?'Ждёт проверки':st[0])+'</span>'+(b.accepted_lines&&b.status==='accepted'?'<div class="tiny muted">принято: '+b.accepted_lines.map(lineTxt).join(', ')+'</div>':'')+'</td>'+
   '<td class="l wrapc">'+flagCell(buyFlags(b))+'</td><td><div class="row" style="justify-content:flex-end;gap:6px">'+(b.status==='delivered'?'<button class="btn primary sm" data-act="buyacc" data-id="'+h(b.id)+'">'+(acceptLines(b).length?'Принять':'Подтвердить')+'</button>':'')+(['bought','partial','delivered'].includes(b.status)?'<button class="btn ghost sm" data-act="buycancel" data-id="'+h(b.id)+'">Отменить</button>':'')+'</div></td></tr>'}).join(''):'<tr><td colspan="10" class="l muted">Закупок нет</td></tr>')+'</tbody></table></div>'}
@@ -454,6 +461,7 @@ function dayEvents(id,a,b,pts,shs){const ev=[];const add=(at,lat,lng,c,lbl,t,ext
   if(x.lAt)add(x.lAt,x.left_lat,x.left_lng,'#2c67a6','С','Остаток сдан на склад: '+x.supplier,{photo:x.left_photo})});
  S.fuel.filter(r=>r.masterId===id).forEach(r=>add(r.at,r.loc&&r.loc.lat,r.loc&&r.loc.lng,'#8a4fd8','А','Заправка '+n1(r.liters)+' '+fuelUnit(tech(id))+', '+money(r.sum),{photo:r.photo}));
  S.tickets.filter(t=>t.techId===id).forEach(t=>{const g=t.gps;if(g.onsite)add(t.times.onsite,g.onsite.lat,g.onsite.lng,'#e9a11b','№','Заказ '+t.num+': на месте');if(g.done)add(t.times.done,g.done.lat,g.done.lng,'#e9a11b','✓','Заказ '+t.num+': завершён')});
+ S.tasks.filter(t=>t.masterId===id&&t.status==='done').forEach(t=>add(t.dAt,t.done_lat,t.done_lng,'#0f766e','✓','Задача выполнена: '+t.title+(t.done_dist!=null?' ('+fDist(t.done_dist)+' от места)':''),{photo:t.done_photo,bad:taskFlags(t).length>0}));
  S.alerts.filter(x=>x.staff_id===id).forEach(x=>add(x.at,null,null,'#c23d2c','!',x.message,{bad:1}));
  return ev.sort((x,y)=>x.at-y.at)}
 function vDay(){const list=approved();const emp=S.dayEmp&&tech(S.dayEmp)?S.dayEmp:(list[0]||{}).id;const date=S.dayDate||ymd(Date.now());S.dayEmp=emp;S.dayDate=date;
@@ -468,10 +476,10 @@ function vDay(){const list=approved();const emp=S.dayEmp&&tech(S.dayEmp)?S.dayEm
  const hrs=shs.reduce((x,sh)=>x+((sh.endAt||Date.now())-sh.startAt),0);
  s+='<div class="kgrid">'+kpi(shs.length?fHM(shs[0].startAt)+'–'+(shs[shs.length-1].endAt?fHM(shs[shs.length-1].endAt):'идёт'):'нет смены','смена'+(hrs?', '+fDur(hrs):''),!shs.length&&![0,6].includes(new Date(a).getDay()))+
   kpi(gk!=null?n1(gk)+' км':'—','по GPS'+(ok?', по одометру '+ok+' км':''),ok&&gk!=null&&gk>=1&&ok>gk*1.25+10)+
-  kpi(longs.length,'долгих стоянок в неизвестных местах',longs.length>0)+kpi(wp.length,'фото работ',shs.length&&!wp.length)+
+  kpi(longs.length,'долгих стоянок в неизвестных местах',longs.length>0)+kpi(wp.length,'фото работ',shs.length&&!wp.length)+(()=>{const tk=S.tasks.filter(t=>t.masterId===emp&&t.day===date&&t.status!=='cancelled');return tk.length?kpi(tk.filter(t=>t.status==='done').length+' из '+tk.length,'задач выполнено',tk.some(t=>taskFlags(t).length)):''})()+
   kpi(by.length+(nb.length?' · '+nb.length+' не сдано':''),'закупок',nb.some(x=>buyFlags(x).some(f=>f.lv==='bad')))+kpi(fu.length?n1(fu.reduce((x,r)=>x+(+r.liters||0),0))+' '+fuelUnit(m)+' · '+money(fu.reduce((x,r)=>x+(+r.sum||0),0)):'—','заправки')+'</div>';
  if(!pts.length)s+='<div class="flag warn">'+I.alert+'<span>'+(shs.length?'Маршрут за этот день не записан: у сотрудника нет разрешения на местоположение «всегда», выключен GPS или телефон был без интернета весь день.':'В этот день смены не было.')+'</span></div>';
- s+='<section class="card tight"><div id="daymap" class="daymap" role="img" aria-label="Карта маршрута"></div><div class="dlegend"><span><i style="background:#2c67a6"></i>маршрут, закупки и сдача</span><span><i style="background:#c23d2c"></i>долгая стоянка в неизвестном месте</span><span><i style="background:#b86d06"></i>стоянка в неизвестном месте</span><span><i style="background:#7c8a85"></i>стоянка в известном месте</span><span><i style="background:#2c8a57"></i>фото работ</span><span><i style="background:#8a4fd8"></i>заправка</span><span><i style="background:#123a33"></i>начало и конец смены</span></div></section>';
+ s+='<section class="card tight"><div id="daymap" class="daymap" role="img" aria-label="Карта маршрута"></div><div class="dlegend"><span><i style="background:#2c67a6"></i>маршрут, закупки и сдача</span><span><i style="background:#c23d2c"></i>долгая стоянка в неизвестном месте</span><span><i style="background:#b86d06"></i>стоянка в неизвестном месте</span><span><i style="background:#7c8a85"></i>стоянка в известном месте</span><span><i style="background:#2c8a57"></i>фото работ</span><span><i style="background:#8a4fd8"></i>заправка</span><span><i style="background:#0f766e"></i>задача выполнена</span><span><i style="background:#123a33"></i>начало и конец смены</span></div></section>';
  const fl=shs.reduce((x,sh)=>x.concat(shiftFlags(sh)),[]);if(fl.length)s+='<section class="card tight"><span class="label">Отклонения</span>'+fl.map(f=>'<div class="flag '+f.lv+'">'+I.alert+'<span>'+h(f.t)+'</span></div>').join('')+'</section>';
  s+='<section class="card"><h2>Хронология</h2>'+(ev.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th>Время</th><th class="l">Что</th><th>Фото</th><th>Где</th></tr></thead><tbody>'+ev.map(e=>'<tr class="tlrow"><td>'+fHM(e.at)+'</td><td class="l wrapc"'+(e.bad?' style="color:var(--bad)"':'')+'><span class="mk" style="display:inline-flex;background:'+e.c+';margin-right:8px">'+h(e.lbl)+'</span>'+h(e.t)+'</td><td>'+(e.photo?thumb(e.photo):'')+'</td><td>'+(e.lat!=null?'<button class="lnk" data-act="dayfly" data-lat="'+e.lat+'" data-lng="'+e.lng+'">на карте</button>':'—')+(e.unk?'<br><button class="lnk" data-act="addplace" data-lat="'+e.lat+'" data-lng="'+e.lng+'">+ добавить место</button>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Событий нет.</p>')+'</section>';
  return s}
@@ -496,7 +504,7 @@ function vPhotos(){const from=perFrom(S.per);const list=S.wph.filter(w=>w.at>=fr
  s+='<section class="card">'+(groups.length?groups.map(gr=>{const w0=gr[gr.length-1];const m=tech(w0.masterId);const pts=gr.filter(w=>w.loc);let spread=0;pts.forEach(x=>pts.forEach(y=>{const d=distM(x.loc,y.loc);if(d>spread)spread=d}));
   const fl=[];if(!gr.some(w=>w.kind==='after'))fl.push({lv:'warn',t:'Нет фото «после»'});if(!gr.some(w=>w.kind==='before'))fl.push({lv:'warn',t:'Нет фото «до»'});if(spread>500)fl.push({lv:'bad',t:'Фото одного объекта сделаны в местах, далёких друг от друга ('+fDist(spread)+')'});
   return '<div class="pgrp"><div class="row between wrapx"><div><b>'+h(w0.object||'Без названия')+'</b><div class="tiny muted">'+h(m?m.name:'—')+' · '+fDay(w0.at)+', '+fHM(w0.at)+'–'+fHM(gr[0].at)+' · '+gr.length+' фото</div></div><div class="row wrapx">'+(w0.loc?'<a class="chip c-muted" href="'+mapUrl(w0.loc)+'" target="_blank" rel="noopener">на карте</a>':'')+'<button class="btn ghost sm" data-act="dayopen" data-id="'+h(w0.masterId)+'" data-v="'+ymd(w0.at)+'">Маршрут дня</button></div></div>'+
-   (fl.length?'<div>'+flagCell(fl)+'</div>':'')+'<div class="pgrid">'+gr.slice().reverse().map(w=>'<figure>'+thumb(w.path,'thumb lg')+'<figcaption class="tiny muted">'+WK[w.kind]+' '+fHM(w.at)+'</figcaption></figure>').join('')+'</div>'+(gr.some(w=>w.note)?'<p class="small" style="margin:0">'+gr.filter(w=>w.note).map(w=>h(w.note)).join(' · ')+'</p>':'')+'</div>'}).join(''):'<div class="empty" style="padding:18px"><p>Фото работ за этот период нет.</p></div>')+'</section>';
+   (fl.length?'<div>'+flagCell(fl)+'</div>':'')+'<div class="pgrid">'+gr.slice().reverse().map(w=>'<figure>'+thumb(w.path,'thumb lg')+'<figcaption class="tiny muted">'+WK[w.kind]+' '+fHM(w.at)+(w.offline?'<br><span style="color:var(--warn)">без сети, отправлено '+fHM(w.sentAt)+'</span>':'')+'</figcaption></figure>').join('')+'</div>'+(gr.some(w=>w.note)?'<p class="small" style="margin:0">'+gr.filter(w=>w.note).map(w=>h(w.note)).join(' · ')+'</p>':'')+'</div>'}).join(''):'<div class="empty" style="padding:18px"><p>Фото работ за этот период нет.</p></div>')+'</section>';
  return s}
 
 function vIssues(){const lv=S.ilv||'bad';const from=dayStart(Date.now())-6*864e5;let a=allIssues(from).filter(i=>!S.empF||i.who===S.empF);const nb=a.filter(i=>i.lv==='bad').length;if(lv==='bad')a=a.filter(i=>i.lv==='bad');
@@ -521,7 +529,7 @@ function vPlaces(){const f=S.form;if(!f.pl)f.pl={kind:'client',radius:'200'};con
  if(sp.length)s+='<section class="card"><div class="row between"><h2>Неизвестные стоянки за 7 дней</h2><span class="muted small">если это объект клиента или магазин, добавьте его</span></div><div class="tblw flat"><table class="tbl"><thead><tr><th class="l">Где</th><th>Раз</th><th>Всего времени</th><th class="l">Кто</th><th>Последний раз</th><th></th></tr></thead><tbody>'+
   sp.slice(0,30).map(c=>'<tr><td class="l"><a href="'+mapUrl(c)+'" target="_blank" rel="noopener">'+c.lat.toFixed(5)+', '+c.lng.toFixed(5)+'</a></td><td>'+c.n+'</td><td>'+fDur(c.dur)+'</td><td class="l">'+[...c.who].map(id=>h((tech(id)||{}).name||'—')).join(', ')+'</td><td>'+fT(c.last)+'</td><td><button class="btn ghost sm" data-act="addplace" data-lat="'+c.lat+'" data-lng="'+c.lng+'">Добавить место</button></td></tr>').join('')+'</tbody></table></div></section>';
  s+='<section class="card"><h2>Все места ('+S.places.length+')</h2>'+(S.places.length?'<div class="tblw flat"><table class="tbl"><thead><tr><th class="l">Название</th><th class="l">Тип</th><th>Радиус</th><th class="l">Заметка</th><th>Карта</th><th></th></tr></thead><tbody>'+
-  S.places.map(x=>'<tr><td class="l"><b>'+h(x.name)+'</b></td><td class="l">'+(PLK[x.kind]||PLK.other)[0]+'</td><td>'+x.radius+' м</td><td class="l">'+h(x.note||'')+'</td><td><a class="chip c-muted" href="'+mapUrl(x)+'" target="_blank" rel="noopener">на карте</a></td><td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn ghost sm" data-act="pledit" data-id="'+h(x.id)+'">Изменить</button><button class="btn danger sm" data-act="pldel" data-id="'+h(x.id)+'">Удалить</button></div></td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Пока ни одного места.</p>')+'</section>';
+  S.places.map(x=>'<tr><td class="l"><b>'+h(x.name)+'</b></td><td class="l">'+(PLK[x.kind]||PLK.other)[0]+'</td><td>'+x.radius+' м</td><td class="l">'+h(x.note||'')+'</td><td><a class="chip c-muted" href="'+mapUrl(x)+'" target="_blank" rel="noopener">на карте</a></td><td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn ghost sm" data-act="pltask" data-id="'+h(x.id)+'">Задача</button><button class="btn ghost sm" data-act="pledit" data-id="'+h(x.id)+'">Изменить</button><button class="btn danger sm" data-act="pldel" data-id="'+h(x.id)+'">Удалить</button></div></td></tr>').join('')+'</tbody></table></div>':'<p class="muted small">Пока ни одного места.</p>')+'</section>';
  return s}
 function plLL(){const m=String((S.form.pl||{}).ll||'').match(/(-?\d+[.,]\d+)\s*[, ]\s*(-?\d+[.,]\d+)/);return m?{lat:+m[1].replace(',','.'),lng:+m[2].replace(',','.')}:null}
 function initPlacesMap(){const el=document.getElementById('plmap');if(S.map){try{S.map.remove()}catch(e){}S.map=null}if(!el)return;
@@ -534,6 +542,25 @@ function initPlacesMap(){const el=document.getElementById('plmap');if(S.map){try
  else if(ll.length)map.fitBounds(ll,{padding:[30,30],maxZoom:15});else map.setView([40.18,44.51],12);
  map.on('click',ev=>{S.form.pl=S.form.pl||{};S.form.pl.ll=ev.latlng.lat.toFixed(6)+', '+ev.latlng.lng.toFixed(6);render(true);const n=document.getElementById('p-name');if(n&&!n.value)n.focus()})}
 
+/* ---------- задачи на день ---------- */
+function vTasks(){const date=S.taskDate||ymd(Date.now());S.taskDate=date;const f=S.form;if(!f.tk)f.tk={emp:S.empF||'',place:''};const tk=f.tk;
+ const list=S.tasks.filter(t=>t.day===date&&(!S.empF||t.masterId===S.empF)&&t.status!=='cancelled');
+ const bar='<div class="daybar">'+empSel()+'<button class="btn ghost sm" data-act="tdshift" data-v="-1" aria-label="Предыдущий день">←</button><input type="date" class="inp" data-act="tdate" value="'+h(date)+'"><button class="btn ghost sm" data-act="tdshift" data-v="1" aria-label="Следующий день">→</button></div>';
+ let s=atop('Задачи на день',bar);
+ s+='<div class="card tight"><p class="small" style="margin:0">Сотрудник видит задачи на главном экране: кнопка «Маршрут» ведёт в Google Maps, «Выполнено» — только с фото на месте. Расстояние до места проверяет сервер. Невыполненные задачи попадают в отклонения на следующий день.</p></div>';
+ s+='<section class="card"><h2>Новая задача на '+h(fDay(ymdTs(date)))+'</h2><div class="cols">'+
+  '<div class="field"><label for="t-emp">Сотрудник</label><select id="t-emp" class="inp" data-tk="emp"><option value="">— выберите —</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(tk.emp===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select></div>'+
+  '<div class="field"><label for="t-pl">Место</label><select id="t-pl" class="inp" data-tk="place"><option value="">— без места —</option>'+S.places.map(p=>'<option value="'+h(p.id)+'"'+(tk.place===p.id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div></div>'+
+  '<div class="field"><label for="t-ti">Что сделать</label><input id="t-ti" class="inp" data-tk="title" value="'+h(tk.title||'')+'" placeholder="Чистка панелей, 24 шт."></div>'+
+  '<div class="field"><label for="t-no">Заметка (не обязательно)</label><input id="t-no" class="inp" data-tk="note" value="'+h(tk.note||'')+'" placeholder="Ключ у соседа, кв. 5"></div>'+
+  (!S.places.length?'<p class="tiny muted">Чтобы задача вела к точке на карте, сначала добавьте место в разделе «Места».</p>':'')+
+  '<button class="btn primary" style="align-self:flex-start" data-act="tadd">Добавить задачу</button></section>';
+ const by={};list.forEach(t=>{(by[t.masterId]=by[t.masterId]||[]).push(t)});
+ s+=Object.keys(by).length?Object.keys(by).map(id=>{const m=tech(id);const ts=by[id];const dn=ts.filter(t=>t.status==='done').length;
+  return '<section class="card"><div class="row between"><h2>'+h(m?m.name:'—')+'</h2><div class="row"><span class="chip '+(dn===ts.length?'c-ok':'c-info')+'">'+dn+' из '+ts.length+'</span><button class="btn ghost sm" data-act="dayopen" data-id="'+h(id)+'" data-v="'+h(date)+'">Маршрут дня</button></div></div><div class="tblw flat"><table class="tbl"><thead><tr><th class="l">Задача</th><th class="l">Место</th><th class="l">Статус</th><th>Фото</th><th class="l">Отклонения</th><th></th></tr></thead><tbody>'+
+   ts.map(t=>{const pl=S.places.find(p=>p.id===t.place_id);return '<tr><td class="l wrapc"><b>'+h(t.title)+'</b>'+(t.note?'<div class="tiny muted">'+h(t.note)+'</div>':'')+(t.done_note?'<div class="tiny">Сотрудник: '+h(t.done_note)+'</div>':'')+'</td><td class="l">'+(pl?'<a href="'+mapUrl(pl)+'" target="_blank" rel="noopener">'+h(pl.name)+'</a>':'—')+'</td><td class="l">'+(t.status==='done'?'<span class="chip c-ok">выполнено '+fHM(t.dAt)+'</span>'+(t.done_dist!=null?'<div class="tiny muted">'+fDist(t.done_dist)+' от места</div>':''):'<span class="chip c-warn">не выполнено</span>')+'</td><td>'+(t.done_photo?thumb(t.done_photo):'—')+'</td><td class="l wrapc">'+flagCell(taskFlags(t))+'</td><td>'+(t.status==='new'?'<button class="btn ghost sm" data-act="tdel" data-id="'+h(t.id)+'">Отменить</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div></section>'}).join(''):'<div class="empty" style="padding:18px"><p>На этот день задач нет.</p></div>';
+ return s}
+
 function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.work_start=String(f.c.work_start||'09:00').slice(0,5);f.c.work_end=String(f.c.work_end||'18:00').slice(0,5)}const c=f.c;
  const inp=(k,l,t,extra)=>'<div class="field"><label for="g-'+k+'">'+l+'</label><input id="g-'+k+'" class="inp num" type="'+(t||'number')+'" data-c="'+k+'" value="'+h(c[k]==null?'':c[k])+'"'+(extra||'')+'></div>';
  let s=atop('Настройки','<button class="btn primary" data-act="savecfg">Сохранить</button>');
@@ -542,11 +569,11 @@ function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.wor
   '<div class="field"><label for="g-wifi">Офисный Wi-Fi: имя сети (можно несколько через запятую)</label><input id="g-wifi" class="inp" data-c="office_wifi" value="'+h(c.office_wifi||'')+'" placeholder="ArevOffice"><p class="tiny muted">Если заполнено, приход и уход проверяются ещё и по Wi-Fi: подделать его сложнее, чем GPS.</p></div>'+
   '<div class="cols">'+inp('office_radius','Радиус офиса, м')+inp('client_radius','Радиус у клиента, м')+'</div>'+
   '<div class="field"><label for="g-wll">Координаты склада (если склад не в офисе)</label><input id="g-wll" class="inp" data-c="wll" value="'+h(c.wll!=null?c.wll:(c.warehouse_lat!=null?c.warehouse_lat+', '+c.warehouse_lng:''))+'" placeholder="пусто — склад в офисе"></div></section>'+
-  '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+inp('purchase_max_hours','Сдать закупку не позже, ч')+inp('stop_min','Стоянка считается от, мин')+inp('long_stop_min','Долгая стоянка от, мин')+'</div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div></section></div>';
+  '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+inp('purchase_max_hours','Сдать закупку не позже, ч')+inp('stop_min','Стоянка считается от, мин')+inp('long_stop_min','Долгая стоянка от, мин')+'</div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div><div class="field"><label for="g-ph">Телефон офиса (кнопка «Позвонить» в приложении)</label><input id="g-ph" class="inp" data-c="office_phone" value="'+h(c.office_phone||'')+'" placeholder="+374 10 123456"></div></section></div>';
  return s}
 
 /* ---------- рендер ---------- */
-const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-settings':vSettings};
+const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else root.innerHTML=shell((VIEWS[S.view.name]||vDash)());
@@ -567,6 +594,13 @@ const ACT={
  filter(d){S.filter=d.v;render(true)},
  bfilter(d){S.bf=d.v;render(true)},
  ilv(d){S.ilv=d.v;render(true)},
+ tdshift(d){S.taskDate=ymd(ymdTs(S.taskDate||ymd(Date.now()))+(+d.v)*864e5+36e5);render(true)},
+ pltask(d){S.taskDate=S.taskDate||ymd(Date.now());go('a-tasks');S.form.tk={emp:S.empF||'',place:d.id};render()},
+ async tadd(){const tk=S.form.tk||{};if(!tk.emp)return toast('Выберите сотрудника');const pl=S.places.find(p=>p.id===tk.place);const title=(tk.title||'').trim()||(pl?pl.name:'');if(!title)return toast('Напишите, что сделать');
+  const n=S.tasks.filter(t=>t.masterId===tk.emp&&t.day===S.taskDate).length;
+  const r=await sb.from('tasks').insert({staff_id:tk.emp,day:S.taskDate,place_id:pl?pl.id:null,title,note:(tk.note||'').trim()||null,lat:pl?pl.lat:null,lng:pl?pl.lng:null,ord:n});
+  if(r.error)return toast('Ошибка: '+r.error.message);toast('Задача добавлена: '+(tech(tk.emp)||{}).name);S.form.tk={emp:tk.emp,place:''};await load()},
+ async tdel(d){if(await confirmBox('Отменить задачу?','Сотрудник перестанет её видеть.','Отменить задачу')!=='y')return;await upd('tasks',d.id,{status:'cancelled'},'Задача отменена')},
  addplace(d){go('a-places');S.form.pl={kind:'client',radius:'200',ll:(+d.lat).toFixed(6)+', '+(+d.lng).toFixed(6)};render();const n=document.getElementById('p-name');if(n)n.focus()},
  pledit(d){const x=S.places.find(p=>p.id===d.id);if(!x)return;S.form.pl={id:x.id,name:x.name,kind:x.kind,radius:String(x.radius),ll:x.lat+', '+x.lng,note:x.note||''};render();window.scrollTo(0,0)},
  plclear(){S.form.pl={kind:'client',radius:'200'};render(true)},
@@ -623,12 +657,12 @@ const ACT={
   const wm=String(c.wll!=null?c.wll:(c.warehouse_lat!=null?c.warehouse_lat+','+c.warehouse_lng:'')).match(/(-?\d+[.,]\d+)\s*[, ]\s*(-?\d+[.,]\d+)/);
   const patch={company:c.company||'Arev Service',office_lat:m?+m[1].replace(',','.'):null,office_lng:m?+m[2].replace(',','.'):null,office_wifi:(c.office_wifi||'').trim()||null,office_radius:num('office_radius')||150,client_radius:num('client_radius')||200,
    work_start:c.work_start||'09:00',work_end:c.work_end||'18:00',grace_min:num('grace_min')??10,max_idle_min:num('max_idle_min')||120,default_norm:num('default_norm')||9,route_k:Math.min(3,Math.max(1,num('route_k')||1.3)),photo_max_age_min:num('photo_max_age_min')||10,
-   warehouse_lat:wm?+wm[1].replace(',','.'):null,warehouse_lng:wm?+wm[2].replace(',','.'):null,purchase_max_hours:num('purchase_max_hours')||24,stop_min:num('stop_min')||20,long_stop_min:num('long_stop_min')||30,updated_at:new Date().toISOString()};
+   warehouse_lat:wm?+wm[1].replace(',','.'):null,warehouse_lng:wm?+wm[2].replace(',','.'):null,purchase_max_hours:num('purchase_max_hours')||24,stop_min:num('stop_min')||20,long_stop_min:num('long_stop_min')||30,office_phone:(c.office_phone||'').trim()||null,updated_at:new Date().toISOString()};
   const r=await sb.from('config').update(patch).eq('id',1);if(r.error)return toast('Ошибка: '+r.error.message);toast('Настройки сохранены');S.form={};await load()}
 };
-document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg','dayemp','daydate'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});
-document.addEventListener('change',e=>{const el=e.target;const a=el.dataset.act;if(a==='assign')ACT.assign(el.dataset,el);if(a==='emp'){S.empF=el.value||null;render(true)}if(a==='impmap'&&S.imp){S.imp.map[el.dataset.k]=+el.value;render(true)}if(a==='urg')S.form.urgent=el.checked;if(a==='dayemp'){S.dayEmp=el.value;render(true)}if(a==='daydate'&&el.value){S.dayDate=el.value;render(true)}if(el.dataset.f&&el.tagName==='SELECT')S.form[el.dataset.f]=el.value;if(el.dataset.pl&&el.tagName==='SELECT'){S.form.pl=S.form.pl||{};S.form.pl[el.dataset.pl]=el.value}if(el.dataset.pl==='ll'||el.dataset.pl==='radius')render(true)});
-document.addEventListener('input',e=>{const el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value;if(el.dataset.pl){S.form.pl=S.form.pl||{};S.form.pl[el.dataset.pl]=el.value}if(el.dataset.c!=null)S.form.c[el.dataset.c]=el.value});
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg','dayemp','daydate','tdate'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});
+document.addEventListener('change',e=>{const el=e.target;const a=el.dataset.act;if(a==='assign')ACT.assign(el.dataset,el);if(a==='emp'){S.empF=el.value||null;render(true)}if(a==='impmap'&&S.imp){S.imp.map[el.dataset.k]=+el.value;render(true)}if(a==='urg')S.form.urgent=el.checked;if(a==='dayemp'){S.dayEmp=el.value;render(true)}if(a==='tdate'&&el.value){S.taskDate=el.value;render(true)}if(el.dataset.tk){S.form.tk=S.form.tk||{};S.form.tk[el.dataset.tk]=el.value}if(a==='daydate'&&el.value){S.dayDate=el.value;render(true)}if(el.dataset.f&&el.tagName==='SELECT')S.form[el.dataset.f]=el.value;if(el.dataset.pl&&el.tagName==='SELECT'){S.form.pl=S.form.pl||{};S.form.pl[el.dataset.pl]=el.value}if(el.dataset.pl==='ll'||el.dataset.pl==='radius')render(true)});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value;if(el.dataset.pl){S.form.pl=S.form.pl||{};S.form.pl[el.dataset.pl]=el.value}if(el.dataset.tk&&el.tagName!=='SELECT'){S.form.tk=S.form.tk||{};S.form.tk[el.dataset.tk]=el.value}if(el.dataset.c!=null)S.form.c[el.dataset.c]=el.value});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!S.session&&e.target.matches('#l-pw'))ACT.login()});
 document.getElementById('fileSheet').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;try{S.imp=await readSheet(file);render(true)}catch(err){toast('Не удалось прочитать файл. Нужен Excel (.xlsx) или CSV')}});
 

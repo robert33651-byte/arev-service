@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
         admin.from('shifts').select('start_photo,end_photo').gte('start_at', since),
         admin.from('fuel').select('photo').gte('at', since),
         admin.from('ai_checks').select('photo'),
-        admin.from('purchases').select('photo').gte('created_at', since),
+        admin.from('purchases').select('photo').eq('source', 'shop').gte('created_at', since),
       ]);
       const checked = new Set((done.data || []).map((x: { photo: string }) => x.photo));
       const todo: { photo: string; kind: 'odo' | 'receipt' | 'purchase' }[] = [];

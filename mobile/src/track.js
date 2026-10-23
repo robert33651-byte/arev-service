@@ -4,7 +4,8 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
-import { deviceId } from './device';
+import { deviceId, distM } from './device';
+import { notifyNow } from './notify';
 
 export const TRACK_TASK = 'arev-shift-track';
 const QKEY = 'arev.trackQueue';
@@ -42,8 +43,26 @@ export function defineTrackTask() {
     }));
     const q = await readQ();
     await writeQ(q.concat(pts));
+    try { await checkStay(pts); } catch (e) {}
     try { await flushTrack(); } catch (e) {}
   });
+}
+
+// Стоит на одном месте больше часа, не в офисе и без фото работ — напомнить про фото.
+async function checkStay(pts) {
+  const last = pts.filter((p) => !p.mock && (p.acc == null || p.acc <= 100)).pop();
+  if (!last) return;
+  const raw = await AsyncStorage.multiGet(['arev.stay', 'arev.lastWork', 'arev.known']);
+  let stay = null; try { stay = JSON.parse(raw[0][1] || 'null'); } catch (e) {}
+  const lastWork = +raw[1][1] || 0;
+  let known = []; try { known = JSON.parse(raw[2][1] || '[]'); } catch (e) {}
+  if (!stay || distM(stay, last) > 200) {
+    stay = { lat: last.lat, lng: last.lng, t: last.t, n: 0 };
+  } else if (!stay.n && last.t - stay.t > 60 * 60000 && lastWork < stay.t && !known.some((k) => distM(k, last) <= (k.r || 250))) {
+    stay.n = 1;
+    await notifyNow('Вы на одном месте больше часа', 'Если это объект, не забудьте фото работ: до и после.');
+  }
+  await AsyncStorage.setItem('arev.stay', JSON.stringify(stay));
 }
 
 export async function startTrack() {
@@ -54,9 +73,8 @@ export async function startTrack() {
     if (on) return true;
     await Location.startLocationUpdatesAsync(TRACK_TASK, {
       accuracy: Location.Accuracy.Balanced,
-      timeInterval: 60000,
-      distanceInterval: 100,
-      deferredUpdatesInterval: 120000,
+      timeInterval: 120000,
+      distanceInterval: 0,
       pausesUpdatesAutomatically: false,
       foregroundService: {
         notificationTitle: 'Идёт смена',
