@@ -107,7 +107,7 @@ function Main({ session }) {
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -115,6 +115,7 @@ function Main({ session }) {
         supabase.rpc('get_pool'),
         supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
         supabase.from('work_photos').select('id,at,kind,object,note,path').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
+        supabase.from('places').select('id,name,kind,lat,lng').eq('active', true).order('name'),
       ]);
       const shifts = shiftR.data || [];
       setSt({
@@ -127,6 +128,7 @@ function Main({ session }) {
         pool: poolR.data || [],
         buys: buyR.data || [],
         wph: wpR.data || [],
+        places: plR.data || [],
         err: staffR.error ? errText(staffR.error) : null,
       });
     } catch (e) {
@@ -692,6 +694,7 @@ function PurchaseScreen({ ctx, ticket }) {
           {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={'Заказ ' + t.num} onPress={() => setDest(t.id)} />)}
         </View>
         {dest === 'site' ? <Field label="Объект: клиент или адрес" value={site} onChangeText={setSite} placeholder="Ашот, Абовян, ул. ..." /> : null}
+        {dest === 'site' ? <PlacePick places={st.places} value={site} onPick={setSite} /> : null}
         {dest === 'site' ? <Muted>На объекте отметите материал фото. Остаток нужно будет сдать на склад.</Muted> : null}
         {dest !== 'warehouse' && dest !== 'site' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
       </Card>
@@ -799,6 +802,22 @@ function DeliverScreen({ ctx, id }) {
   );
 }
 
+/* ---------------- выбор объекта из списка руководителя ---------------- */
+function PlacePick({ places, value, onPick }) {
+  const q = String(value || '').trim().toLowerCase();
+  const list = (places || []).filter((p) => p.kind !== 'warehouse' && p.name.toLowerCase() !== q && (!q || p.name.toLowerCase().includes(q))).slice(0, 6);
+  if (!list.length) return null;
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+      {list.map((p) => (
+        <Pressable key={p.id} onPress={() => onPick(p.name)} style={{ paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, backgroundColor: C.surface2, borderWidth: 1, borderColor: C.line }}>
+          <Text style={{ color: C.ink, fontSize: 14 }}>{p.name}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 /* ---------------- фото работ ---------------- */
 const KINDS = [['before', 'До работы'], ['after', 'После работы'], ['other', 'Другое']];
 function WorkScreen({ ctx, ticket }) {
@@ -830,6 +849,7 @@ function WorkScreen({ ctx, ticket }) {
       <Muted>Снимайте каждую работу до и после. Место и время записываются автоматически, фото из галереи не принимаются.</Muted>
       <Card>
         <Field label="Объект: клиент или адрес" value={object} onChangeText={setObject} placeholder="Ашот, Абовян, ул. ..." />
+        <PlacePick places={st.places} value={object} onPick={setObject} />
         <Label>Что на фото</Label>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {KINDS.map(([k, l]) => <Btn key={k} kind={kind === k ? 'dark' : 'ghost'} title={l} onPress={() => setKind(k)} />)}

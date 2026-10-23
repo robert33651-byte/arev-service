@@ -224,6 +224,20 @@ create index if not exists purchases_staff_time on public.purchases(staff_id, cr
 create index if not exists purchases_status on public.purchases(status, created_at desc);
 create index if not exists purchases_ticket on public.purchases(ticket_id);
 
+-- ---------- места: объекты клиентов, поставщики, склад. Стоянки здесь не считаются подозрительными ----------
+create table if not exists public.places(
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  kind text not null default 'client' check (kind in ('client','supplier','warehouse','other')),
+  lat double precision not null,
+  lng double precision not null,
+  radius int not null default 200,
+  note text,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.places enable row level security;
+
 -- ---------- фото проделанных работ (с заказом или без) ----------
 create table if not exists public.work_photos(
   id uuid primary key default gen_random_uuid(),
@@ -286,6 +300,10 @@ do $$ begin
   drop policy if exists tickets_admin on public.tickets;
   create policy tickets_admin on public.tickets for all to authenticated using (public.is_admin()) with check (public.is_admin());
   -- только админ
+  drop policy if exists places_read on public.places;
+  create policy places_read on public.places for select to authenticated using (true);
+  drop policy if exists places_admin on public.places;
+  create policy places_admin on public.places for all to authenticated using (public.is_admin()) with check (public.is_admin());
   drop policy if exists work_photos_read on public.work_photos;
   create policy work_photos_read on public.work_photos for select to authenticated using (staff_id = auth.uid() or public.is_admin());
   drop policy if exists purchases_read on public.purchases;
