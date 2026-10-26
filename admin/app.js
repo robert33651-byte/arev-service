@@ -77,7 +77,7 @@ async function load(){
   pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false})),
   pages(()=>sb.from('work_photos').select('*').gte('at',from).order('at',{ascending:false})),
   pages(()=>sb.from('places').select('*').order('name')),
-  pages(()=>sb.from('tasks').select('*').gte('day',from.slice(0,10)).order('day').order('ord').order('created_at'))
+  pages(()=>sb.from('tasks').select('*').or('day.gte.'+from.slice(0,10)+',archived_at.is.null').order('day').order('ord').order('created_at'))
  ]);
  const err=q.find(r=>r&&r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
  S.cfg=q[0].data||{};S.staff=q[1].data||[];
@@ -178,7 +178,7 @@ function buyFlags(b){const c=S.cfg,f=[];if(b.status==='cancelled')return f;const
 
 function taskFlags(t){const f=[];if(t.status==='cancelled')return f;const pl=S.places.find(p=>p.id===t.place_id);const lim=(pl&&pl.radius)||+S.cfg.client_radius||200;
  if(t.status==='done'&&t.done_dist!=null&&t.done_dist>lim)f.push({lv:'bad',t:'Задача «'+t.title+'» отмечена в '+fDist(t.done_dist)+' от места'});
- if(t.status==='new'&&ymdTs(t.day)+864e5<=Date.now())f.push({lv:'warn',t:'Задача «'+t.title+'» не выполнена'});return f}
+ if(t.status==='new'&&(t.due?ymdTs(t.due):(t.place_id||t.lat!=null)?ymdTs(t.day):1e15)+864e5<=Date.now())f.push({lv:'warn',t:'Задача «'+t.title+'» не выполнена'});return f}
 function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const g=+c.grace_min||0;const rad=+c.office_radius||150;
  const late=Math.round((sh.startAt-hmToTs(sh.startAt,c.work_start))/60000);if(late>g)f.push({lv:'warn',t:'Опоздание '+fDur(late*60000)});
  if(s.dist!=null&&s.dist>rad)f.push({lv:'bad',t:'Приход отмечен в '+fDist(s.dist)+' от офиса'});else if(s.lat==null)f.push({lv:'warn',t:'Приход без координат'});
@@ -281,7 +281,7 @@ const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не �
 
 const ANAV=[['a-dash','Сводка','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-buys','Закупки','box'],['a-places','Места','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
- const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
+ const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&(t.status==='report'||t.disc_status==='open')).length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  const MN=[['a-dash','Сводка','chart'],['a-day','Маршрут','route'],['a-buys','Закупки','box'],['a-photos','Фото','camera']];const inMN=MN.some(x=>x[0]===cur);
  const title=(ANAV.find(x=>x[0]===cur)||['','Arev Admin'])[1];
  const top='<header class="mtop"><span class="sunmark" aria-hidden="true"></span><b class="grow">'+h(title)+'</b>'+(installable()?'<button class="mtbtn" data-act="install">Установить</button>':'')+'<button class="mtbtn ic" data-act="reload" aria-label="Обновить данные">'+I.refresh+'</button></header>';
@@ -561,18 +561,12 @@ function initPlacesMap(){const el=document.getElementById('plmap');if(S.map){try
  map.on('click',ev=>{S.form.pl=S.form.pl||{};S.form.pl.ll=ev.latlng.lat.toFixed(6)+', '+ev.latlng.lng.toFixed(6);render(true);const n=document.getElementById('p-name');if(n&&!n.value)n.focus()})}
 
 /* ---------- задачи на день ---------- */
-function vTasks(){const date=S.taskDate||ymd(Date.now());S.taskDate=date;const f=S.form;if(!f.tk)f.tk={emp:S.empF||'',place:''};const tk=f.tk;
+function vTasksDay(){const date=S.taskDate||ymd(Date.now());S.taskDate=date;const f=S.form;if(!f.tk)f.tk={emp:S.empF||'',place:''};const tk=f.tk;
  const list=S.tasks.filter(t=>t.day===date&&(!S.empF||t.masterId===S.empF)&&t.status!=='cancelled');
  const bar='<div class="daybar">'+empSel()+'<button class="btn ghost sm" data-act="tdshift" data-v="-1" aria-label="Предыдущий день">←</button><input type="date" class="inp" data-act="tdate" value="'+h(date)+'"><button class="btn ghost sm" data-act="tdshift" data-v="1" aria-label="Следующий день">→</button></div>';
- let s=atop('Задачи на день',bar);
+ let s=atop('Задачи на день',bar);s+='<div class="filters"><button data-act="tmode" data-v="open">← Все задачи</button><button class="on">На день (GPS)</button></div>';
  s+='<div class="card tight"><p class="small" style="margin:0">Сотрудник видит задачи на главном экране: кнопка «Маршрут» ведёт в Google Maps, «Выполнено» — только с фото на месте. Расстояние до места проверяет сервер. Невыполненные задачи попадают в отклонения на следующий день.</p></div>';
- s+='<section class="card"><h2>Новая задача на '+h(fDay(ymdTs(date)))+'</h2><div class="cols">'+
-  '<div class="field"><label for="t-emp">Сотрудник</label><select id="t-emp" class="inp" data-tk="emp"><option value="">— выберите —</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(tk.emp===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select></div>'+
-  '<div class="field"><label for="t-pl">Место</label><select id="t-pl" class="inp" data-tk="place"><option value="">— без места —</option>'+S.places.map(p=>'<option value="'+h(p.id)+'"'+(tk.place===p.id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div></div>'+
-  '<div class="field"><label for="t-ti">Что сделать</label><input id="t-ti" class="inp" data-tk="title" value="'+h(tk.title||'')+'" placeholder="Чистка панелей, 24 шт."></div>'+
-  '<div class="field"><label for="t-no">Заметка (не обязательно)</label><input id="t-no" class="inp" data-tk="note" value="'+h(tk.note||'')+'" placeholder="Ключ у соседа, кв. 5"></div>'+
-  (!S.places.length?'<p class="tiny muted">Чтобы задача вела к точке на карте, сначала добавьте место в разделе «Места».</p>':'')+
-  '<button class="btn primary" style="align-self:flex-start" data-act="tadd">Добавить задачу</button></section>';
+ s+=taskForm(tk,date,true);
  const by={};list.forEach(t=>{(by[t.masterId]=by[t.masterId]||[]).push(t)});
  s+=Object.keys(by).length?Object.keys(by).map(id=>{const m=tech(id);const ts=by[id];const dn=ts.filter(t=>t.status==='done').length;
   return '<section class="card"><div class="row between"><h2>'+h(m?m.name:'—')+'</h2><div class="row"><span class="chip '+(dn===ts.length?'c-ok':'c-info')+'">'+dn+' из '+ts.length+'</span><button class="btn ghost sm" data-act="dayopen" data-id="'+h(id)+'" data-v="'+h(date)+'">Маршрут дня</button></div></div><div class="tblw flat"><table class="tbl"><thead><tr><th class="l">Задача</th><th class="l">Место</th><th class="l">Статус</th><th>Фото</th><th class="l">Отклонения</th><th></th></tr></thead><tbody>'+
@@ -590,6 +584,98 @@ function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.wor
   '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+inp('purchase_max_hours','Сдать закупку не позже, ч')+inp('stop_min','Стоянка считается от, мин')+inp('long_stop_min','Долгая стоянка от, мин')+'</div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div><div class="field"><label for="g-ph">Телефон офиса (кнопка «Позвонить» в приложении)</label><input id="g-ph" class="inp" data-c="office_phone" value="'+h(c.office_phone||'')+'" placeholder="+374 10 123456"></div></section></div>';
  return s}
 
+/* ---------- задачи: в работе, на проверке, обсуждения, архив ---------- */
+const TST={new:['В работе','c-info'],report:['Сообщили о готовности','c-warn'],done:['Выполнена','c-ok'],cancelled:['Отменена','c-muted']};
+const PRI={important:['Важно','c-sun'],urgent:['Срочно','c-bad']};
+const PRI_W={urgent:0,important:1,normal:2};
+const tnames=t=>[t.staff_id,t.staff2_id].map(tech).filter(Boolean).map(m=>m.name).join(' + ')||'—';
+const taskChips=t=>{const s=TST[t.status]||TST.new;return '<span class="chip '+s[1]+'">'+s[0]+'</span>'+(PRI[t.priority]?' <span class="chip '+PRI[t.priority][1]+'">'+PRI[t.priority][0]+'</span>':'')+(t.disc_status==='open'?' <span class="chip c-bad">💬 вопрос</span>':'')+(t.self_added?' <span class="chip c-muted">сам добавил</span>':'')};
+const dueOver=t=>t.due&&t.status!=='done'&&t.status!=='cancelled'&&ymdTs(t.due)+864e5<=Date.now();
+const dueText=t=>t.due?'<span'+(dueOver(t)?' class="over"':'')+'>'+h(fDay(ymdTs(t.due)))+(dueOver(t)?' · просрочено':'')+'</span>':'<span class="muted">без срока</span>';
+function seenText(t){const late=t.status==='new'&&Date.now()-ms(t.created_at)>36e5;
+ const one=(id,at)=>{const m=tech(id);if(!m)return '';const nm=h(m.name.split(' ')[0]);return '<div class="tiny">'+(at?'👀 '+nm+' · '+fT(ms(at)):'<span style="color:var(--'+(late?'bad':'muted')+')">не открыл(а): '+nm+'</span>')+'</div>'};
+ return one(t.staff_id,t.seen_at)+(t.staff2_id?one(t.staff2_id,t.seen2_at):'')}
+function taskRows(list){return list.length?'<div class="tblw"><table class="tbl"><thead><tr><th class="l">Задача</th><th class="l">Кто</th><th class="l">Срок</th><th class="l">Открыл</th><th class="l">Статус</th></tr></thead><tbody>'+
+ list.map(t=>'<tr class="click" data-act="topen" data-id="'+h(t.id)+'"><td class="l wrapc"><b>'+h(t.title)+'</b>'+(t.note?'<div class="tiny muted">'+h(t.note)+'</div>':'')+(t.done_note&&t.status!=='new'?'<div class="tiny">Сотрудник: '+h(t.done_note)+'</div>':'')+'</td><td class="l wrapc">'+h(tnames(t))+'</td><td class="l">'+dueText(t)+'</td><td class="l">'+seenText(t)+'</td><td class="l wrapc" style="min-width:170px">'+taskChips(t)+'</td></tr>').join('')+'</tbody></table></div>'
+ :'<div class="empty" style="padding:22px"><p>Здесь пока пусто.</p></div>'}
+const ymdPlus=n=>ymd(Date.now()+n*864e5);
+function taskForm(tk,date,dayMode){
+ const opts=sel=>approved().map(m=>'<option value="'+h(m.id)+'"'+(sel===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('');
+ const dueBtn=(lbl,n)=>{const v=n==null?'':ymdPlus(n);return '<button class="'+((tk.due||'')===v?'on':'')+'" data-act="tdue" data-v="'+v+'">'+lbl+'</button>'};
+ const priBtn=(lbl,v)=>'<button class="'+((tk.pri||'normal')===v?'on':'')+'" data-act="tpri" data-v="'+v+'">'+lbl+'</button>';
+ return '<section class="card"><h2>'+(dayMode?'Новая задача на '+h(fDay(ymdTs(date))):'Новая задача')+'</h2><div class="cols">'+
+  '<div class="field"><label for="t-emp">Исполнитель</label><select id="t-emp" class="inp" data-tk="emp"><option value="">— выберите —</option>'+opts(tk.emp)+'</select></div>'+
+  '<div class="field"><label for="t-emp2">Второй исполнитель (не обязательно)</label><select id="t-emp2" class="inp" data-tk="emp2"><option value="">— нет —</option>'+opts(tk.emp2)+'</select></div></div>'+
+  '<div class="field"><label for="t-ti">Что сделать</label><input id="t-ti" class="inp" data-tk="title" value="'+h(tk.title||'')+'" placeholder="Подготовить акт, заказать кабель"></div>'+
+  '<div class="field"><label for="t-no">Заметка (не обязательно)</label><input id="t-no" class="inp" data-tk="note" value="'+h(tk.note||'')+'" placeholder="Подробности для исполнителя"></div>'+
+  '<div class="cols"><div class="field"><label>Срок</label><div class="seg">'+dueBtn('Сегодня',0)+dueBtn('1 день',1)+dueBtn('3 дня',3)+dueBtn('Без срока',null)+'</div></div>'+
+  '<div class="field"><label for="t-due">или выбрать дату</label><input id="t-due" type="date" class="inp" data-tk="due" value="'+h(tk.due||'')+'"></div></div>'+
+  '<div class="cols"><div class="field"><label>Важность</label><div class="seg">'+priBtn('Обычная','normal')+priBtn('Важно','important')+priBtn('Срочно','urgent')+'</div></div>'+
+  '<div class="field"><label for="t-pl">Место (для выезда с проверкой GPS)</label><select id="t-pl" class="inp" data-tk="place"><option value="">— без места —</option>'+S.places.map(p=>'<option value="'+h(p.id)+'"'+(tk.place===p.id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div></div>'+
+  '<button class="btn primary" style="align-self:flex-start" data-act="tadd">Добавить задачу</button></section>'}
+
+function vTasks(){const mode=S.tmode||'open';const today=ymd(Date.now());S.taskDate=S.taskDate||today;
+ if(mode==='day')return vTasksDay();
+ if(!S.form.tk)S.form.tk={emp:S.empF||'',place:''};
+ const mine=t=>!S.empF||t.staff_id===S.empF||t.staff2_id===S.empF;
+ const live=S.tasks.filter(t=>!t.archived_at&&t.status!=='cancelled'&&t.status!=='done'&&mine(t));
+ const sorter=(a,b)=>(PRI_W[a.priority]??2)-(PRI_W[b.priority]??2)||String(a.due||'9999').localeCompare(String(b.due||'9999'))||String(a.created_at).localeCompare(String(b.created_at));
+ const lists={open:live.filter(t=>t.status==='new').sort(sorter),review:live.filter(t=>t.status==='report').sort(sorter),
+  disc:live.filter(t=>t.disc_status==='open').sort(sorter),
+  arch:S.tasks.filter(t=>t.status==='done'&&mine(t)).sort((a,b)=>(ms(b.archived_at||b.done_at)||0)-(ms(a.archived_at||a.done_at)||0))};
+ const tabs=[['open','В работе'],['review','На проверке'],['disc','Обсуждения'],['arch','Архив'],['day','На день (GPS)']];
+ let s=atop('Задачи','<div class="row wrapx">'+empSel()+'<button class="btn primary sm" data-act="tnew">'+I.plus+(S.tnew?'Скрыть форму':'Новая задача')+'</button></div>');
+ s+='<div class="filters">'+tabs.map(x=>'<button class="'+(mode===x[0]?'on':'')+'" data-act="tmode" data-v="'+x[0]+'">'+x[1]+(lists[x[0]]&&lists[x[0]].length&&x[0]!=='arch'?' · '+lists[x[0]].length:'')+'</button>').join('')+'</div>';
+ if(S.tnew)s+=taskForm(S.form.tk,today,false);
+ s+='<section class="card tight">'+(mode==='review'?'<p class="small muted" style="margin:0">Сотрудник нажал «Готово». Откройте задачу и нажмите «Принять»: она уйдёт в архив вместе с перепиской и файлами.</p>':mode==='disc'?'<p class="small muted" style="margin:0">Сотрудник задал вопрос. Ответьте текстом, голосом или фото. Закрыть вопрос может только менеджер.</p>':mode==='arch'?'<p class="small muted" style="margin:0">Завершённые задачи. Откройте любую, чтобы увидеть хронологию: кто, что и когда сказал, с фото и голосовыми.</p>':'')+taskRows(lists[mode])+'</section>';
+ return s}
+
+const EVT={created:()=>'Задача создана',self_added:()=>'Сотрудник добавил задачу себе',assigned:b=>'Назначено: '+b,seen:()=>'👀 открыл(а) задачу',reported:()=>'✅ Сообщили о готовности',confirmed:()=>'✔ Принято менеджером',reopened:()=>'↩ Возвращена в работу',reminder:()=>'⏰ Отправлено напоминание: задачу не открыли',disc_open:()=>'💬 Открыто обсуждение',disc_closed:()=>'✔ Вопрос решён',due_changed:b=>'Срок или важность изменены: '+b,done_field:()=>'✅ Выполнено на месте (проверка GPS)',status:b=>'Статус: '+b};
+function logHtml(t,log){if(!log.length)return '<p class="small muted">Записей пока нет.</p>';let day='',s='';
+ log.forEach(l=>{const d=fDay(ms(l.at));if(d!==day){day=d;s+='<div class="label" style="margin-top:8px">'+h(d)+'</div>'}
+  const who=h(l.actor_name)+(l.actor_role==='admin'?' <span class="tiny muted">менеджер</span>':l.actor_role==='staff'?' <span class="tiny muted">сотрудник</span>':'');
+  let body;
+  if(l.kind==='event'){const f=EVT[l.code];body='<span class="muted">'+h(f?f(l.body||''):(l.code||'событие'))+'</span>'+(l.actor_role!=='system'&&l.code!=='created'&&l.code!=='seen'?' · '+who:l.code==='seen'?' · '+who:'')}
+  else{const to=l.actor_role==='staff'?'менеджеру':'→ '+h(tnames(t));
+   body='<div><b>'+who+'</b> <span class="tiny muted">'+(l.actor_role==='staff'?'→ менеджеру':to)+'</span></div>'+
+    (l.kind==='voice'&&l.path?'<audio controls preload="none" style="width:100%;max-width:340px" src="'+h(S.urls[l.path]||'')+'"></audio>':l.kind==='photo'&&l.path?thumb(l.path,'thumb lg'):'')+
+    (l.body?'<div style="white-space:pre-wrap;overflow-wrap:anywhere">'+h(l.body)+'</div>':'')}
+  s+='<div class="tl-i"><time>'+fHM(ms(l.at))+'</time><div>'+body+'</div></div>'});
+ return '<div class="tl">'+s+'</div>'}
+function taskSheet(t,log){const live=!t.archived_at&&t.status!=='cancelled';
+ const fin=t.status==='done';
+ return '<h2>'+h(t.title)+'</h2><div class="row wrapx" style="gap:6px">'+taskChips(t)+'</div>'+
+  '<dl class="kv"><dt>Кто</dt><dd>'+h(tnames(t))+'</dd><dt>Срок</dt><dd>'+dueText(t)+'</dd><dt>Создана</dt><dd>'+fT(ms(t.created_at))+'</dd><dt>Открыл</dt><dd>'+(seenText(t)||'—')+'</dd>'+(t.report_at?'<dt>Сообщили о готовности</dt><dd>'+fT(ms(t.report_at))+'</dd>':'')+'</dl>'+
+  (t.note?'<div class="flag note">'+h(t.note)+'</div>':'')+(t.done_note?'<div class="flag note">Сотрудник: '+h(t.done_note)+'</div>':'')+
+  '<hr class="sep"><div class="label">Хронология</div>'+logHtml(t,log)+
+  (live||fin?'<hr class="sep"><div class="field"><label for="tr-text">Ответ или комментарий</label><textarea id="tr-text" class="inp" placeholder="Напишите ответ, можно добавить фото или голосовое"></textarea></div>'+
+   '<div class="row wrapx" style="gap:8px"><button class="btn primary sm" data-act="treply">Отправить</button><button class="btn ghost sm" data-act="tphoto">'+I.camera+'Фото</button><button class="btn ghost sm" id="tr-rec" data-act="trec">🎤 Голосовое</button></div>':'')+
+  '<div class="row wrapx" style="gap:8px">'+
+   (t.disc_status==='open'?'<button class="btn ghost sm" data-act="tdisc">✔ Вопрос решён</button>':'')+
+   (live&&(t.status==='new'||t.status==='report')?'<button class="btn dark sm" data-act="tconfirm">✔ Принять и в архив</button>':'')+
+   ((t.status==='report'||fin)?'<button class="btn ghost sm" data-act="treopen">↩ Вернуть в работу</button>':'')+
+   (live&&t.status==='new'?'<button class="btn danger sm" data-act="tcancel">Отменить задачу</button>':'')+'</div>'+
+  '<button class="btn ghost block" data-act="sheet" data-v="">Закрыть</button>'}
+async function openTask(id,keep){const t=S.tasks.find(x=>x.id===id);if(!t)return;
+ const r=await sb.from('task_log').select('*').eq('task_id',id).order('at').order('id');if(r.error)return toast('Ошибка: '+r.error.message);const log=r.data||[];
+ const need=log.map(l=>l.path).filter(Boolean).filter(p=>!S.urls[p]);
+ if(need.length){const u=await sb.storage.from('photos').createSignedUrls(need,3600);(u.data||[]).forEach(x=>{if(x.signedUrl)S.urls[x.path]=x.signedUrl})}
+ const prev=document.querySelector('.sheet');const sc=prev?prev.scrollTop:0;const keepTxt=(document.getElementById('tr-text')||{}).value||'';
+ sheet(taskSheet(t,log));S.tcur=id;const el=document.querySelector('.sheet');if(el){el.style.maxWidth='680px';if(keep)el.scrollTop=sc}
+ const tx=document.getElementById('tr-text');if(tx&&keep&&keepTxt)tx.value=keepTxt}
+async function rpcA(name,args){const r=await sb.rpc(name,args);if(r.error)throw r.error;if(r.data&&r.data.error)throw new Error(r.data.error);return r.data}
+const A_ERR={EMPTY:'Напишите текст ответа',TASK_CLOSED:'Задача уже в архиве',WRONG_STATUS:'Статус уже изменился, обновите экран',NOT_ADMIN:'Только для администратора',NO_OPEN_DISCUSSION:'Обсуждение уже закрыто'};
+const aErr=e=>{const m=String((e&&(e.message||e.error))||e);for(const k in A_ERR)if(m.includes(k))return A_ERR[k];return 'Ошибка: '+m};
+async function afterTask(msg){if(msg)toast(msg);await load();if(S.tcur)await openTask(S.tcur,true)}
+let recSt=null;
+function recUi(on){const b=document.getElementById('tr-rec');if(b){b.textContent=on?'⏹ Остановить и отправить':'🎤 Голосовое';b.classList.toggle('danger',on)}}
+async function shrinkImg(file){try{const bmp=await createImageBitmap(file);const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+ return await new Promise(r=>c.toBlob(b=>r(b||file),'image/jpeg',0.8))}catch(e){return file}}
+async function sendTaskMedia(kind,blob){const id=S.tcur;if(!id)return;const uid=S.session.user.id;const ty=blob.type||'';const ext=ty.includes('mp4')?'m4a':ty.includes('webm')?'webm':ty.includes('ogg')?'ogg':ty.includes('jpeg')?'jpg':ty.includes('png')?'png':'bin';
+ const path=uid+'/task-'+kind+'-'+Date.now()+'.'+ext;const up=await sb.storage.from('photos').upload(path,blob,{contentType:ty||undefined,upsert:false});
+ if(up.error)return toast('Не загрузилось: '+up.error.message);const tx=document.getElementById('tr-text');const cap=tx?tx.value.trim():'';if(tx)tx.value='';
+ try{await rpcA('task_reply',{p_id:id,p_kind:kind,p_body:cap||null,p_path:path});await afterTask('Отправлено')}catch(e){toast(aErr(e))}}
+
 /* ---------- рендер ---------- */
 const VIEWS={'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
@@ -599,7 +685,7 @@ function render(keep){const y=window.scrollY;const root=document.getElementById(
 function go(name,p){S.view={name,p:p||{}};S.form={};render();window.scrollTo(0,0)}
 let toastT;function toast(m){let el=document.getElementById('toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';document.body.appendChild(el)}el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{el.hidden=true},3500)}
 let sheetRes=null;function sheet(html){closeSheet(null);return new Promise(r=>{sheetRes=r;const s=document.createElement('div');s.className='scrim';s.id='scrim';s.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';s.addEventListener('click',e=>{if(e.target===s)closeSheet(null)});document.body.appendChild(s);const i=s.querySelector('input,button');if(i)i.focus()})}
-function closeSheet(v){const s=document.getElementById('scrim');if(s)s.remove();if(sheetRes){const r=sheetRes;sheetRes=null;r(v)}}
+function closeSheet(v){S.tcur=null;const s=document.getElementById('scrim');if(s)s.remove();if(sheetRes){const r=sheetRes;sheetRes=null;r(v)}}
 const confirmBox=(title,text,ok)=>sheet('<h2>'+title+'</h2><p class="small">'+text+'</p><button class="btn danger block" data-act="sheet" data-v="y">'+ok+'</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');
 async function upd(table,id,patch,msg){const r=await sb.from(table).update(patch).eq('id',id);if(r.error){toast('Ошибка: '+r.error.message);return false}if(msg)toast(msg);await load();return true}
 
@@ -620,9 +706,30 @@ const ACT={
  pltask(d){S.taskDate=S.taskDate||ymd(Date.now());go('a-tasks');S.form.tk={emp:S.empF||'',place:d.id};render()},
  async tadd(){const tk=S.form.tk||{};if(!tk.emp)return toast('Выберите сотрудника');const pl=S.places.find(p=>p.id===tk.place);const title=(tk.title||'').trim()||(pl?pl.name:'');if(!title)return toast('Напишите, что сделать');
   const n=S.tasks.filter(t=>t.masterId===tk.emp&&t.day===S.taskDate).length;
-  const r=await sb.from('tasks').insert({staff_id:tk.emp,day:S.taskDate,place_id:pl?pl.id:null,title,note:(tk.note||'').trim()||null,lat:pl?pl.lat:null,lng:pl?pl.lng:null,ord:n});
-  if(r.error)return toast('Ошибка: '+r.error.message);toast('Задача добавлена: '+(tech(tk.emp)||{}).name);S.form.tk={emp:tk.emp,place:''};await load()},
+  if(tk.emp2&&tk.emp2===tk.emp)return toast('Второй исполнитель должен отличаться от первого');
+  const r=await sb.from('tasks').insert({staff_id:tk.emp,staff2_id:tk.emp2||null,day:S.taskDate,due:tk.due||null,priority:tk.pri||'normal',created_by:S.session.user.id,place_id:pl?pl.id:null,title,note:(tk.note||'').trim()||null,lat:pl?pl.lat:null,lng:pl?pl.lng:null,ord:n});
+  if(r.error)return toast('Ошибка: '+r.error.message);toast('Задача добавлена: '+(tech(tk.emp)||{}).name+(tk.emp2?' и '+(tech(tk.emp2)||{}).name:'')+'. Уведомление отправлено');S.form.tk={emp:tk.emp,place:''};S.tnew=false;await load()},
  async tdel(d){if(await confirmBox('Отменить задачу?','Сотрудник перестанет её видеть.','Отменить задачу')!=='y')return;await upd('tasks',d.id,{status:'cancelled'},'Задача отменена')},
+ tnew(){S.tnew=!S.tnew;render(true)},
+ tmode(d){S.tmode=d.v;S.form={};render(true)},
+ tdue(d){S.form.tk=S.form.tk||{};S.form.tk.due=d.v||'';render(true)},
+ tpri(d){S.form.tk=S.form.tk||{};S.form.tk.pri=d.v;render(true)},
+ topen(d){openTask(d.id)},
+ async treply(){const id=S.tcur;const tx=document.getElementById('tr-text');const body=tx?tx.value.trim():'';if(!body)return toast('Напишите текст ответа');
+  try{await rpcA('task_reply',{p_id:id,p_kind:'text',p_body:body,p_path:null});if(tx)tx.value='';await afterTask('Ответ отправлен')}catch(e){toast(aErr(e))}},
+ tphoto(){const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=async()=>{const f=i.files&&i.files[0];if(!f)return;toast('Загружаю фото…');await sendTaskMedia('photo',await shrinkImg(f))};i.click()},
+ async trec(){if(recSt){recSt.stop();return}
+  if(!navigator.mediaDevices||!window.MediaRecorder)return toast('Этот браузер не умеет записывать голос');
+  let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){return toast('Нет доступа к микрофону')}
+  const mime=['audio/mp4','audio/webm;codecs=opus','audio/webm'].find(x=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(x))||'';
+  const mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);const chunks=[];
+  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  mr.onstop=async()=>{stream.getTracks().forEach(t=>t.stop());recSt=null;recUi(false);await sendTaskMedia('voice',new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'}))};
+  recSt=mr;mr.start();recUi(true)},
+ async tdisc(){try{await rpcA('task_close_discussion',{p_id:S.tcur});await afterTask('Вопрос закрыт, сотрудники получили уведомление')}catch(e){toast(aErr(e))}},
+ async tconfirm(){try{await rpcA('task_confirm',{p_id:S.tcur});toast('Принято, задача в архиве');S.tcur=null;closeSheet(null);await load()}catch(e){toast(aErr(e))}},
+ async treopen(){const tx=document.getElementById('tr-text');try{await rpcA('task_reopen',{p_id:S.tcur,p_note:tx?tx.value.trim()||null:null});if(tx)tx.value='';await afterTask('Возвращено в работу')}catch(e){toast(aErr(e))}},
+ async tcancel(){const id=S.tcur;if(await confirmBox('Отменить задачу?','Сотрудник перестанет её видеть.','Отменить задачу')!=='y')return;S.tcur=null;await upd('tasks',id,{status:'cancelled'},'Задача отменена')},
  addplace(d){go('a-places');S.form.pl={kind:'client',radius:'200',ll:(+d.lat).toFixed(6)+', '+(+d.lng).toFixed(6)};render();const n=document.getElementById('p-name');if(n)n.focus()},
  pledit(d){const x=S.places.find(p=>p.id===d.id);if(!x)return;S.form.pl={id:x.id,name:x.name,kind:x.kind,radius:String(x.radius),ll:x.lat+', '+x.lng,note:x.note||''};render();window.scrollTo(0,0)},
  plclear(){S.form.pl={kind:'client',radius:'200'};render(true)},
