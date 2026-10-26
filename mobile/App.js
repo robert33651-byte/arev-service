@@ -11,6 +11,8 @@ import { CameraSheet, uploadPhoto, preparePhoto, uploadPrepared } from './src/ph
 import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, Action, Row, Check, TabBar } from './src/ui';
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
 import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
+import TasksScreen from './src/TasksScreen';
+import { registerPush, onTaskNotificationTap, lastTaskTap } from './src/tasks';
 
 const CATS = { inverter: 'Не работает инвертор', output: 'Упала выработка', panel: 'Повреждена панель', wiring: 'Проводка и разъёмы', battery: 'Аккумулятор', cleaning: 'Чистка панелей', checkup: 'Плановый техосмотр', expand: 'Расширение или чужая станция', other: 'Другое' };
 const ST = { new: ['Новый', 'info'], assigned: ['Взят', 'info'], enroute: ['В пути', 'warn'], onsite: ['На месте', 'warn'], done: ['Выполнен', 'ok'], closed: ['Закрыт', 'note'], cancelled: ['Отменён', 'note'] };
@@ -115,7 +117,7 @@ function Auth() {
 }
 
 /* ---------------- основное приложение ---------------- */
-const TAB_TITLE = { home: 'Arev Service', day: 'Мой день', history: 'История', profile: 'Профиль' };
+const TAB_TITLE = { home: 'Arev Service', tasks: 'Задачи', day: 'Мой день', history: 'История', profile: 'Профиль' };
 const SUB_TITLE = { shift: 'Смена', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
 
 function Main({ session }) {
@@ -125,12 +127,13 @@ function Main({ session }) {
   const [view, setView] = useState({ name: 'home' });
   const [refreshing, setRefreshing] = useState(false);
   const [boxN, setBoxN] = useState(0);
+  const [openTask, setOpenTask] = useState(null);
   const timer = useRef(null);
 
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, tkR, fuR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, tkR, fuR, ntR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -139,8 +142,9 @@ function Main({ session }) {
         supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
         supabase.from('work_photos').select('id,at,kind,object,note,path').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
         supabase.from('places').select('id,name,kind,lat,lng,radius').eq('active', true).order('name'),
-        supabase.from('tasks').select('*').eq('staff_id', uid).eq('day', ymd(new Date())).neq('status', 'cancelled').order('ord').order('created_at'),
+        supabase.from('tasks').select('*').eq('staff_id', uid).eq('day', ymd(new Date())).neq('status', 'cancelled').or('place_id.not.is.null,lat.not.is.null').order('ord').order('created_at'),
         supabase.from('fuel').select('liters,amount,at').eq('staff_id', uid).gte('at', d0.toISOString()),
+        supabase.rpc('my_tasks'),
       ]);
       const shifts = shiftR.data || [];
       const next = {
@@ -156,6 +160,7 @@ function Main({ session }) {
         places: plR.data || [],
         tasks: tkR.data || [],
         fuelToday: fuR.data || [],
+        nTasks: (ntR.data || []).filter((t) => !t.place_id && t.lat == null && t.status === 'new').length,
         err: staffR.error ? errText(staffR.error) : null,
       };
       setSt(next);
@@ -198,6 +203,15 @@ function Main({ session }) {
 
   const approved = st.staff && st.staff.status === 'approved';
   useEffect(() => { if (approved) setupNotify(); }, [approved]);
+
+  // push-уведомления о задачах: токен в базу, нажатие на уведомление открывает задачу
+  useEffect(() => {
+    if (!approved) return undefined;
+    registerPush();
+    const go = (id) => { setView({ name: 'home' }); setTab('tasks'); setOpenTask(id); };
+    lastTaskTap().then((id) => { if (id) go(id); });
+    return onTaskNotificationTap(go);
+  }, [approved]);
 
   // если смена открыта, но запись маршрута остановилась (перезагрузка телефона) — включаем снова
   useEffect(() => { if (st.open) startTrack(); }, [st.open && st.open.id]);
@@ -244,6 +258,7 @@ function Main({ session }) {
   if (tab === 'day') body = <MyDay ctx={ctx} />;
   else if (tab === 'history') body = <History ctx={ctx} />;
   else if (tab === 'profile') body = <Profile ctx={ctx} />;
+  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} />;
   else body = <Home ctx={ctx} />;
   const left = st.buys.length + st.tasks.filter((t) => t.status === 'new').length;
   return (
@@ -254,7 +269,7 @@ function Main({ session }) {
         </Pressable>
       ) : null} />
       {body}
-      <TabBar tab={tab} onTab={goTab} badges={{ home: st.open && left ? left : null }} />
+      <TabBar tab={tab} onTab={goTab} badges={{ home: st.open && left ? left : null, tasks: st.nTasks || null }} />
     </>
   );
 }
