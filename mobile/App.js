@@ -160,7 +160,7 @@ function Main({ session }) {
         places: plR.data || [],
         tasks: tkR.data || [],
         fuelToday: fuR.data || [],
-        nTasks: (ntR.data || []).filter((t) => !t.place_id && t.lat == null && t.status === 'new').length,
+        nTasks: (ntR.data || []).filter((t) => t.status === 'new').length,
         err: staffR.error ? errText(staffR.error) : null,
       };
       setSt(next);
@@ -258,7 +258,7 @@ function Main({ session }) {
   if (tab === 'day') body = <MyDay ctx={ctx} />;
   else if (tab === 'history') body = <History ctx={ctx} />;
   else if (tab === 'profile') body = <Profile ctx={ctx} />;
-  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} />;
+  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} places={st.places} gpsTaskIds={st.tasks.map((t) => t.id)} onGpsDone={(id) => nav('task', { id })} />;
   else body = <Home ctx={ctx} />;
   const left = st.buys.length + st.tasks.filter((t) => t.status === 'new').length;
   return (

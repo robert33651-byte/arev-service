@@ -14,8 +14,8 @@ import { uploadPhoto } from './photo';
 
 // ---------- чтение ----------
 // Мои открытые задачи вместе с именами исполнителей: [{id,title,note,due,priority,status,disc_status,name1,name2,seen_at,seen2_at,...}]
-// Задачи с местом и GPS остаются в старом потоке «Задачи на сегодня», здесь их нет.
-export async function myTasks() { return ((await rpc('my_tasks')) || []).filter((t) => !t.place_id && t.lat == null); }
+// Все открытые задачи, в том числе с местом: обсуждение доступно по каждой.
+export async function myTasks() { return (await rpc('my_tasks')) || []; }
 
 // Переписка и события по задаче в порядке времени
 export async function taskLog(taskId) {

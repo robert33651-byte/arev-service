@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, Pressable, TextInput, ScrollView, Modal, Image, ActivityIndicator, RefreshControl,
-  KeyboardAvoidingView, Platform, Alert, AppState, StyleSheet,
+  KeyboardAvoidingView, Platform, Alert, AppState, StyleSheet, Linking,
 } from 'react-native';
 import { supabase, errText } from './supabase';
 import { CameraSheet } from './photo';
@@ -24,7 +24,7 @@ const TXT = {
     doneTitle: 'Отметить как готовое', note: 'Комментарий (не обязательно)', sendDone: '✅ Отправить менеджеру', cancel: 'Отмена',
     newTitle: 'Новая задача для себя', what: 'Что нужно сделать', deadline: 'Срок', today: 'Сегодня', d1: '1 день', d3: '3 дня', noDl: 'Без срока',
     priority: 'Важность', normal: 'Обычная', important: 'Важно', urgent: 'Срочно', save: 'Добавить', history: 'История', manager: 'Менеджер',
-    rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
+    route: '🗺 Маршрут', doneGps: '✅ Готово на месте (фото)', place: 'Место', rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
     selfNote: 'Менеджер увидит, что вы добавили задачу сами', noteLbl: 'Заметка', youLbl: 'Вы',
     ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => 'Назначено: ' + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => 'Срок или важность изменены: ' + b, done_field: '✅ Выполнено на месте', status: (b) => 'Статус: ' + b },
   },
@@ -35,7 +35,7 @@ const TXT = {
     doneTitle: 'Նշել որպես կատարված', note: 'Նշում (ոչ պարտադիր)', sendDone: '✅ Ուղարկել մենեջերին', cancel: 'Չեղարկել',
     newTitle: 'Նոր առաջադրանք ինձ համար', what: 'Ի՞նչ անել', deadline: 'Ժամկետ', today: 'Այսօր', d1: '1 օր', d3: '3 օր', noDl: 'Առանց ժամկետի',
     priority: 'Կարևորություն', normal: 'Սովորական', important: 'Կարևոր', urgent: 'Հրատապ', save: 'Ավելացնել', history: 'Պատմություն', manager: 'Մենեջեր',
-    rec: '● Ձայնագրություն', close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
+    route: '🗺 Երթուղի', doneGps: '✅ Կատարված է տեղում (լուսանկար)', place: 'Վայր', rec: '● Ձայնագրություն', close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
     selfNote: 'Մենեջերը կտեսնի, որ դուք ինքներդ եք ավելացրել', noteLbl: 'Նշում', youLbl: 'Դուք',
     ev: { created: 'Առաջադրանքը ստեղծվեց', self_added: 'Ավելացվեց աշխատակցի կողմից', assigned: (b) => 'Նշանակվեց՝ ' + b, seen: '👀 Բացվեց', reported: '✅ Զեկուցվեց կատարման մասին', confirmed: '✔ Ընդունվեց մենեջերի կողմից', reopened: '↩ Վերադարձվեց աշխատանքի', reminder: '⏰ Հիշեցում', disc_open: '💬 Քննարկում բացվեց', disc_closed: '✔ Հարցը լուծվեց', due_changed: (b) => 'Ժամկետը կամ կարևորությունը փոխվեց՝ ' + b, done_field: '✅ Կատարվեց տեղում', status: (b) => 'Կարգավիճակ՝ ' + b },
   },
@@ -68,7 +68,7 @@ function Btn({ label, onPress, kind, disabled, small }) {
   );
 }
 
-export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask }) {
+export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask, places, gpsTaskIds, onGpsDone }) {
   const [uid, setUid] = useState(userId || null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -126,6 +126,11 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
   }, []);
 
   const fail = (e) => Alert.alert(L.error, errText(e));
+  const placeOf = (t) => (places || []).find((p) => p.id === t.place_id) || null;
+  const openRoute = (t) => {
+    const pl = placeOf(t);
+    Linking.openURL(t.lat != null ? 'https://www.google.com/maps/dir/?api=1&destination=' + t.lat + ',' + t.lng : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent((pl && pl.name) || t.title)).catch(() => {});
+  };
   // открыть задачу по нажатию на уведомление (приходит из главного экрана)
   useEffect(() => { if (openTaskId && !loading) { openTask(openTaskId); if (onOpenedTask) onOpenedTask(); } }, [openTaskId, loading]); // eslint-disable-line react-hooks/exhaustive-deps
   const task = tasks.find((x) => x.id === openId) || null;
@@ -222,6 +227,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
               <Pressable key={t.id} onPress={() => openTask(t.id)} accessibilityRole="button" accessibilityLabel={t.title} style={st.card}>
                 <Text style={st.cardT}>{t.title}</Text>
                 {!!t.note && <Text style={st.muted} numberOfLines={2}>{t.note}</Text>}
+                {!!placeOf(t) && <Text style={st.muted}>📍 {placeOf(t).name}</Text>}
                 <View style={st.row}>
                   {pr && <Chip text={pr[0]} fg={pr[1]} bg={pr[2]} />}
                   {t.status === 'report' && <Chip text={L.waitReview} fg={P.warn} bg={P.warnSoft} />}
@@ -252,6 +258,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
               </View>
               {!!task.note && <View style={st.flag}><Text style={st.ink}>{task.note}</Text></View>}
               <Text style={st.muted}>{L.due}: {task.due ? fday(task.due) : L.noDue}{partner ? '  ·  ' + L.with + ' ' + partner : ''}</Text>
+              {!!placeOf(task) && <Text style={st.muted}>📍 {L.place}: {placeOf(task).name}</Text>}
               {task.status === 'report' && <View style={[st.flag, { backgroundColor: P.warnSoft }]}><Text style={{ color: P.warn }}>{L.waitReview}</Text></View>}
               {task.disc_status === 'open' && <View style={[st.flag, { backgroundColor: P.badSoft }]}><Text style={{ color: P.bad }}>{L.discOpen}</Text></View>}
 
@@ -271,7 +278,10 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
                 <Btn label={recording ? L.stop + ' · ' + Math.floor(recSec / 60) + ':' + p2(recSec % 60) : '🎤 ' + L.voice} small kind={recording ? 'danger' : 'ghost'} onPress={toggleVoice} disabled={busy && !recording} />
               </View>
               {busy && <ActivityIndicator color={P.pine} />}
-              {task.status === 'new' && <Btn label={L.done} kind="dark" onPress={() => setDoneOpen(true)} />}
+              {(task.place_id || task.lat != null) && <Btn label={L.route} kind="ghost" onPress={() => openRoute(task)} />}
+              {task.status === 'new' && (gpsTaskIds && gpsTaskIds.includes(task.id) && onGpsDone
+                ? <Btn label={L.doneGps} kind="dark" onPress={() => { const id = task.id; closeTask(); onGpsDone(id); }} />
+                : <Btn label={L.done} kind="dark" onPress={() => setDoneOpen(true)} />)}
             </ScrollView>
           </KeyboardAvoidingView>
         )}
