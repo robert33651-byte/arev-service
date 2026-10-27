@@ -22,6 +22,7 @@ alter table public.staff add column if not exists telegram_id bigint;
 -- у менеджера обычно нет приложения: уведомления ему идут в Telegram (по желанию) или push, если он вошёл в приложение
 alter table public.admins add column if not exists push_token text;
 alter table public.admins add column if not exists telegram_id bigint;
+alter table public.admins add column if not exists name text;  -- имя менеджера в переписке по задачам
 
 -- ---------- задачи ----------
 alter table public.tasks add column if not exists staff2_id uuid references public.staff(id) on delete set null;
@@ -126,6 +127,7 @@ end $$;
 create function public._actor_name(p_uid uuid) returns text
 language sql stable security definer set search_path = public, auth as $$
   select coalesce((select name from public.staff where id = p_uid),
+                  (select nullif(trim(name), '') from public.admins where user_id = p_uid),
                   (select split_part(email, '@', 1) from auth.users where id = p_uid),
                   'Система')
 $$;
