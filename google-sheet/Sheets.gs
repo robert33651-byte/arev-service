@@ -141,7 +141,12 @@ function syncLocked() {
   // каждый лист строится отдельно: ошибка одного не мешает остальным
   [['Աշխատակիցներ', renderStaff], ['Առաջադրանքներ', renderTasks], ['Քննարկումներ', renderDisc], ['Արխիվ', renderArchive],
    ['Ճանապարհ', renderTrips], ['Վառելիք', renderFuel], ['Գնումներ', renderBuys], ['Վիճակագրություն', renderSummary]].forEach(function (x) {
-    try { x[1](d); } catch (e) { errs.push(x[0] + ': ' + (e && e.message ? e.message : e)); Logger.log(x[0] + ' → ' + (e && e.stack ? e.stack : e)); }
+    try { x[1](d); } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      errs.push(x[0] + ': ' + msg); Logger.log(x[0] + ' → ' + (e && e.stack ? e.stack : e));
+      // ошибка видна прямо в листе (ячейка A1), чтобы не искать в журнале
+      try { const sh = ss().getSheetByName(x[0]); if (sh) sh.getRange(1, 1).setValue('⚠ ՍԽԱԼ: ' + msg.slice(0, 250)).setFontColor('#C62828'); } catch (e2) { /* нет */ }
+    }
   });
   PropertiesService.getScriptProperties().setProperty('lastError', errs.join(' | '));
   PropertiesService.getScriptProperties().setProperty('lastSync', new Date().toISOString());
