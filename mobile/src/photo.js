@@ -7,6 +7,7 @@ import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 import { C } from './ui';
 
+import { tr } from './i18n';
 // Сжать снимок (без интернета тоже работает)
 export function preparePhoto(uri) {
   return manipulateAsync(uri, [{ resize: { width: 1600 } }], { compress: 0.75, format: SaveFormat.JPEG, base64: true });
@@ -42,14 +43,14 @@ export function CameraSheet({ visible, title, onClose, onShot }) {
       <View style={st.wrap}>
         {!perm ? null : !perm.granted ? (
           <View style={st.center}>
-            <Text style={st.txt}>Нужен доступ к камере</Text>
-            <Pressable style={st.btn} onPress={requestPerm}><Text style={st.btnT}>Разрешить</Text></Pressable>
+            <Text style={st.txt}>{tr('Нужен доступ к камере')}</Text>
+            <Pressable style={st.btn} onPress={requestPerm}><Text style={st.btnT}>{tr('Разрешить')}</Text></Pressable>
           </View>
         ) : (
           <CameraView ref={ref} style={st.cam} facing="back" />
         )}
         <View style={st.bar}>
-          <Pressable onPress={onClose} style={st.side}><Text style={st.txt}>Отмена</Text></Pressable>
+          <Pressable onPress={onClose} style={st.side}><Text style={st.txt}>{tr('Отмена')}</Text></Pressable>
           <Pressable onPress={shoot} disabled={busy} style={st.shutter}>
             {busy ? <ActivityIndicator color={C.pine} /> : <View style={st.inner} />}
           </Pressable>

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, StyleSheet } from 'react-native';
 
+import { tr } from './i18n';
 export const C = {
   bg: '#eef2f0', surface: '#ffffff', surface2: '#f6f8f7', ink: '#14211d', muted: '#5b6a65', line: '#d9e1dd',
   pine: '#123a33', pineInk: '#e8f1ed', sun: '#e9a11b', sunInk: '#2e1f00', sunSoft: '#fdf1d8',
@@ -141,7 +142,7 @@ export function TabBar({ tab, onTab, badges }) {
               <Icon name={on ? ic : ic + '-outline'} size={24} color={on ? C.pine : C.muted} />
               {b ? <View style={u.badge}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{b}</Text></View> : null}
             </View>
-            <Text style={{ fontSize: 11.5, color: on ? C.pine : C.muted, fontWeight: on ? '700' : '500' }}>{l}</Text>
+            <Text style={{ fontSize: 11.5, color: on ? C.pine : C.muted, fontWeight: on ? '700' : '500' }}>{tr(l)}</Text>
           </Pressable>
         );
       })}

@@ -4,6 +4,7 @@ import { AppState } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, STAFF_EMAIL_DOMAIN } from './config';
 
+import { tr } from './i18n';
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { storage: AsyncStorage, autoRefreshToken: true, persistSession: true, detectSessionInUrl: false },
 });
@@ -65,12 +66,12 @@ const ERR = {
 };
 export function errText(e) {
   const m = (e && (e.error || e.message)) || String(e || '');
-  for (const k of Object.keys(ERR)) if (m.includes(k)) return ERR[k];
-  if (/Invalid login credentials/i.test(m)) return 'Неверный телефон или PIN-код.';
-  if (/already registered|already been registered/i.test(m)) return 'Этот номер уже зарегистрирован. Войдите с PIN-кодом.';
-  if (/Password should be/i.test(m)) return 'PIN-код должен быть не короче 6 цифр.';
-  if (/Network request failed|fetch/i.test(m)) return 'Нет интернета. Проверьте связь и повторите.';
-  return 'Ошибка: ' + m;
+  for (const k of Object.keys(ERR)) if (m.includes(k)) return tr(ERR[k]);
+  if (/Invalid login credentials/i.test(m)) return tr('Неверный телефон или PIN-код.');
+  if (/already registered|already been registered/i.test(m)) return tr('Этот номер уже зарегистрирован. Войдите с PIN-кодом.');
+  if (/Password should be/i.test(m)) return tr('PIN-код должен быть не короче 6 цифр.');
+  if (/Network request failed|fetch/i.test(m)) return tr('Нет интернета. Проверьте связь и повторите.');
+  return tr('Ошибка: ') + m;
 }
 
 // Вызов серверной функции. Сервер возвращает {error: 'КОД'} или данные.

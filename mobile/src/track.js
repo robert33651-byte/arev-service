@@ -7,6 +7,7 @@ import { supabase } from './supabase';
 import { deviceId, distM } from './device';
 import { notifyNow } from './notify';
 
+import { tr, loadLang } from './i18n';
 export const TRACK_TASK = 'arev-shift-track';
 const QKEY = 'arev.trackQueue';
 
@@ -60,7 +61,8 @@ async function checkStay(pts) {
     stay = { lat: last.lat, lng: last.lng, t: last.t, n: 0 };
   } else if (!stay.n && last.t - stay.t > 60 * 60000 && lastWork < stay.t && !known.some((k) => distM(k, last) <= (k.r || 250))) {
     stay.n = 1;
-    await notifyNow('Вы на одном месте больше часа', 'Если это объект, не забудьте фото работ: до и после.');
+    await loadLang();
+    await notifyNow(tr('Вы на одном месте больше часа'), tr('Если это объект, не забудьте фото работ: до и после.'));
   }
   await AsyncStorage.setItem('arev.stay', JSON.stringify(stay));
 }
@@ -77,8 +79,8 @@ export async function startTrack() {
       distanceInterval: 0,
       pausesUpdatesAutomatically: false,
       foregroundService: {
-        notificationTitle: 'Идёт смена',
-        notificationBody: 'Arev Service записывает маршрут до конца смены',
+        notificationTitle: tr('Идёт смена'),
+        notificationBody: tr('Arev Service записывает маршрут до конца смены'),
         notificationColor: '#123a33',
         killServiceOnDestroy: false,
       },

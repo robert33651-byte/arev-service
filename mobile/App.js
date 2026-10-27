@@ -12,6 +12,7 @@ import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, A
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
 import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
 import TasksScreen from './src/TasksScreen';
+import { tr, loc, getLang, setLang, loadLang, onLang } from './src/i18n';
 import { startTalk, stopTalk, uploadTalk, requestTalkAi, talkRecording, TALK_MAX_MS } from './src/talk';
 import { registerPush, onTaskNotificationTap, lastTaskTap } from './src/tasks';
 
@@ -19,9 +20,9 @@ const CATS = { inverter: 'Не работает инвертор', output: 'Уп
 const ST = { new: ['Новый', 'info'], assigned: ['Взят', 'info'], enroute: ['В пути', 'warn'], onsite: ['На месте', 'warn'], done: ['Выполнен', 'ok'], closed: ['Закрыт', 'note'], cancelled: ['Отменён', 'note'] };
 const p2 = (n) => String(n).padStart(2, '0');
 const hm = (ts) => { if (!ts) return '—'; const d = new Date(ts); return p2(d.getHours()) + ':' + p2(d.getMinutes()); };
-const dur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' мин' : Math.floor(m / 60) + ' ч ' + p2(m % 60) + ' мин'; };
+const dur = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + tr(' мин') : Math.floor(m / 60) + tr(' ч ') + p2(m % 60) + tr(' мин'); };
 const money = (n) => (n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ֏');
-const fDist = (m) => (m == null ? '—' : m < 1000 ? m + ' м' : (m / 1000).toFixed(1).replace('.', ',') + ' км');
+const fDist = (m) => (m == null ? '—' : m < 1000 ? m + tr(' м') : (m / 1000).toFixed(1).replace('.', ',') + tr(' км'));
 const ymd = (d) => d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
 const MONTHS_G = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -30,15 +31,18 @@ const mapsTo = (lat, lng, q) => Linking.openURL(lat != null ? 'https://www.googl
 
 export default function App() {
   const [session, setSession] = useState(undefined);
+  const [lang, setLangState] = useState(null);
   useEffect(() => {
+    loadLang().then(setLangState);
+    const off = onLang(setLangState);
     supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s || null));
-    return () => sub.subscription.unsubscribe();
+    return () => { sub.subscription.unsubscribe(); off(); };
   }, []);
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.pine, paddingTop: RNStatusBar.currentHeight || 0 }}>
+    <SafeAreaView key={lang || 'x'} style={{ flex: 1, backgroundColor: C.pine, paddingTop: RNStatusBar.currentHeight || 0 }}>
       <StatusBar style="light" />
-      {session === undefined ? <Splash /> : session ? <Main session={session} /> : <Auth />}
+      {session === undefined || !lang ? <Splash /> : session ? <Main session={session} /> : <Auth />}
     </SafeAreaView>
   );
 }
@@ -51,7 +55,7 @@ function Header({ title, sub, right, onBack }) {
   return (
     <View style={{ backgroundColor: C.pine, paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       {onBack ? (
-        <Pressable onPress={onBack} hitSlop={12} accessibilityLabel="Назад" style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
+        <Pressable onPress={onBack} hitSlop={12} accessibilityLabel={tr('Назад')} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="arrow-back" size={24} color={C.pineInk} />
         </Pressable>
       ) : (
@@ -85,9 +89,9 @@ function Auth() {
   const [pin2, setPin2] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
-    if (normPhone(phone).length < 11) return Alert.alert('Телефон', 'Введите номер полностью, например +374 91 123456');
-    if (!/^\d{6,}$/.test(pin)) return Alert.alert('PIN-код', 'PIN-код — минимум 6 цифр');
-    if (mode === 'reg' && pin !== pin2) return Alert.alert('PIN-код', 'PIN-коды не совпадают');
+    if (normPhone(phone).length < 11) return Alert.alert(tr('Телефон'), tr('Введите номер полностью, например +374 91 123456'));
+    if (!/^\d{6,}$/.test(pin)) return Alert.alert(tr('PIN-код'), tr('PIN-код — минимум 6 цифр'));
+    if (mode === 'reg' && pin !== pin2) return Alert.alert(tr('PIN-код'), tr('PIN-коды не совпадают'));
     setBusy(true);
     try {
       const email = phoneEmail(phone);
@@ -95,23 +99,23 @@ function Auth() {
         ? await supabase.auth.signInWithPassword({ email, password: pin })
         : await supabase.auth.signUp({ email, password: pin });
       if (r.error) throw r.error;
-      if (mode === 'reg' && !r.data.session) Alert.alert('Почти готово', 'Аккаунт создан. Войдите с этим номером и PIN-кодом.');
+      if (mode === 'reg' && !r.data.session) Alert.alert(tr('Почти готово'), tr('Аккаунт создан. Войдите с этим номером и PIN-кодом.'));
     } catch (e) {
-      Alert.alert('Не получилось', errText(e));
+      Alert.alert(tr('Не получилось'), errText(e));
     } finally { setBusy(false); }
   };
   return (
     <>
-      <Header title="Arev Service" sub="Приложение сотрудника" />
+      <Header title="Arev Service" sub={tr('Приложение сотрудника')} />
       <Page>
-        <H1>{mode === 'login' ? 'Вход' : 'Новый сотрудник'}</H1>
-        <Muted>{mode === 'login' ? 'Войдите по номеру телефона и PIN-коду.' : 'Придумайте PIN-код из 6 цифр. Его нужно запомнить: им вы будете входить в приложение.'}</Muted>
-        <Field label="Телефон" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+374 91 123456" autoComplete="tel" />
-        <Field label="PIN-код" value={pin} onChangeText={setPin} keyboardType="number-pad" secureTextEntry maxLength={12} placeholder="••••••" />
-        {mode === 'reg' ? <Field label="Повторите PIN-код" value={pin2} onChangeText={setPin2} keyboardType="number-pad" secureTextEntry maxLength={12} /> : null}
-        <Btn title={mode === 'login' ? 'Войти' : 'Создать аккаунт'} onPress={go} busy={busy} big />
-        <Btn kind="ghost" title={mode === 'login' ? 'Я новый сотрудник' : 'У меня уже есть аккаунт'} onPress={() => setMode(mode === 'login' ? 'reg' : 'login')} />
-        <Muted style={{ textAlign: 'center' }}>Забыли PIN-код? Обратитесь к руководителю.</Muted>
+        <H1>{mode === 'login' ? tr('Вход') : tr('Новый сотрудник')}</H1>
+        <Muted>{mode === 'login' ? tr('Войдите по номеру телефона и PIN-коду.') : tr('Придумайте PIN-код из 6 цифр. Его нужно запомнить: им вы будете входить в приложение.')}</Muted>
+        <Field label={tr('Телефон')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="+374 91 123456" autoComplete="tel" />
+        <Field label={tr('PIN-код')} value={pin} onChangeText={setPin} keyboardType="number-pad" secureTextEntry maxLength={12} placeholder="••••••" />
+        {mode === 'reg' ? <Field label={tr('Повторите PIN-код')} value={pin2} onChangeText={setPin2} keyboardType="number-pad" secureTextEntry maxLength={12} /> : null}
+        <Btn title={mode === 'login' ? tr('Войти') : tr('Создать аккаунт')} onPress={go} busy={busy} big />
+        <Btn kind="ghost" title={mode === 'login' ? tr('Я новый сотрудник') : tr('У меня уже есть аккаунт')} onPress={() => setMode(mode === 'login' ? 'reg' : 'login')} />
+        <Muted style={{ textAlign: 'center' }}>{tr('Забыли PIN-код? Обратитесь к руководителю.')}</Muted>
       </Page>
     </>
   );
@@ -253,7 +257,7 @@ function Main({ session }) {
     else if (view.name === 'perms') body = <Page><PermCard always /><NotifyCard /></Page>;
     return (
       <>
-        <Header title={SUB_TITLE[view.name] || 'Arev Service'} sub={st.staff.name} onBack={() => nav('home')} />
+        <Header title={tr(SUB_TITLE[view.name] || 'Arev Service')} sub={st.staff.name} onBack={() => nav('home')} />
         {body}
       </>
     );
@@ -267,8 +271,8 @@ function Main({ session }) {
   const left = st.buys.length + st.tasks.filter((t) => t.status === 'new').length;
   return (
     <>
-      <Header title={TAB_TITLE[tab]} sub={st.staff.name} right={st.cfg.office_phone ? (
-        <Pressable onPress={() => callOffice(st.cfg)} hitSlop={10} accessibilityLabel="Позвонить в офис" style={{ padding: 4 }}>
+      <Header title={tr(TAB_TITLE[tab])} sub={st.staff.name} right={st.cfg.office_phone ? (
+        <Pressable onPress={() => callOffice(st.cfg)} hitSlop={10} accessibilityLabel={tr('Позвонить в офис')} style={{ padding: 4 }}>
           <Icon name="call" size={22} color={C.pineInk} />
         </Pressable>
       ) : null} />
@@ -286,9 +290,9 @@ function NotifyCard() {
   if (ok) return null;
   return (
     <Card style={{ borderLeftWidth: 4, borderLeftColor: C.warn }}>
-      <H2>Уведомления выключены</H2>
-      <Muted>Без них приложение не напомнит начать смену, сдать закупку или снять фото работ.</Muted>
-      <Btn kind="ghost" title="Открыть настройки" onPress={() => Linking.openSettings()} />
+      <H2>{tr('Уведомления выключены')}</H2>
+      <Muted>{tr('Без них приложение не напомнит начать смену, сдать закупку или снять фото работ.')}</Muted>
+      <Btn kind="ghost" title={tr('Открыть настройки')} onPress={() => Linking.openSettings()} />
     </Card>
   );
 }
@@ -318,22 +322,22 @@ function PermCard({ always }) {
       const r = await askPermissions();
       setP(r);
       if (r.loc && !r.bg) {
-        Alert.alert('Нужно «Разрешить всегда»', 'Откроются настройки приложения. Выберите «Разрешения» → «Местоположение» → «Разрешить в любом режиме» (или «Всегда»).', [{ text: 'Открыть настройки', onPress: () => Linking.openSettings() }]);
+        Alert.alert(tr('Нужно «Разрешить всегда»'), tr('Откроются настройки приложения. Выберите «Разрешения» → «Местоположение» → «Разрешить в любом режиме» (или «Всегда»).'), [{ text: tr('Открыть настройки'), onPress: () => Linking.openSettings() }]);
       } else if (!r.loc || !r.cam) {
-        Alert.alert('Разрешения не выданы', 'Откройте настройки приложения и включите «Камеру» и «Местоположение».', [{ text: 'Открыть настройки', onPress: () => Linking.openSettings() }, { text: 'Позже' }]);
+        Alert.alert(tr('Разрешения не выданы'), tr('Откройте настройки приложения и включите «Камеру» и «Местоположение».'), [{ text: tr('Открыть настройки'), onPress: () => Linking.openSettings() }, { text: tr('Позже') }]);
       }
     } finally { setBusy(false); }
   };
   return (
     <Card style={{ borderLeftWidth: 4, borderLeftColor: allOk ? C.ok : C.warn }}>
-      <H2>{allOk ? 'Разрешения выданы' : 'Нужны разрешения'}</H2>
-      {row(p.loc, 'Местоположение')}
-      {row(p.bg, 'Местоположение «всегда» (для маршрута смены)')}
-      {row(p.cam, 'Камера')}
-      {row(p.gps, 'GPS включён на телефоне')}
-      {!allOk ? <Muted>Без них приложение не сможет отмечать приход, уход и выезды.</Muted> : null}
-      {!allOk ? <Btn title="Выдать разрешения" onPress={ask} busy={busy} /> : null}
-      {!allOk && p.loc ? <Btn kind="ghost" title="Открыть настройки приложения" onPress={() => Linking.openSettings()} /> : null}
+      <H2>{allOk ? tr('Разрешения выданы') : tr('Нужны разрешения')}</H2>
+      {row(p.loc, tr('Местоположение'))}
+      {row(p.bg, tr('Местоположение «всегда» (для маршрута смены)'))}
+      {row(p.cam, tr('Камера'))}
+      {row(p.gps, tr('GPS включён на телефоне'))}
+      {!allOk ? <Muted>{tr('Без них приложение не сможет отмечать приход, уход и выезды.')}</Muted> : null}
+      {!allOk ? <Btn title={tr('Выдать разрешения')} onPress={ask} busy={busy} /> : null}
+      {!allOk && p.loc ? <Btn kind="ghost" title={tr('Открыть настройки приложения')} onPress={() => Linking.openSettings()} /> : null}
     </Card>
   );
 }
@@ -346,37 +350,37 @@ function Register({ ctx }) {
   const phone = '+' + ctx.phone;
   const set = (k) => (v) => setF((p) => ({ ...p, [k]: v }));
   const send = async () => {
-    if (!f.name.trim()) return Alert.alert('Анкета', 'Укажите имя и фамилию');
-    if (!f.carModel.trim() || !num(f.norm)) return Alert.alert('Анкета', 'Укажите машину и расход на 100 км');
-    if (!ok) return Alert.alert('Анкета', 'Нужно согласие');
+    if (!f.name.trim()) return Alert.alert(tr('Анкета'), tr('Укажите имя и фамилию'));
+    if (!f.carModel.trim() || !num(f.norm)) return Alert.alert(tr('Анкета'), tr('Укажите машину и расход на 100 км'));
+    if (!ok) return Alert.alert(tr('Анкета'), tr('Нужно согласие'));
     setBusy(true);
     try {
       await rpc('register', { p_name: f.name, p_phone: phone, p_car_model: f.carModel, p_car_plate: f.carPlate, p_fuel_type: f.fuel, p_norm: num(f.norm), p_tank: num(f.tank), p_device: deviceId() });
       await askPermissions();
       await ctx.load();
-    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+    } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
   return (
     <>
-      <Header title="Arev Service" sub="Анкета сотрудника" />
+      <Header title="Arev Service" sub={tr('Анкета сотрудника')} />
       <Page>
-        <H1>Анкета сотрудника</H1>
-        <Muted>Заполните один раз. Анкета привязывается к этому телефону. После проверки руководителем можно работать.</Muted>
-        <Field label="Имя и фамилия" value={f.name} onChangeText={set('name')} />
+        <H1>{tr('Анкета сотрудника')}</H1>
+        <Muted>{tr('Заполните один раз. Анкета привязывается к этому телефону. После проверки руководителем можно работать.')}</Muted>
+        <Field label={tr('Имя и фамилия')} value={f.name} onChangeText={set('name')} />
         <Card>
-          <Label>Машина</Label>
-          <Field label="Марка и модель" value={f.carModel} onChangeText={set('carModel')} placeholder="Toyota Prius" />
-          <Field label="Номер" value={f.carPlate} onChangeText={set('carPlate')} placeholder="35 XX 123" autoCapitalize="characters" />
+          <Label>{tr('Машина')}</Label>
+          <Field label={tr('Марка и модель')} value={f.carModel} onChangeText={set('carModel')} placeholder="Toyota Prius" />
+          <Field label={tr('Номер')} value={f.carPlate} onChangeText={set('carPlate')} placeholder="35 XX 123" autoCapitalize="characters" />
           <FuelSeg value={f.fuel} onChange={set('fuel')} />
-          <Field label={'Расход на 100 км, ' + (f.fuel === 'gas' ? 'м³' : 'л')} value={f.norm} onChangeText={set('norm')} keyboardType="decimal-pad" />
-          <Field label={'Объём бака, ' + (f.fuel === 'gas' ? 'м³' : 'л')} value={f.tank} onChangeText={set('tank')} keyboardType="decimal-pad" />
+          <Field label={tr('Расход на 100 км, ') + (f.fuel === 'gas' ? tr('м³') : tr('л'))} value={f.norm} onChangeText={set('norm')} keyboardType="decimal-pad" />
+          <Field label={tr('Объём бака, ') + (f.fuel === 'gas' ? tr('м³') : tr('л'))} value={f.tank} onChangeText={set('tank')} keyboardType="decimal-pad" />
         </Card>
         <Pressable onPress={() => setOk(!ok)} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
           <View style={{ width: 22, height: 22, borderRadius: 5, borderWidth: 2, borderColor: C.pine, backgroundColor: ok ? C.pine : 'transparent', marginTop: 2 }} />
-          <Muted style={{ flex: 1 }}>Согласен, что во время смены записывается моё местоположение, а фото одометра, чеков и работ сохраняются с координатами и временем и сверяются с выпиской по топливной карте.</Muted>
+          <Muted style={{ flex: 1 }}>{tr('Согласен, что во время смены записывается моё местоположение, а фото одометра, чеков и работ сохраняются с координатами и временем и сверяются с выпиской по топливной карте.')}</Muted>
         </Pressable>
-        <Btn title="Отправить" onPress={send} busy={busy} big />
-        <Btn kind="ghost" title="Выйти" onPress={() => supabase.auth.signOut()} />
+        <Btn title={tr('Отправить')} onPress={send} busy={busy} big />
+        <Btn kind="ghost" title={tr('Выйти')} onPress={() => supabase.auth.signOut()} />
       </Page>
     </>
   );
@@ -384,10 +388,10 @@ function Register({ ctx }) {
 const num = (v) => { const n = parseFloat(String(v || '').replace(',', '.')); return isFinite(n) && n > 0 ? n : null; };
 
 function FuelSeg({ value, onChange }) {
-  const opts = [['petrol', 'Бензин'], ['gas', 'Метан'], ['lpg', 'Пропан'], ['diesel', 'Дизель']];
+  const opts = [['petrol', tr('Бензин')], ['gas', tr('Метан')], ['lpg', tr('Пропан')], ['diesel', tr('Дизель')]];
   return (
     <View style={{ gap: 6 }}>
-      <Text style={{ fontSize: 13, fontWeight: '600', color: C.ink }}>Топливо</Text>
+      <Text style={{ fontSize: 13, fontWeight: '600', color: C.ink }}>{tr('Топливо')}</Text>
       <View style={{ flexDirection: 'row', backgroundColor: C.surface2, borderRadius: 12, borderWidth: 1, borderColor: C.line, padding: 3, gap: 3 }}>
         {opts.map((o) => (
           <Pressable key={o[0]} onPress={() => onChange(o[0])} style={{ flex: 1, paddingVertical: 9, borderRadius: 9, backgroundColor: value === o[0] ? C.surface : 'transparent', alignItems: 'center' }}>
@@ -401,17 +405,17 @@ function FuelSeg({ value, onChange }) {
 
 function Waiting({ ctx }) {
   const s = ctx.st.staff;
-  const txt = s.status === 'pending' ? 'Руководитель проверит анкету. После подтверждения здесь появится кнопка «Начать смену».'
-    : s.status === 'blocked' ? 'Доступ приостановлен. ' + (s.note || 'Свяжитесь с офисом.') : 'Анкета не одобрена. ' + (s.note || 'Свяжитесь с офисом.');
+  const txt = s.status === 'pending' ? tr('Руководитель проверит анкету. После подтверждения здесь появится кнопка «Начать смену».')
+    : s.status === 'blocked' ? tr('Доступ приостановлен. ') + (s.note || tr('Свяжитесь с офисом.')) : tr('Анкета не одобрена. ') + (s.note || tr('Свяжитесь с офисом.'));
   return (
     <>
       <Header title="Arev Service" sub={s.name} />
       <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
-        <H1>{s.status === 'pending' ? 'Анкета на проверке' : 'Нет доступа'}</H1>
+        <H1>{s.status === 'pending' ? tr('Анкета на проверке') : tr('Нет доступа')}</H1>
         <Flag kind={s.status === 'pending' ? 'note' : 'warn'}>{txt}</Flag>
         {s.status === 'pending' ? <PermCard always /> : null}
-        <Btn kind="ghost" title="Проверить ещё раз" onPress={ctx.refresh} />
-        <Btn kind="ghost" title="Выйти" onPress={() => supabase.auth.signOut()} />
+        <Btn kind="ghost" title={tr('Проверить ещё раз')} onPress={ctx.refresh} />
+        <Btn kind="ghost" title={tr('Выйти')} onPress={() => supabase.auth.signOut()} />
       </Page>
     </>
   );
@@ -424,12 +428,12 @@ function Home({ ctx }) {
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
   const first = String(st.staff.name).split(' ')[0];
-  const greet = (() => { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; })();
+  const greet = (() => { const h = new Date().getHours(); return h < 5 ? tr('Доброй ночи') : h < 12 ? tr('Доброе утро') : h < 18 ? tr('Добрый день') : tr('Добрый вечер'); })();
   const mine = st.mine.filter((t) => ['assigned', 'enroute', 'onsite'].includes(t.status));
   const tasks = st.tasks;
   const tLeft = tasks.filter((t) => t.status === 'new').length;
   const fuelL = st.fuelToday.reduce((a, r) => a + (+r.liters || 0), 0);
-  const unit = st.staff.fuel_type === 'gas' ? 'м³' : 'л';
+  const unit = st.staff.fuel_type === 'gas' ? tr('м³') : tr('л');
 
   if (!sh) {
     const last = st.shifts.find((x) => x.end_at);
@@ -445,23 +449,23 @@ function Home({ ctx }) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: C.pineInk, fontSize: 21, fontWeight: '700' }}>{greet}, {first}</Text>
-              <Text style={{ color: C.pineInk, opacity: 0.75 }}>{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+              <Text style={{ color: C.pineInk, opacity: 0.75 }}>{new Date().toLocaleDateString(loc(), { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
             </View>
           </View>
           {doneToday ? (
-            <Text style={{ color: C.pineInk, opacity: 0.85 }}>Смена на сегодня закончена в {hm(last.end_at)}. Хорошего вечера!</Text>
+            <Text style={{ color: C.pineInk, opacity: 0.85 }}>{tr('Смена на сегодня закончена в')}{' '}{hm(last.end_at)}{tr('. Хорошего вечера!')}</Text>
           ) : (
-            <Text style={{ color: C.pineInk, opacity: 0.85 }}>Начните смену в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.</Text>
+            <Text style={{ color: C.pineInk, opacity: 0.85 }}>{tr('Начните смену в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.')}</Text>
           )}
-          <Btn title={doneToday ? 'Начать ещё одну смену' : 'Начать смену'} onPress={() => nav('shift')} big />
+          <Btn title={doneToday ? tr('Начать ещё одну смену') : tr('Начать смену')} onPress={() => nav('shift')} big />
         </View>
         {tasks.length ? <TaskList ctx={ctx} tasks={tasks} preview /> : null}
         {st.buys.length ? <BuyList ctx={ctx} items={st.buys} /> : null}
         {last ? (
           <Card>
-            <Label>Прошлая смена</Label>
-            <Row icon="time" title={new Date(last.start_at).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }) + ', ' + hm(last.start_at) + '–' + hm(last.end_at)}
-              sub={'Одометр ' + last.end_odo + ' км' + (last.gps_km != null ? ' · по GPS ' + String(last.gps_km).replace('.', ',') + ' км' : '')} last />
+            <Label>{tr('Прошлая смена')}</Label>
+            <Row icon="time" title={new Date(last.start_at).toLocaleDateString(loc(), { weekday: 'short', day: 'numeric', month: 'long' }) + ', ' + hm(last.start_at) + '–' + hm(last.end_at)}
+              sub={tr('Одометр ') + last.end_odo + tr(' км') + (last.gps_km != null ? tr(' · по GPS ') + String(last.gps_km).replace('.', ',') + tr(' км') : '')} last />
           </Card>
         ) : null}
         <CallOffice cfg={st.cfg} />
@@ -470,11 +474,11 @@ function Home({ ctx }) {
   }
   const mins = Math.max(0, Math.round((Date.now() - new Date(sh.start_at).getTime()) / 60000));
   const checks = [
-    { done: true, text: 'Смена начата', sub: 'в ' + hm(sh.start_at) },
-    tasks.length ? { done: !tLeft, text: 'Задачи на сегодня', sub: (tasks.length - tLeft) + ' из ' + tasks.length + ' выполнено' } : null,
-    { done: st.wph.length > 0, text: 'Фото работ', sub: st.wph.length ? 'снято ' + st.wph.length : 'снимайте до и после каждой работы' },
-    { done: !st.buys.length, text: 'Закупки и материал сданы', sub: st.buys.length ? 'не сдано: ' + st.buys.length : 'всё сдано' },
-    { done: false, text: 'Закончить смену в офисе', sub: 'фото одометра' },
+    { done: true, text: tr('Смена начата'), sub: tr('в ') + hm(sh.start_at) },
+    tasks.length ? { done: !tLeft, text: tr('Задачи на сегодня'), sub: (tasks.length - tLeft) + tr(' из ') + tasks.length + tr(' выполнено') } : null,
+    { done: st.wph.length > 0, text: tr('Фото работ'), sub: st.wph.length ? tr('снято ') + st.wph.length : tr('снимайте до и после каждой работы') },
+    { done: !st.buys.length, text: tr('Закупки и материал сданы'), sub: st.buys.length ? tr('не сдано: ') + st.buys.length : tr('всё сдано') },
+    { done: false, text: tr('Закончить смену в офисе'), sub: tr('фото одометра') },
   ].filter(Boolean);
   return (
     <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
@@ -484,7 +488,7 @@ function Home({ ctx }) {
         <View style={{ flex: 1, gap: 2 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#53c085' }} />
-            <Text style={{ color: C.pineInk, opacity: 0.8, fontSize: 13 }}>Смена идёт · с {hm(sh.start_at)}</Text>
+            <Text style={{ color: C.pineInk, opacity: 0.8, fontSize: 13 }}>{tr('Смена идёт · с')}{' '}{hm(sh.start_at)}</Text>
           </View>
           <Text style={{ color: C.pineInk, fontSize: 44, fontWeight: '800', letterSpacing: 1 }}>{Math.floor(mins / 60)}:{p2(mins % 60)}</Text>
           <Text style={{ color: C.pineInk, opacity: 0.75, fontSize: 13 }}>{greet}, {first}</Text>
@@ -493,49 +497,49 @@ function Home({ ctx }) {
           <Icon name="sunny" size={34} color={C.pine} />
         </View>
       </View>
-      {ctx.boxN ? <Flag kind="warn">Без интернета сохранено фото: {ctx.boxN}. Они отправятся сами, когда появится связь.</Flag> : null}
+      {ctx.boxN ? <Flag kind="warn">{tr('Без интернета сохранено фото:')}{' '}{ctx.boxN}{tr('. Они отправятся сами, когда появится связь.')}</Flag> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Tile icon="camera" value={st.wph.length} label="фото работ" tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />
-        <Tile icon="checkbox" value={st.nTasks || 0} label="задачи" tone={st.nTasks ? 'warn' : 'ok'} onPress={() => ctx.goTab('tasks')} />
-        <Tile icon="cube" value={st.buys.length} label="не сдано" tone={st.buys.length ? 'bad' : 'ok'} onPress={st.buys.length ? () => nav('deliver', { id: st.buys[0].id }) : undefined} />
-        <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label="заправка сегодня" onPress={() => nav('fuel')} />
+        <Tile icon="camera" value={st.wph.length} label={tr('фото работ')} tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />
+        <Tile icon="checkbox" value={st.nTasks || 0} label={tr('задачи')} tone={st.nTasks ? 'warn' : 'ok'} onPress={() => ctx.goTab('tasks')} />
+        <Tile icon="cube" value={st.buys.length} label={tr('не сдано')} tone={st.buys.length ? 'bad' : 'ok'} onPress={st.buys.length ? () => nav('deliver', { id: st.buys[0].id }) : undefined} />
+        <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label={tr('заправка сегодня')} onPress={() => nav('fuel')} />
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Action icon="camera" title="Фото работ" sub="до и после" kind="primary" onPress={() => nav('work')} />
-        <Action icon="cart" title="Закупка" sub="купил в магазине" onPress={() => nav('purchase')} />
-        <Action icon="archive" title="Со склада" sub="взял материал" onPress={() => nav('take')} />
-        <Action icon="water" title="Заправка" sub="чек АЗС" onPress={() => nav('fuel')} />
-        <Action icon="mic" title="Разговор" sub="запись с клиентом" onPress={() => nav('talk')} />
-        <Action icon="help-circle" title="Помощь" sub="как пользоваться" onPress={() => nav('help')} />
+        <Action icon="camera" title={tr('Фото работ')} sub={tr('до и после')} kind="primary" onPress={() => nav('work')} />
+        <Action icon="cart" title={tr('Закупка')} sub={tr('купил в магазине')} onPress={() => nav('purchase')} />
+        <Action icon="archive" title={tr('Со склада')} sub={tr('взял материал')} onPress={() => nav('take')} />
+        <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />
+        <Action icon="mic" title={tr('Разговор')} sub={tr('запись с клиентом')} onPress={() => nav('talk')} />
+        <Action icon="help-circle" title={tr('Помощь')} sub={tr('как пользоваться')} onPress={() => nav('help')} />
       </View>
       {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
       <BuyList ctx={ctx} items={st.buys} />
       <Card>
-        <H2>План на день</H2>
+        <H2>{tr('План на день')}</H2>
         {checks.map((c, i) => <Check key={i} done={c.done} text={c.text} sub={c.sub} />)}
       </Card>
-      {mine.length ? <H2>{mine.length > 1 ? 'Мои заказы' : 'Мой заказ'}</H2> : null}
+      {mine.length ? <H2>{mine.length > 1 ? tr('Мои заказы') : tr('Мой заказ')}</H2> : null}
       {mine.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id })}>
           <Card>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Label>{t.num}{t.urgent ? ' · срочно' : ''}</Label><Chip kind={ST[t.status][1]}>{ST[t.status][0]}</Chip></View>
-            <T style={{ fontWeight: '700' }}>{CATS[t.category] || t.category}</T>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Label>{t.num}{t.urgent ? tr(' · срочно') : ''}</Label><Chip kind={ST[t.status][1]}>{tr(ST[t.status][0])}</Chip></View>
+            <T style={{ fontWeight: '700' }}>{tr(CATS[t.category] || t.category)}</T>
             <Muted>{t.address}</Muted>
             <T>{t.client_name} · {t.client_phone}</T>
           </Card>
         </Pressable>
       ))}
-      {st.pool.length ? <H2>Новые заказы ({st.pool.length})</H2> : null}
+      {st.pool.length ? <H2>{tr('Новые заказы (')}{st.pool.length})</H2> : null}
       {st.pool.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id, pooled: t })}>
           <Card>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><T style={{ fontWeight: '700', flex: 1 }}>{CATS[t.category] || t.category}</T>{t.urgent ? <Chip kind="bad">срочно</Chip> : null}</View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><T style={{ fontWeight: '700', flex: 1 }}>{tr(CATS[t.category] || t.category)}</T>{t.urgent ? <Chip kind="bad">{tr('срочно')}</Chip> : null}</View>
             <Muted>{t.address}</Muted>
             {t.est_min ? <T>{money(t.est_min)} – {money(t.est_max)}</T> : null}
           </Card>
         </Pressable>
       ))}
-      <Btn kind="dark" title="Закончить смену" big onPress={() => nav('shift')} />
+      <Btn kind="dark" title={tr('Закончить смену')} big onPress={() => nav('shift')} />
       <CallOffice cfg={st.cfg} />
     </Page>
   );
@@ -546,7 +550,7 @@ function CallOffice({ cfg }) {
   return (
     <Pressable onPress={() => callOffice(cfg)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10 }}>
       <Icon name="call" size={18} color={C.info} />
-      <Text style={{ color: C.info, fontSize: 15, fontWeight: '600' }}>Позвонить в офис</Text>
+      <Text style={{ color: C.info, fontSize: 15, fontWeight: '600' }}>{tr('Позвонить в офис')}</Text>
     </Pressable>
   );
 }
@@ -559,8 +563,8 @@ function TaskList({ ctx, tasks, preview }) {
   return (
     <Card>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <H2>Задачи на сегодня</H2>
-        <Chip kind={done === tasks.length ? 'ok' : 'info'}>{done} из {tasks.length}</Chip>
+        <H2>{tr('Задачи на сегодня')}</H2>
+        <Chip kind={done === tasks.length ? 'ok' : 'info'}>{done}{' '}{tr('из')}{' '}{tasks.length}</Chip>
       </View>
       {tasks.map((t, i) => (
         <View key={t.id} style={{ gap: 8, borderTopWidth: i ? 1 : 0, borderTopColor: C.line, paddingTop: i ? 10 : 0 }}>
@@ -570,18 +574,18 @@ function TaskList({ ctx, tasks, preview }) {
               <Text style={{ fontSize: 15.5, fontWeight: '700', color: t.status === 'done' ? C.muted : C.ink }}>{t.title}</Text>
               {placeName(t) ? <Muted>{placeName(t)}</Muted> : null}
               {t.note ? <Muted>{t.note}</Muted> : null}
-              {t.status === 'done' ? <Text style={{ color: C.ok, fontSize: 13 }}>Выполнено в {hm(t.done_at)}</Text> : null}
+              {t.status === 'done' ? <Text style={{ color: C.ok, fontSize: 13 }}>{tr('Выполнено в')}{' '}{hm(t.done_at)}</Text> : null}
             </View>
           </View>
           {t.status === 'new' && !preview ? (
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Btn kind="ghost" title="Маршрут" onPress={() => mapsTo(t.lat, t.lng, placeName(t) || t.title)} style={{ flex: 1 }} />
-              <Btn kind="dark" title="Выполнено" onPress={() => nav('task', { id: t.id })} style={{ flex: 1 }} />
+              <Btn kind="ghost" title={tr('Маршрут')} onPress={() => mapsTo(t.lat, t.lng, placeName(t) || t.title)} style={{ flex: 1 }} />
+              <Btn kind="dark" title={tr('Выполнено')} onPress={() => nav('task', { id: t.id })} style={{ flex: 1 }} />
             </View>
           ) : null}
         </View>
       ))}
-      {preview ? <Muted>Отмечать задачи можно после начала смены.</Muted> : null}
+      {preview ? <Muted>{tr('Отмечать задачи можно после начала смены.')}</Muted> : null}
     </Card>
   );
 }
@@ -593,47 +597,47 @@ function TaskScreen({ ctx, id }) {
   const [shot, setShot] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  if (!t) return <Page><Muted>Задача не найдена или уже выполнена.</Muted><Btn kind="ghost" title="На главную" onPress={() => nav('home')} /></Page>;
+  if (!t) return <Page><Muted>{tr('Задача не найдена или уже выполнена.')}</Muted><Btn kind="ghost" title={tr('На главную')} onPress={() => nav('home')} /></Page>;
   const place = st.places.find((x) => x.id === t.place_id);
   const target = t.lat != null ? { lat: t.lat, lng: t.lng } : null;
   const lim = (place && place.radius) || st.cfg.client_radius || 200;
   const onShot = async (uri) => {
     try {
       const fix = await getFix();
-      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      if (fix.mocked) { setCam(false); return Alert.alert(tr('Подмена местоположения'), tr('Отключите подмену местоположения и сфотографируйте снова.')); }
       const up = await uploadPhoto(uri, uid, 'task');
       setShot({ ...up, fix, dist: distM(fix, target) }); setCam(false);
-    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) { setCam(false); Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const submit = async () => {
-    if (!shot) return Alert.alert('Фото', 'Сфотографируйте выполненную работу на месте');
+    if (!shot) return Alert.alert(tr('Фото'), tr('Сфотографируйте выполненную работу на месте'));
     setBusy(true);
     try {
       await rpc('complete_task', { p_id: t.id, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_note: note });
       AsyncStorage.setItem('arev.lastWork', String(Date.now())).catch(() => {});
       await load();
       nav('home');
-    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+    } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
   const far = shot && shot.dist != null && shot.dist > lim;
   return (
     <Page>
-      <Label>Задача на сегодня</Label>
+      <Label>{tr('Задача на сегодня')}</Label>
       <H1>{t.title}</H1>
       <Card>
         {place ? <Row icon="location" title={place.name} sub={t.note || undefined} last /> : t.note ? <T>{t.note}</T> : null}
-        <Btn kind="ghost" title="Маршрут в Google Maps" onPress={() => mapsTo(t.lat, t.lng, (place && place.name) || t.title)} />
+        <Btn kind="ghost" title={tr('Маршрут в Google Maps')} onPress={() => mapsTo(t.lat, t.lng, (place && place.name) || t.title)} />
       </Card>
       <Card>
-        <T style={{ fontWeight: '700' }}>Фото выполненной работы</T>
-        <Muted>Снимите на месте. Фото попадёт и в «Фото работ».</Muted>
+        <T style={{ fontWeight: '700' }}>{tr('Фото выполненной работы')}</T>
+        <Muted>{tr('Снимите на месте. Фото попадёт и в «Фото работ».')}</Muted>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} /> : null}
-        {shot ? (shot.dist == null ? <Flag kind="note">Координаты сохранены</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)} от точки задачи. Отметка будет записана с отклонением.</Flag> : <Flag kind="ok">На месте · {fDist(shot.dist)}</Flag>) : null}
-        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать'} onPress={() => setCam(true)} />
-        <Field label="Комментарий (не обязательно)" value={note} onChangeText={setNote} placeholder="Почистил 24 панели" />
+        {shot ? (shot.dist == null ? <Flag kind="note">{tr('Координаты сохранены')}</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)}{' '}{tr('от точки задачи. Отметка будет записана с отклонением.')}</Flag> : <Flag kind="ok">{tr('На месте ·')}{' '}{fDist(shot.dist)}</Flag>) : null}
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? tr('Переснять') : tr('Сфотографировать')} onPress={() => setCam(true)} />
+        <Field label={tr('Комментарий (не обязательно)')} value={note} onChangeText={setNote} placeholder={tr('Почистил 24 панели')} />
       </Card>
-      <Btn title="Задача выполнена" big busy={busy} onPress={submit} />
-      <CameraSheet visible={cam} title="Работа выполнена" onClose={() => setCam(false)} onShot={onShot} />
+      <Btn title={tr('Задача выполнена')} big busy={busy} onPress={submit} />
+      <CameraSheet visible={cam} title={tr('Работа выполнена')} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -656,24 +660,24 @@ function ShiftScreen({ ctx }) {
       const fix = await getFix();
       if (fix.mocked) {
         setCam(false);
-        return Alert.alert('Подмена местоположения', 'На телефоне включена подмена местоположения. Отключите её в настройках и сфотографируйте снова.');
+        return Alert.alert(tr('Подмена местоположения'), tr('На телефоне включена подмена местоположения. Отключите её в настройках и сфотографируйте снова.'));
       }
       const up = await uploadPhoto(uri, uid, ending ? 'odo-end' : 'odo-start');
       setShot({ ...up, fix, dist: distM(fix, office) });
       setCam(false);
-    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) { setCam(false); Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const submit = async (force) => {
     const v = parseInt(String(odo).replace(/\D/g, ''), 10);
-    if (!shot) return Alert.alert('Фото', 'Сфотографируйте одометр');
-    if (!v) return Alert.alert('Одометр', 'Введите показания одометра');
+    if (!shot) return Alert.alert(tr('Фото'), tr('Сфотографируйте одометр'));
+    if (!v) return Alert.alert(tr('Одометр'), tr('Введите показания одометра'));
     if (ending && force !== true && force !== 'photos' && !st.wph.length) {
-      return Alert.alert('Нет фото работ', 'За сегодня не загружено ни одного фото проделанной работы. Руководитель увидит это. Закончить смену всё равно?',
-        [{ text: 'Сначала сниму' }, { text: 'Закончить', onPress: () => submit(st.buys.length ? 'photos' : true) }]);
+      return Alert.alert(tr('Нет фото работ'), tr('За сегодня не загружено ни одного фото проделанной работы. Руководитель увидит это. Закончить смену всё равно?'),
+        [{ text: tr('Сначала сниму') }, { text: tr('Закончить'), onPress: () => submit(st.buys.length ? 'photos' : true) }]);
     }
     if (ending && force !== true && st.buys.length) {
-      return Alert.alert('Не сдана закупка', 'Есть купленный товар, который не сдан на склад или на объект (' + st.buys.length + '). Руководитель увидит это. Закончить смену всё равно?',
-        [{ text: 'Сначала сдам' }, { text: 'Закончить', onPress: () => submit(true) }]);
+      return Alert.alert(tr('Не сдана закупка'), tr('Есть купленный товар, который не сдан на склад или на объект (') + st.buys.length + tr('). Руководитель увидит это. Закончить смену всё равно?'),
+        [{ text: tr('Сначала сдам') }, { text: tr('Закончить'), onPress: () => submit(true) }]);
     }
     setBusy(true);
     try {
@@ -683,29 +687,29 @@ function ShiftScreen({ ctx }) {
       else {
         await rpc('start_shift', args);
         const ok = await startTrack();
-        if (!ok) Alert.alert('Разрешите местоположение «Всегда»', 'Без этого маршрут смены не записывается, и руководитель это увидит. Откройте настройки приложения → Разрешения → Местоположение → «Разрешить всегда».', [{ text: 'Открыть настройки', onPress: () => Linking.openSettings() }, { text: 'Позже' }]);
+        if (!ok) Alert.alert(tr('Разрешите местоположение «Всегда»'), tr('Без этого маршрут смены не записывается, и руководитель это увидит. Откройте настройки приложения → Разрешения → Местоположение → «Разрешить всегда».'), [{ text: tr('Открыть настройки'), onPress: () => Linking.openSettings() }, { text: tr('Позже') }]);
       }
       await load();
       nav('home');
-    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+    } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
   const far = shot && shot.dist != null && shot.dist > radius;
   return (
     <Page>
-      <H1>{ending ? 'Закончить смену' : 'Начать смену'}</H1>
+      <H1>{ending ? tr('Закончить смену') : tr('Начать смену')}</H1>
       <Card>
-        <T style={{ fontWeight: '700' }}>1. Фото одометра</T>
-        <Muted>{ending ? 'Вернитесь в офис и сфотографируйте одометр.' : 'Сфотографируйте одометр у офиса.'} Место и время запишутся вместе с фото.</Muted>
+        <T style={{ fontWeight: '700' }}>{tr('1. Фото одометра')}</T>
+        <Muted>{ending ? tr('Вернитесь в офис и сфотографируйте одометр.') : tr('Сфотографируйте одометр у офиса.')}{' '}{tr('Место и время запишутся вместе с фото.')}</Muted>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} /> : null}
-        {shot ? (shot.dist == null ? <Flag kind="note">Координаты сохранены</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)} от офиса. Отметка будет записана с отклонением.</Flag> : <Flag kind="ok">В офисе · {fDist(shot.dist)}</Flag>) : null}
-        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать одометр'} onPress={() => setCam(true)} />
+        {shot ? (shot.dist == null ? <Flag kind="note">{tr('Координаты сохранены')}</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)}{' '}{tr('от офиса. Отметка будет записана с отклонением.')}</Flag> : <Flag kind="ok">{tr('В офисе ·')}{' '}{fDist(shot.dist)}</Flag>) : null}
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? tr('Переснять') : tr('Сфотографировать одометр')} onPress={() => setCam(true)} />
       </Card>
       <Card>
-        <Field label="2. Показания одометра, км" value={odo} onChangeText={setOdo} keyboardType="number-pad" placeholder={String(ending ? sh.start_odo : prev || '')} />
-        {ending ? <Muted>Утром было {sh.start_odo} км.</Muted> : prev ? <Muted>Прошлым вечером было {prev} км.</Muted> : null}
+        <Field label={tr('2. Показания одометра, км')} value={odo} onChangeText={setOdo} keyboardType="number-pad" placeholder={String(ending ? sh.start_odo : prev || '')} />
+        {ending ? <Muted>{tr('Утром было')}{' '}{sh.start_odo}{' '}{tr('км.')}</Muted> : prev ? <Muted>{tr('Прошлым вечером было')}{' '}{prev}{' '}{tr('км.')}</Muted> : null}
       </Card>
-      <Btn title={ending ? 'Закончить смену' : 'Начать смену'} kind={ending ? 'dark' : 'primary'} onPress={submit} busy={busy} big />
-      <CameraSheet visible={cam} title="Одометр" onClose={() => setCam(false)} onShot={onShot} />
+      <Btn title={ending ? tr('Закончить смену') : tr('Начать смену')} kind={ending ? 'dark' : 'primary'} onPress={submit} busy={busy} big />
+      <CameraSheet visible={cam} title={tr('Одометр')} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -718,48 +722,48 @@ function FuelScreen({ ctx }) {
   const [liters, setLiters] = useState('');
   const [sum, setSum] = useState('');
   const [busy, setBusy] = useState(false);
-  const unit = st.staff.fuel_type === 'gas' ? 'м³' : 'л';
+  const unit = st.staff.fuel_type === 'gas' ? tr('м³') : tr('л');
   const onShot = async (uri) => {
     try {
       const fix = await getFix();
-      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      if (fix.mocked) { setCam(false); return Alert.alert(tr('Подмена местоположения'), tr('Отключите подмену местоположения и сфотографируйте снова.')); }
       const up = await uploadPhoto(uri, uid, 'receipt');
       setShot({ ...up, fix }); setCam(false);
-    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) { setCam(false); Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const submit = async () => {
     const l = num(liters), a = parseInt(String(sum).replace(/\D/g, ''), 10);
-    if (!shot) return Alert.alert('Чек', 'Сфотографируйте чек');
-    if (!l) return Alert.alert('Объём', 'Укажите, сколько залито');
-    if (!a) return Alert.alert('Сумма', 'Укажите сумму из чека');
+    if (!shot) return Alert.alert(tr('Чек'), tr('Сфотографируйте чек'));
+    if (!l) return Alert.alert(tr('Объём'), tr('Укажите, сколько залито'));
+    if (!a) return Alert.alert(tr('Сумма'), tr('Укажите сумму из чека'));
     const save = async () => {
       setBusy(true);
       try {
         await rpc('add_fuel', { p_liters: l, p_amount: a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId() });
         await load(); nav('home');
-      } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+      } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
     };
     if (st.staff.tank && l > st.staff.tank * 1.05) {
-      return Alert.alert('Больше, чем бак', 'Указано ' + l + ' ' + unit + ', а бак ' + st.staff.tank + '. Проверьте цифры. Если всё верно, заправка будет отмечена для руководителя.', [{ text: 'Исправить' }, { text: 'Сохранить', onPress: save }]);
+      return Alert.alert(tr('Больше, чем бак'), tr('Указано ') + l + ' ' + unit + tr(', а бак ') + st.staff.tank + tr('. Проверьте цифры. Если всё верно, заправка будет отмечена для руководителя.'), [{ text: tr('Исправить') }, { text: tr('Сохранить'), onPress: save }]);
     }
     save();
   };
   return (
     <Page>
-      <H1>Заправка</H1>
-      <Muted>Каждая заправка сверяется с выпиской по топливной карте и с рабочим пробегом.</Muted>
+      <H1>{tr('Заправка')}</H1>
+      <Muted>{tr('Каждая заправка сверяется с выпиской по топливной карте и с рабочим пробегом.')}</Muted>
       <Card>
-        <T style={{ fontWeight: '700' }}>1. Фото чека</T>
+        <T style={{ fontWeight: '700' }}>{tr('1. Фото чека')}</T>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 10 }} /> : null}
-        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать чек'} onPress={() => setCam(true)} />
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? tr('Переснять') : tr('Сфотографировать чек')} onPress={() => setCam(true)} />
       </Card>
       <Card>
-        <T style={{ fontWeight: '700' }}>2. Как в чеке</T>
-        <Field label={unit === 'м³' ? 'Кубов' : 'Литров'} value={liters} onChangeText={setLiters} keyboardType="decimal-pad" />
-        <Field label="Сумма, ֏" value={sum} onChangeText={setSum} keyboardType="number-pad" />
+        <T style={{ fontWeight: '700' }}>{tr('2. Как в чеке')}</T>
+        <Field label={unit === 'м³' ? tr('Кубов') : tr('Литров')} value={liters} onChangeText={setLiters} keyboardType="decimal-pad" />
+        <Field label={tr('Сумма, ֏')} value={sum} onChangeText={setSum} keyboardType="number-pad" />
       </Card>
-      <Btn title="Сохранить заправку" onPress={submit} busy={busy} big />
-      <CameraSheet visible={cam} title="Чек" onClose={() => setCam(false)} onShot={onShot} />
+      <Btn title={tr('Сохранить заправку')} onPress={submit} busy={busy} big />
+      <CameraSheet visible={cam} title={tr('Чек')} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -780,25 +784,25 @@ function TicketScreen({ ctx, id, pooled }) {
   }, [t && t.id]);
   useEffect(() => { loadPhotos(); }, [loadPhotos]);
 
-  const act = async (fn) => { setBusy(true); try { await fn(); await load(); } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); } };
+  const act = async (fn) => { setBusy(true); try { await fn(); await load(); } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); } };
 
   if (!t && pooled) {
     return (
       <Page>
         <Label>{pooled.num}</Label>
-        <H1>{CATS[pooled.category] || pooled.category}</H1>
+        <H1>{tr(CATS[pooled.category] || pooled.category)}</H1>
         <Card>
           <T>{pooled.address}</T>
           {pooled.descr ? <Muted>{pooled.descr}</Muted> : null}
-          {pooled.err_code ? <T>Код ошибки: {pooled.err_code}</T> : null}
-          {pooled.est_min ? <T>Оценка клиенту: {money(pooled.est_min)} – {money(pooled.est_max)}</T> : null}
-          <Muted>Имя и телефон клиента откроются, когда вы возьмёте заказ.</Muted>
+          {pooled.err_code ? <T>{tr('Код ошибки:')}{' '}{pooled.err_code}</T> : null}
+          {pooled.est_min ? <T>{tr('Оценка клиенту:')}{' '}{money(pooled.est_min)} – {money(pooled.est_max)}</T> : null}
+          <Muted>{tr('Имя и телефон клиента откроются, когда вы возьмёте заказ.')}</Muted>
         </Card>
-        <Btn title="Беру заказ" big busy={busy} onPress={() => act(async () => { await rpc('take_ticket', { p_id: pooled.id, p_device: deviceId() }); nav('ticket', { id: pooled.id }); })} />
+        <Btn title={tr('Беру заказ')} big busy={busy} onPress={() => act(async () => { await rpc('take_ticket', { p_id: pooled.id, p_device: deviceId() }); nav('ticket', { id: pooled.id }); })} />
       </Page>
     );
   }
-  if (!t) return <Page><Muted>Заказ не найден. Возможно, его уже взял другой сотрудник.</Muted><Btn kind="ghost" title="На главную" onPress={() => nav('home')} /></Page>;
+  if (!t) return <Page><Muted>{tr('Заказ не найден. Возможно, его уже взял другой сотрудник.')}</Muted><Btn kind="ghost" title={tr('На главную')} onPress={() => nav('home')} /></Page>;
 
   const step = (name, extra) => act(async () => {
     const fix = await getFix();
@@ -807,7 +811,7 @@ function TicketScreen({ ctx, id, pooled }) {
       const d = distM(fix, { lat: t.lat, lng: t.lng });
       const lim = st.cfg.client_radius || 200;
       if (d != null && d > lim) {
-        const go = await new Promise((res) => Alert.alert('Вы далеко от объекта', 'До точки клиента ' + fDist(d) + '. Отметка будет записана с отклонением.', [{ text: 'Я ещё еду', onPress: () => res(false) }, { text: 'Отметить', onPress: () => res(true) }]));
+        const go = await new Promise((res) => Alert.alert(tr('Вы далеко от объекта'), tr('До точки клиента ') + fDist(d) + tr('. Отметка будет записана с отклонением.'), [{ text: tr('Я ещё еду'), onPress: () => res(false) }, { text: tr('Отметить'), onPress: () => res(true) }]));
         if (!go) return;
       }
     }
@@ -822,47 +826,47 @@ function TicketScreen({ ctx, id, pooled }) {
       const up = await uploadPhoto(uri, uid, kind);
       await rpc('add_ticket_photo', { p_id: t.id, p_kind: kind, p_path: up.path, p_lat: fix.lat, p_lng: fix.lng, p_mocked: fix.mocked, p_device: deviceId() });
       setCam(null); await loadPhotos();
-    } catch (e) { setCam(null); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) { setCam(null); Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const nb = photos.filter((p) => p.kind === 'before').length, na = photos.filter((p) => p.kind === 'after').length;
   const mapUrl = t.lat != null ? 'https://www.google.com/maps/dir/?api=1&destination=' + t.lat + ',' + t.lng : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(t.address);
   return (
     <Page>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Label>{t.num}{t.urgent ? ' · срочно' : ''}</Label><Chip kind={ST[t.status][1]}>{ST[t.status][0]}</Chip></View>
-      <H1>{CATS[t.category] || t.category}</H1>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Label>{t.num}{t.urgent ? tr(' · срочно') : ''}</Label><Chip kind={ST[t.status][1]}>{tr(ST[t.status][0])}</Chip></View>
+      <H1>{tr(CATS[t.category] || t.category)}</H1>
       <Card>
         <T style={{ fontWeight: '700' }}>{t.client_name}</T>
         <Pressable onPress={() => Linking.openURL('tel:' + String(t.client_phone).replace(/[^\d+]/g, ''))}><Text style={{ color: C.info, fontSize: 16 }}>{t.client_phone}</Text></Pressable>
         <T>{t.address}</T>
-        <Btn kind="ghost" title="Маршрут в Google Maps" onPress={() => Linking.openURL(mapUrl)} />
+        <Btn kind="ghost" title={tr('Маршрут в Google Maps')} onPress={() => Linking.openURL(mapUrl)} />
         {t.descr ? <Muted>{t.descr}</Muted> : null}
-        {t.err_code ? <T>Код ошибки: {t.err_code}</T> : null}
+        {t.err_code ? <T>{tr('Код ошибки:')}{' '}{t.err_code}</T> : null}
       </Card>
       {['assigned', 'enroute', 'onsite'].includes(t.status) ? <TicketBuys ctx={ctx} t={t} /> : null}
       {t.status === 'assigned' ? <>
-        <Btn kind="dark" title="Выехал к клиенту" big busy={busy} onPress={() => step('enroute')} />
-        <Btn kind="ghost" title="Отказаться от заказа" onPress={() => Alert.alert('Отказаться?', 'Заказ вернётся в общий список, отказ увидит руководитель.', [{ text: 'Нет' }, { text: 'Отказаться', onPress: () => act(async () => { await rpc('refuse_ticket', { p_id: t.id, p_device: deviceId() }); nav('home'); }) }])} />
+        <Btn kind="dark" title={tr('Выехал к клиенту')} big busy={busy} onPress={() => step('enroute')} />
+        <Btn kind="ghost" title={tr('Отказаться от заказа')} onPress={() => Alert.alert(tr('Отказаться?'), tr('Заказ вернётся в общий список, отказ увидит руководитель.'), [{ text: tr('Нет') }, { text: tr('Отказаться'), onPress: () => act(async () => { await rpc('refuse_ticket', { p_id: t.id, p_device: deviceId() }); nav('home'); }) }])} />
       </> : null}
       {t.status === 'enroute' ? <>
-        <Muted>В пути с {hm(t.enroute_at)}. Отметка сработает рядом с объектом.</Muted>
-        <Btn title="Я на месте" big busy={busy} onPress={() => step('onsite')} />
+        <Muted>{tr('В пути с')}{' '}{hm(t.enroute_at)}{tr('. Отметка сработает рядом с объектом.')}</Muted>
+        <Btn title={tr('Я на месте')} big busy={busy} onPress={() => step('onsite')} />
       </> : null}
       {t.status === 'onsite' ? <>
         <Card>
-          <T style={{ fontWeight: '700' }}>Фото до работы: {nb}</T>
-          <Btn kind={nb ? 'ghost' : 'dark'} title="Снять фото до" onPress={() => setCam('before')} />
-          <T style={{ fontWeight: '700' }}>Фото после работы: {na}</T>
-          <Btn kind={na ? 'ghost' : 'dark'} title="Снять фото после" onPress={() => setCam('after')} />
+          <T style={{ fontWeight: '700' }}>{tr('Фото до работы:')}{' '}{nb}</T>
+          <Btn kind={nb ? 'ghost' : 'dark'} title={tr('Снять фото до')} onPress={() => setCam('before')} />
+          <T style={{ fontWeight: '700' }}>{tr('Фото после работы:')}{' '}{na}</T>
+          <Btn kind={na ? 'ghost' : 'dark'} title={tr('Снять фото после')} onPress={() => setCam('after')} />
         </Card>
         <Card>
-          <Field label="Сумма, ֏" value={price} onChangeText={setPrice} keyboardType="number-pad" />
-          <Field label="Что сделано (коротко)" value={work} onChangeText={setWork} multiline placeholder="Заменил 2 коннектора MC4" />
+          <Field label={tr('Сумма, ֏')} value={price} onChangeText={setPrice} keyboardType="number-pad" />
+          <Field label={tr('Что сделано (коротко)')} value={work} onChangeText={setWork} multiline placeholder={tr('Заменил 2 коннектора MC4')} />
         </Card>
-        <Btn title="Завершить" big busy={busy} disabled={!nb || !na} onPress={() => step('done', { p_price: parseInt(String(price).replace(/\D/g, ''), 10) || 0, p_work: work })} />
-        {!nb || !na ? <Muted style={{ textAlign: 'center' }}>Нужно хотя бы одно фото до и одно после.</Muted> : null}
+        <Btn title={tr('Завершить')} big busy={busy} disabled={!nb || !na} onPress={() => step('done', { p_price: parseInt(String(price).replace(/\D/g, ''), 10) || 0, p_work: work })} />
+        {!nb || !na ? <Muted style={{ textAlign: 'center' }}>{tr('Нужно хотя бы одно фото до и одно после.')}</Muted> : null}
       </> : null}
-      {t.status === 'done' || t.status === 'closed' ? <Card><T>Сумма: {money(t.price)}</T>{t.work ? <Muted>{t.work}</Muted> : null}<Chip kind={t.status === 'closed' ? 'ok' : 'note'}>{t.status === 'closed' ? 'Клиент подтвердил' : 'Ждём подтверждения'}</Chip></Card> : null}
-      <CameraSheet visible={!!cam} title={cam === 'before' ? 'Фото до' : 'Фото после'} onClose={() => setCam(null)} onShot={onShot} />
+      {t.status === 'done' || t.status === 'closed' ? <Card><T>{tr('Сумма:')}{' '}{money(t.price)}</T>{t.work ? <Muted>{t.work}</Muted> : null}<Chip kind={t.status === 'closed' ? 'ok' : 'note'}>{t.status === 'closed' ? tr('Клиент подтвердил') : tr('Ждём подтверждения')}</Chip></Card> : null}
+      <CameraSheet visible={!!cam} title={cam === 'before' ? tr('Фото до') : tr('Фото после')} onClose={() => setCam(null)} onShot={onShot} />
     </Page>
   );
 }
@@ -870,10 +874,10 @@ function TicketScreen({ ctx, id, pooled }) {
 /* ---------------- закупки ---------------- */
 const lineText = (l) => l.name + ' — ' + l.qty + (l.unit ? ' ' + l.unit : '');
 const buyWhere = (b, mine) => {
-  if (b.status === 'partial') return 'Остаток → на склад';
-  if (b.dest === 'ticket') { const t = (mine || []).find((x) => x.id === b.ticket_id); return 'На объект' + (t ? ' · ' + t.num : ''); }
-  if (b.dest === 'site') return (b.source === 'warehouse' ? 'Со склада → ' : 'На объект · ') + (b.site || '');
-  return 'На склад';
+  if (b.status === 'partial') return tr('Остаток → на склад');
+  if (b.dest === 'ticket') { const t = (mine || []).find((x) => x.id === b.ticket_id); return tr('На объект') + (t ? ' · ' + t.num : ''); }
+  if (b.dest === 'site') return (b.source === 'warehouse' ? tr('Со склада → ') : tr('На объект · ')) + (b.site || '');
+  return tr('На склад');
 };
 
 // список несданного товара на главном экране
@@ -882,7 +886,7 @@ function BuyList({ ctx, items }) {
   const maxH = ctx.st.cfg.purchase_max_hours || 24;
   return (
     <>
-      <H2>Не сдано ({items.length})</H2>
+      <H2>{tr('Не сдано (')}{items.length})</H2>
       {items.map((b) => {
         const late = Date.now() - new Date(b.created_at).getTime() > maxH * 3600000;
         const lines = b.status === 'partial' ? (b.left_lines || []).filter((l) => l.qty > 0) : b.lines || [];
@@ -891,9 +895,9 @@ function BuyList({ ctx, items }) {
             <Card style={{ borderLeftWidth: 4, borderLeftColor: late ? C.bad : C.sun }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Label>{buyWhere(b, ctx.st.mine)}</Label>
-                {late ? <Chip kind="bad">просрочено</Chip> : <Chip kind="warn">{hm(b.created_at)}</Chip>}
+                {late ? <Chip kind="bad">{tr('просрочено')}</Chip> : <Chip kind="warn">{hm(b.created_at)}</Chip>}
               </View>
-              <T style={{ fontWeight: '700' }}>{b.source === 'warehouse' ? 'Материал со склада' : b.supplier + ' · ' + money(b.amount)}</T>
+              <T style={{ fontWeight: '700' }}>{b.source === 'warehouse' ? tr('Материал со склада') : b.supplier + ' · ' + money(b.amount)}</T>
               <Muted>{lines.map(lineText).join(', ')}</Muted>
             </Card>
           </Pressable>
@@ -908,15 +912,15 @@ function TicketBuys({ ctx, t }) {
   const items = ctx.st.buys.filter((b) => b.ticket_id === t.id && b.status === 'bought');
   return (
     <Card>
-      <T style={{ fontWeight: '700' }}>Материал для заказа</T>
+      <T style={{ fontWeight: '700' }}>{tr('Материал для заказа')}</T>
       {items.length ? items.map((b) => (
         <Pressable key={b.id} onPress={() => ctx.nav('deliver', { id: b.id })} style={{ paddingVertical: 4 }}>
           <T>{b.supplier} · {money(b.amount)}</T>
           <Muted>{(b.lines || []).map(lineText).join(', ')}</Muted>
-          <Text style={{ color: C.info }}>{t.status === 'onsite' ? 'Отметить на объекте →' : 'Отметить можно будет на объекте'}</Text>
+          <Text style={{ color: C.info }}>{t.status === 'onsite' ? tr('Отметить на объекте →') : tr('Отметить можно будет на объекте')}</Text>
         </Pressable>
-      )) : <Muted>Если докупаете что-то для этой работы, запишите покупку здесь. Без отметки на объекте заказ не закроется.</Muted>}
-      <Btn kind="ghost" title="Докупил материал" onPress={() => ctx.nav('purchase', { ticket: t.id })} />
+      )) : <Muted>{tr('Если докупаете что-то для этой работы, запишите покупку здесь. Без отметки на объекте заказ не закроется.')}</Muted>}
+      <Btn kind="ghost" title={tr('Докупил материал')} onPress={() => ctx.nav('purchase', { ticket: t.id })} />
     </Card>
   );
 }
@@ -928,7 +932,7 @@ function PurchaseScreen({ ctx, ticket, source, task }) {
   const [dest, setDest] = useState(ticket || (wh ? 'site' : 'warehouse'));
   const [site, setSite] = useState((st.wph[0] && st.wph[0].object) || '');
   const [supplier, setSupplier] = useState('');
-  const [lines, setLines] = useState([{ name: '', qty: '', unit: 'шт' }]);
+  const [lines, setLines] = useState([{ name: '', qty: '', unit: tr('шт') }]);
   const [sum, setSum] = useState('');
   const [cam, setCam] = useState(false);
   const [shot, setShot] = useState(null);
@@ -937,66 +941,66 @@ function PurchaseScreen({ ctx, ticket, source, task }) {
   const onShot = async (uri) => {
     try {
       const fix = await getFix();
-      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      if (fix.mocked) { setCam(false); return Alert.alert(tr('Подмена местоположения'), tr('Отключите подмену местоположения и сфотографируйте снова.')); }
       const up = await uploadPhoto(uri, uid, wh ? 'take' : 'buy');
       setShot({ ...up, fix }); setCam(false);
-    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) { setCam(false); Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const submit = async () => {
     const clean = lines.map((l) => ({ name: String(l.name).trim(), qty: num(l.qty), unit: String(l.unit || '').trim() })).filter((l) => l.name || l.qty);
     const a = parseInt(String(sum).replace(/\D/g, ''), 10);
-    if (!shot) return Alert.alert('Фото', wh ? 'Сфотографируйте материал на складе' : 'Сфотографируйте чек или накладную');
-    if (!wh && !supplier.trim()) return Alert.alert('Где купили', 'Укажите магазин или поставщика');
-    if (!clean.length || clean.some((l) => !l.name || !l.qty)) return Alert.alert('Товар', 'Для каждой строки укажите название и количество');
-    if (!wh && !a) return Alert.alert('Сумма', 'Укажите сумму из чека');
-    if (dest === 'site' && !site.trim()) return Alert.alert('Объект', 'Укажите, для какого объекта: клиент или адрес');
+    if (!shot) return Alert.alert(tr('Фото'), wh ? tr('Сфотографируйте материал на складе') : tr('Сфотографируйте чек или накладную'));
+    if (!wh && !supplier.trim()) return Alert.alert(tr('Где купили'), tr('Укажите магазин или поставщика'));
+    if (!clean.length || clean.some((l) => !l.name || !l.qty)) return Alert.alert(tr('Товар'), tr('Для каждой строки укажите название и количество'));
+    if (!wh && !a) return Alert.alert(tr('Сумма'), tr('Укажите сумму из чека'));
+    if (dest === 'site' && !site.trim()) return Alert.alert(tr('Объект'), tr('Укажите, для какого объекта: клиент или адрес'));
     setBusy(true);
     try {
       await rpc('add_purchase', { p_source: wh ? 'warehouse' : 'shop', p_supplier: wh ? '' : supplier, p_lines: clean, p_amount: wh ? 0 : a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' || dest === 'site' ? null : dest, p_site: dest === 'site' ? site : null, p_task: task || null });
       await load();
       if (task) { ctx.setOpenTask(task); ctx.goTab('tasks'); }
       else if (dest === 'warehouse' || dest === 'site') nav('home'); else nav('ticket', { id: dest });
-    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+    } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
   return (
     <Page>
-      <H1>{wh ? 'Взять со склада' : 'Закупка'}</H1>
-      <Muted>{wh ? 'Запишите материал, который берёте со склада на объект. На объекте отметите его фото, остаток верните на склад.' : 'Каждая покупка должна дойти до склада или до объекта. Там вы отметите её фото, место проверит телефон.'}</Muted>
+      <H1>{wh ? tr('Взять со склада') : tr('Закупка')}</H1>
+      <Muted>{wh ? tr('Запишите материал, который берёте со склада на объект. На объекте отметите его фото, остаток верните на склад.') : tr('Каждая покупка должна дойти до склада или до объекта. Там вы отметите её фото, место проверит телефон.')}</Muted>
       <Card>
-        <T style={{ fontWeight: '700' }}>1. Куда везёте</T>
+        <T style={{ fontWeight: '700' }}>{tr('1. Куда везёте')}</T>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {!wh ? <Btn kind={dest === 'warehouse' ? 'dark' : 'ghost'} title="На склад" onPress={() => setDest('warehouse')} /> : null}
-          <Btn kind={dest === 'site' ? 'dark' : 'ghost'} title={wh ? 'На объект' : 'Сразу на объект'} onPress={() => setDest('site')} />
-          {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={'Заказ ' + t.num} onPress={() => setDest(t.id)} />)}
+          {!wh ? <Btn kind={dest === 'warehouse' ? 'dark' : 'ghost'} title={tr('На склад')} onPress={() => setDest('warehouse')} /> : null}
+          <Btn kind={dest === 'site' ? 'dark' : 'ghost'} title={wh ? tr('На объект') : tr('Сразу на объект')} onPress={() => setDest('site')} />
+          {active.map((t) => <Btn key={t.id} kind={dest === t.id ? 'dark' : 'ghost'} title={tr('Заказ ') + t.num} onPress={() => setDest(t.id)} />)}
         </View>
-        {dest === 'site' ? <Field label="Объект: клиент или адрес" value={site} onChangeText={setSite} placeholder="Ашот, Абовян, ул. ..." /> : null}
+        {dest === 'site' ? <Field label={tr('Объект: клиент или адрес')} value={site} onChangeText={setSite} placeholder={tr('Ашот, Абовян, ул. ...')} /> : null}
         {dest === 'site' ? <PlacePick places={st.places} value={site} onPick={setSite} /> : null}
-        {dest === 'site' ? <Muted>На объекте отметите материал фото. Остаток нужно будет сдать на склад.</Muted> : null}
+        {dest === 'site' ? <Muted>{tr('На объекте отметите материал фото. Остаток нужно будет сдать на склад.')}</Muted> : null}
         {dest !== 'warehouse' && dest !== 'site' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
       </Card>
       <Card>
-        <T style={{ fontWeight: '700' }}>{wh ? '2. Фото материала на складе' : '2. Фото чека или накладной'}</T>
+        <T style={{ fontWeight: '700' }}>{wh ? tr('2. Фото материала на складе') : tr('2. Фото чека или накладной')}</T>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 10 }} /> : null}
-        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : wh ? 'Сфотографировать материал' : 'Сфотографировать чек'} onPress={() => setCam(true)} />
+        <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? tr('Переснять') : wh ? tr('Сфотографировать материал') : tr('Сфотографировать чек')} onPress={() => setCam(true)} />
       </Card>
       <Card>
-        <T style={{ fontWeight: '700' }}>{wh ? '3. Что берёте' : '3. Что купили, как в чеке'}</T>
-        {!wh ? <Field label="Магазин или поставщик" value={supplier} onChangeText={setSupplier} placeholder="Электротовары, ул. ..." /> : null}
+        <T style={{ fontWeight: '700' }}>{wh ? tr('3. Что берёте') : tr('3. Что купили, как в чеке')}</T>
+        {!wh ? <Field label={tr('Магазин или поставщик')} value={supplier} onChangeText={setSupplier} placeholder={tr('Электротовары, ул. ...')} /> : null}
         {lines.map((l, i) => (
           <View key={i} style={{ gap: 6, borderTopWidth: i ? 1 : 0, borderTopColor: C.line, paddingTop: i ? 8 : 0 }}>
-            <Field label={'Товар ' + (i + 1)} value={l.name} onChangeText={setLine(i, 'name')} placeholder="Кабель солнечный 6 мм²" />
+            <Field label={tr('Товар ') + (i + 1)} value={l.name} onChangeText={setLine(i, 'name')} placeholder={tr('Кабель солнечный 6 мм²')} />
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <View style={{ flex: 1 }}><Field label="Количество" value={l.qty} onChangeText={setLine(i, 'qty')} keyboardType="decimal-pad" /></View>
-              <View style={{ flex: 1 }}><Field label="Ед." value={l.unit} onChangeText={setLine(i, 'unit')} placeholder="шт, м" /></View>
+              <View style={{ flex: 1 }}><Field label={tr('Количество')} value={l.qty} onChangeText={setLine(i, 'qty')} keyboardType="decimal-pad" /></View>
+              <View style={{ flex: 1 }}><Field label={tr('Ед.')} value={l.unit} onChangeText={setLine(i, 'unit')} placeholder={tr('шт, м')} /></View>
             </View>
-            {lines.length > 1 ? <Btn kind="ghost" title="Убрать строку" onPress={() => setLines((p) => p.filter((_, j) => j !== i))} /> : null}
+            {lines.length > 1 ? <Btn kind="ghost" title={tr('Убрать строку')} onPress={() => setLines((p) => p.filter((_, j) => j !== i))} /> : null}
           </View>
         ))}
-        <Btn kind="ghost" title="+ Ещё товар" onPress={() => setLines((p) => [...p, { name: '', qty: '', unit: 'шт' }])} />
-        {!wh ? <Field label="Сумма по чеку, ֏" value={sum} onChangeText={setSum} keyboardType="number-pad" /> : null}
+        <Btn kind="ghost" title={tr('+ Ещё товар')} onPress={() => setLines((p) => [...p, { name: '', qty: '', unit: tr('шт') }])} />
+        {!wh ? <Field label={tr('Сумма по чеку, ֏')} value={sum} onChangeText={setSum} keyboardType="number-pad" /> : null}
       </Card>
-      <Btn title={wh ? 'Записать' : 'Сохранить закупку'} onPress={submit} busy={busy} big />
-      <CameraSheet visible={cam} title={wh ? 'Материал на складе' : 'Чек или накладная'} onClose={() => setCam(false)} onShot={onShot} />
+      <Btn title={wh ? tr('Записать') : tr('Сохранить закупку')} onPress={submit} busy={busy} big />
+      <CameraSheet visible={cam} title={wh ? tr('Материал на складе') : tr('Чек или накладная')} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -1011,7 +1015,7 @@ function DeliverScreen({ ctx, id }) {
   const [cam, setCam] = useState(false);
   const [shot, setShot] = useState(null);
   const [busy, setBusy] = useState(false);
-  if (!b) return <Page><Muted>Закупка уже сдана.</Muted><Btn kind="ghost" title="На главную" onPress={() => nav('home')} /></Page>;
+  if (!b) return <Page><Muted>{tr('Закупка уже сдана.')}</Muted><Btn kind="ghost" title={tr('На главную')} onPress={() => nav('home')} /></Page>;
   const target = toObject
     ? (t && t.lat != null ? { lat: t.lat, lng: t.lng } : null)
     : st.cfg.warehouse_lat != null ? { lat: st.cfg.warehouse_lat, lng: st.cfg.warehouse_lng }
@@ -1021,59 +1025,59 @@ function DeliverScreen({ ctx, id }) {
   const onShot = async (uri) => {
     try {
       const fix = await getFix();
-      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      if (fix.mocked) { setCam(false); return Alert.alert(tr('Подмена местоположения'), tr('Отключите подмену местоположения и сфотографируйте снова.')); }
       const up = await uploadPhoto(uri, uid, toObject ? 'buy-site' : 'buy-store');
       setShot({ ...up, fix, dist: distM(fix, target) }); setCam(false);
-    } catch (e) { setCam(false); Alert.alert('Не получилось', errText(e)); }
+    } catch (e) { setCam(false); Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const submit = async () => {
-    if (!shot) return Alert.alert('Фото', toObject ? 'Сфотографируйте материал на объекте' : 'Сфотографируйте товар на складе');
+    if (!shot) return Alert.alert(tr('Фото'), toObject ? tr('Сфотографируйте материал на объекте') : tr('Сфотографируйте товар на складе'));
     let pUsed = null;
     if (toObject) {
       pUsed = used.map((v) => { const n = parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : -1; });
-      if (pUsed.some((n, i) => n < 0 || n > Number(b.lines[i].qty))) return Alert.alert('Использовано', 'Количество должно быть от 0 до купленного');
+      if (pUsed.some((n, i) => n < 0 || n > Number(b.lines[i].qty))) return Alert.alert(tr('Использовано'), tr('Количество должно быть от 0 до купленного'));
     }
     setBusy(true);
     try {
       const r = await rpc('deliver_purchase', { p_id: b.id, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_used: pUsed });
       await load();
-      if (r && r.status === 'partial') Alert.alert('Остаток', 'Неиспользованный материал нужно сдать на склад. Он остался в списке «Не сдано».');
+      if (r && r.status === 'partial') Alert.alert(tr('Остаток'), tr('Неиспользованный материал нужно сдать на склад. Он остался в списке «Не сдано».'));
       if (b.dest === 'ticket' && toObject) nav('ticket', { id: b.ticket_id }); else nav('home');
-    } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+    } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
   const far = shot && shot.dist != null && shot.dist > lim;
   return (
     <Page>
       <Label>{buyWhere(b, st.mine)}</Label>
-      <H1>{toObject ? 'Материал на объекте' : 'Сдать на склад'}</H1>
+      <H1>{toObject ? tr('Материал на объекте') : tr('Сдать на склад')}</H1>
       <Card>
-        <T style={{ fontWeight: '700' }}>{b.source === 'warehouse' ? 'Материал со склада' : b.supplier + ' · ' + money(b.amount)}</T>
-        <Muted>{b.source === 'warehouse' ? 'Взято' : 'Куплено'} {new Date(b.created_at).toLocaleDateString('ru-RU')} в {hm(b.created_at)}</Muted>
+        <T style={{ fontWeight: '700' }}>{b.source === 'warehouse' ? tr('Материал со склада') : b.supplier + ' · ' + money(b.amount)}</T>
+        <Muted>{b.source === 'warehouse' ? tr('Взято') : tr('Куплено')} {new Date(b.created_at).toLocaleDateString(loc())}{' '}{tr('в')}{' '}{hm(b.created_at)}</Muted>
         {!toObject ? lines.map((l, i) => <T key={i}>{lineText(l)}</T>) : null}
       </Card>
       {toObject ? (
         ready ? (
           <Card>
-            <T style={{ fontWeight: '700' }}>Сколько использовано на объекте</T>
-            <Muted>Что осталось, нужно будет сдать на склад.</Muted>
+            <T style={{ fontWeight: '700' }}>{tr('Сколько использовано на объекте')}</T>
+            <Muted>{tr('Что осталось, нужно будет сдать на склад.')}</Muted>
             {b.lines.map((l, i) => (
-              <Field key={i} label={l.name + (b.source === 'warehouse' ? ' (взято ' : ' (куплено ') + l.qty + (l.unit ? ' ' + l.unit : '') + ')'} value={used[i]}
+              <Field key={i} label={l.name + (b.source === 'warehouse' ? tr(' (взято ') : tr(' (куплено ')) + l.qty + (l.unit ? ' ' + l.unit : '') + ')'} value={used[i]}
                 onChangeText={(v) => setUsed((p) => p.map((x, j) => (j === i ? v : x)))} keyboardType="decimal-pad" />
             ))}
           </Card>
-        ) : <Flag kind="warn">Отметить материал можно, когда по заказу {t ? t.num : ''} нажато «Я на месте».</Flag>
+        ) : <Flag kind="warn">{tr('Отметить материал можно, когда по заказу')}{' '}{t ? t.num : ''}{' '}{tr('нажато «Я на месте».')}</Flag>
       ) : null}
       {!toObject || ready ? <>
         <Card>
-          <T style={{ fontWeight: '700' }}>{toObject ? 'Фото материала на объекте' : 'Фото товара на складе'}</T>
-          <Muted>{toObject ? 'Снимите установленный или разложенный материал так, чтобы было видно место.' : 'Снимите товар на складе. Руководитель сверит количество при приёмке.'}</Muted>
+          <T style={{ fontWeight: '700' }}>{toObject ? tr('Фото материала на объекте') : tr('Фото товара на складе')}</T>
+          <Muted>{toObject ? tr('Снимите установленный или разложенный материал так, чтобы было видно место.') : tr('Снимите товар на складе. Руководитель сверит количество при приёмке.')}</Muted>
           {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} /> : null}
-          {shot ? (shot.dist == null ? <Flag kind="note">Координаты сохранены</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)} от {toObject ? 'объекта' : 'склада'}. Отметка будет записана с отклонением.</Flag> : <Flag kind="ok">На месте · {fDist(shot.dist)}</Flag>) : null}
-          <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? 'Переснять' : 'Сфотографировать'} onPress={() => setCam(true)} />
+          {shot ? (shot.dist == null ? <Flag kind="note">{tr('Координаты сохранены')}</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)}{' '}{tr('от')}{' '}{toObject ? tr('объекта') : tr('склада')}{tr('. Отметка будет записана с отклонением.')}</Flag> : <Flag kind="ok">{tr('На месте ·')}{' '}{fDist(shot.dist)}</Flag>) : null}
+          <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? tr('Переснять') : tr('Сфотографировать')} onPress={() => setCam(true)} />
         </Card>
-        <Btn title={toObject ? 'Отметить на объекте' : 'Сдано на склад'} onPress={submit} busy={busy} big />
+        <Btn title={toObject ? tr('Отметить на объекте') : tr('Сдано на склад')} onPress={submit} busy={busy} big />
       </> : null}
-      <CameraSheet visible={cam} title={toObject ? 'Материал на объекте' : 'Товар на складе'} onClose={() => setCam(false)} onShot={onShot} />
+      <CameraSheet visible={cam} title={toObject ? tr('Материал на объекте') : tr('Товар на складе')} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -1105,7 +1109,7 @@ function WorkScreen({ ctx, ticket }) {
   const [cam, setCam] = useState(false);
   const [mine, setMine] = useState([]); // снятые сейчас: {uri, kind}
   const open = () => {
-    if (!object.trim()) return Alert.alert('Объект', 'Укажите объект: имя клиента или адрес');
+    if (!object.trim()) return Alert.alert(tr('Объект'), tr('Укажите объект: имя клиента или адрес'));
     setCam(true);
   };
   const onShot = async (uri) => {
@@ -1113,7 +1117,7 @@ function WorkScreen({ ctx, ticket }) {
     const takenAt = Date.now();
     try {
       fix = await getFix();
-      if (fix.mocked) { setCam(false); return Alert.alert('Подмена местоположения', 'Отключите подмену местоположения и сфотографируйте снова.'); }
+      if (fix.mocked) { setCam(false); return Alert.alert(tr('Подмена местоположения'), tr('Отключите подмену местоположения и сфотографируйте снова.')); }
       img = await preparePhoto(uri);
       AsyncStorage.setItem('arev.lastWork', String(takenAt)).catch(() => {});
       const net = await NetInfo.fetch();
@@ -1130,29 +1134,29 @@ function WorkScreen({ ctx, ticket }) {
           const n = await addToBox({ uri: img.uri, kind, object, note, ticket: tk ? tk.id : null, fix, takenAt });
           ctx.setBoxN(n);
           setMine((p) => [{ uri: img.uri, kind, offline: true }, ...p]);
-          Alert.alert('Сохранено без интернета', 'Фото сохранено в телефоне и отправится само, когда появится связь. Время и место съёмки записаны.');
-        } catch (x) { Alert.alert('Не получилось', 'Нет интернета, и фото не удалось сохранить. Попробуйте ещё раз.'); }
-      } else Alert.alert('Не получилось', errText(e));
+          Alert.alert(tr('Сохранено без интернета'), tr('Фото сохранено в телефоне и отправится само, когда появится связь. Время и место съёмки записаны.'));
+        } catch (x) { Alert.alert(tr('Не получилось'), tr('Нет интернета, и фото не удалось сохранить. Попробуйте ещё раз.')); }
+      } else Alert.alert(tr('Не получилось'), errText(e));
     }
   };
   const today = st.wph.filter((p) => !object.trim() || p.object === object.trim());
   return (
     <Page>
-      <H1>Фото работ</H1>
-      <Muted>Снимайте каждую работу до и после. Место и время записываются автоматически, фото из галереи не принимаются.</Muted>
+      <H1>{tr('Фото работ')}</H1>
+      <Muted>{tr('Снимайте каждую работу до и после. Место и время записываются автоматически, фото из галереи не принимаются.')}</Muted>
       <Card>
-        <Field label="Объект: клиент или адрес" value={object} onChangeText={setObject} placeholder="Ашот, Абовян, ул. ..." />
+        <Field label={tr('Объект: клиент или адрес')} value={object} onChangeText={setObject} placeholder={tr('Ашот, Абовян, ул. ...')} />
         <PlacePick places={st.places} value={object} onPick={setObject} />
-        <Label>Что на фото</Label>
+        <Label>{tr('Что на фото')}</Label>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {KINDS.map(([k, l]) => <Btn key={k} kind={kind === k ? 'dark' : 'ghost'} title={l} onPress={() => setKind(k)} />)}
+          {KINDS.map(([k, l]) => <Btn key={k} kind={kind === k ? 'dark' : 'ghost'} title={tr(l)} onPress={() => setKind(k)} />)}
         </View>
-        <Field label="Комментарий (не обязательно)" value={note} onChangeText={setNote} placeholder="Заменил 2 коннектора МС4" />
+        <Field label={tr('Комментарий (не обязательно)')} value={note} onChangeText={setNote} placeholder={tr('Заменил 2 коннектора МС4')} />
       </Card>
-      <Btn title="Сфотографировать" big onPress={open} />
+      <Btn title={tr('Сфотографировать')} big onPress={open} />
       {mine.length ? (
         <Card>
-          <T style={{ fontWeight: '700' }}>Снято сейчас: {mine.length}</T>
+          <T style={{ fontWeight: '700' }}>{tr('Снято сейчас:')}{' '}{mine.length}</T>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {mine.map((p, i) => (
               <View key={i}>
@@ -1163,8 +1167,8 @@ function WorkScreen({ ctx, ticket }) {
           </View>
         </Card>
       ) : null}
-      <Muted style={{ textAlign: 'center' }}>За сегодня {object.trim() ? 'по этому объекту ' : ''}загружено: {today.length}</Muted>
-      <CameraSheet visible={cam} title={KINDS.find((x) => x[0] === kind)[1]} onClose={() => setCam(false)} onShot={onShot} />
+      <Muted style={{ textAlign: 'center' }}>{tr('За сегодня')}{' '}{object.trim() ? tr('по этому объекту ') : ''}{tr('загружено:')}{' '}{today.length}</Muted>
+      <CameraSheet visible={cam} title={tr(KINDS.find((x) => x[0] === kind)[1])} onClose={() => setCam(false)} onShot={onShot} />
     </Page>
   );
 }
@@ -1183,15 +1187,15 @@ function TalkScreen({ ctx }) {
   useEffect(() => () => { if (talkRecording()) stopTalk().catch(() => {}); }, []);
   useEffect(() => { if (rec && ms >= TALK_MAX_MS) stop(); }, [ms, rec]);
   const start = async () => {
-    if (!object.trim()) return Alert.alert('Объект', 'Укажите объект: имя клиента или адрес');
-    if (!consent) return Alert.alert('Согласие клиента', 'Сначала предупредите клиента, что разговор записывается, и отметьте его согласие.');
-    if (!st.open) return Alert.alert('Смена', 'Записывать разговор можно только во время смены.');
+    if (!object.trim()) return Alert.alert(tr('Объект'), tr('Укажите объект: имя клиента или адрес'));
+    if (!consent) return Alert.alert(tr('Согласие клиента'), tr('Сначала предупредите клиента, что разговор записывается, и отметьте его согласие.'));
+    if (!st.open) return Alert.alert(tr('Смена'), tr('Записывать разговор можно только во время смены.'));
     try { setFile(null); setMs(0); await startTalk(setMs); setRec(true); }
-    catch (e) { Alert.alert('Не получилось', String(e && e.message) === 'MIC_DENIED' ? 'Разрешите доступ к микрофону в настройках телефона.' : errText(e)); }
+    catch (e) { Alert.alert(tr('Не получилось'), String(e && e.message) === 'MIC_DENIED' ? tr('Разрешите доступ к микрофону в настройках телефона.') : errText(e)); }
   };
   const stop = async () => {
     setRec(false);
-    try { const r = await stopTalk(); if (r) setFile({ uri: r.uri, ms: r.ms || ms }); } catch (e) { Alert.alert('Не получилось', errText(e)); }
+    try { const r = await stopTalk(); if (r) setFile({ uri: r.uri, ms: r.ms || ms }); } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const send = async () => {
     if (!file) return;
@@ -1204,48 +1208,48 @@ function TalkScreen({ ctx }) {
       if (r && r.id) requestTalkAi(r.id);
       setFile(null); setMs(0); setConsent(false);
       await load();
-      Alert.alert('Отправлено', 'Запись отправлена. Отчёт по разговору получит руководитель.');
+      Alert.alert(tr('Отправлено'), tr('Запись отправлена. Отчёт по разговору получит руководитель.'));
     } catch (e) {
-      Alert.alert('Не получилось', isNetErr(e) ? 'Нет интернета. Запись сохранена на этом экране — нажмите «Отправить», когда появится связь.' : errText(e));
+      Alert.alert(tr('Не получилось'), isNetErr(e) ? tr('Нет интернета. Запись сохранена на этом экране — нажмите «Отправить», когда появится связь.') : errText(e));
     } finally { setBusy(false); }
   };
   return (
     <Page>
-      <H1>Разговор с клиентом</H1>
-      <Muted>Запишите разговор на объекте: что случилось, что сделали, о чём договорились. Руководитель получит краткий отчёт.</Muted>
+      <H1>{tr('Разговор с клиентом')}</H1>
+      <Muted>{tr('Запишите разговор на объекте: что случилось, что сделали, о чём договорились. Руководитель получит краткий отчёт.')}</Muted>
       <Card>
-        <Field label="Объект: клиент или адрес" value={object} onChangeText={setObject} placeholder="Ашот, Абовян, ул. ..." editable={!rec} />
+        <Field label={tr('Объект: клиент или адрес')} value={object} onChangeText={setObject} placeholder={tr('Ашот, Абовян, ул. ...')} editable={!rec} />
         <PlacePick places={st.places} value={object} onPick={setObject} />
       </Card>
       <Card style={{ borderLeftWidth: 4, borderLeftColor: consent ? C.ok : C.warn }}>
-        <T style={{ fontWeight: '700' }}>Согласие клиента</T>
-        <Muted>Скажите клиенту перед записью:</Muted>
+        <T style={{ fontWeight: '700' }}>{tr('Согласие клиента')}</T>
+        <Muted>{tr('Скажите клиенту перед записью:')}</Muted>
         <Text style={{ fontSize: 16, color: C.ink, fontStyle: 'italic' }}>«Մեր զրույցը ձայնագրվում է սպասարկման որակի համար։ Համաձա՞յն եք»</Text>
         <Pressable onPress={() => !rec && setConsent(!consent)} style={{ flexDirection: 'row', gap: 10, alignItems: 'center', paddingVertical: 4 }} accessibilityRole="checkbox" accessibilityState={{ checked: consent }}>
           <Icon name={consent ? 'checkbox' : 'square-outline'} size={26} color={consent ? C.ok : C.muted} />
-          <Text style={{ flex: 1, fontSize: 15, color: C.ink }}>Клиент предупреждён и согласен на запись</Text>
+          <Text style={{ flex: 1, fontSize: 15, color: C.ink }}>{tr('Клиент предупреждён и согласен на запись')}</Text>
         </Pressable>
       </Card>
       <View style={{ alignItems: 'center', gap: 10, paddingVertical: 8 }}>
-        <Pressable onPress={rec ? stop : start} disabled={busy} accessibilityLabel={rec ? 'Остановить запись' : 'Начать запись'}
+        <Pressable onPress={rec ? stop : start} disabled={busy} accessibilityLabel={rec ? tr('Остановить запись') : tr('Начать запись')}
           style={({ pressed }) => ({ width: 112, height: 112, borderRadius: 56, backgroundColor: rec ? C.bad : C.pine, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.85 : 1, borderWidth: 6, borderColor: rec ? C.badSoft : C.surface2 })}>
           <Icon name={rec ? 'stop' : 'mic'} size={46} color="#fff" />
         </Pressable>
         <Text style={{ fontSize: 28, fontWeight: '800', color: rec ? C.bad : C.ink }}>{mmss(rec ? ms : file ? file.ms : 0)}</Text>
-        <Muted>{rec ? 'Идёт запись. Держите телефон рядом, экран можно не трогать.' : file ? 'Запись готова' : 'Нажмите, чтобы начать запись'}</Muted>
+        <Muted>{rec ? tr('Идёт запись. Держите телефон рядом, экран можно не трогать.') : file ? tr('Запись готова') : tr('Нажмите, чтобы начать запись')}</Muted>
       </View>
       {file && !rec ? (
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Btn kind="ghost" title="Записать заново" onPress={() => Alert.alert('Удалить запись?', 'Текущая запись не будет отправлена.', [{ text: 'Нет' }, { text: 'Удалить', onPress: () => { setFile(null); setMs(0); } }])} style={{ flex: 1 }} />
-          <Btn title="Отправить" busy={busy} onPress={send} style={{ flex: 1 }} />
+          <Btn kind="ghost" title={tr('Записать заново')} onPress={() => Alert.alert(tr('Удалить запись?'), tr('Текущая запись не будет отправлена.'), [{ text: tr('Нет') }, { text: tr('Удалить'), onPress: () => { setFile(null); setMs(0); } }])} style={{ flex: 1 }} />
+          <Btn title={tr('Отправить')} busy={busy} onPress={send} style={{ flex: 1 }} />
         </View>
       ) : null}
       {(st.talks || []).length ? (
         <Card>
-          <Label>Сегодня записано</Label>
+          <Label>{tr('Сегодня записано')}</Label>
           {st.talks.map((x, i) => (
-            <Row key={x.id} icon="mic" title={(x.object || '—') + ' · ' + hm(x.at)} sub={Math.max(1, Math.round((x.duration_s || 0) / 60)) + ' мин'}
-              right={<Chip kind={(TALK_ST[x.status] || TALK_ST.new)[1]}>{(TALK_ST[x.status] || TALK_ST.new)[0]}</Chip>} last={i === st.talks.length - 1} />
+            <Row key={x.id} icon="mic" title={(x.object || '—') + ' · ' + hm(x.at)} sub={Math.max(1, Math.round((x.duration_s || 0) / 60)) + tr(' мин')}
+              right={<Chip kind={(TALK_ST[x.status] || TALK_ST.new)[1]}>{tr((TALK_ST[x.status] || TALK_ST.new)[0])}</Chip>} last={i === st.talks.length - 1} />
           ))}
         </Card>
       ) : null}
@@ -1275,19 +1279,19 @@ function MyDay({ ctx }) {
       const out = [];
       const add = (at, icon, color, title, sub, photo) => { if (at && new Date(at) >= d0) out.push({ at: new Date(at).getTime(), icon, color, title, sub, photo }); };
       st.shifts.forEach((x) => {
-        add(x.start_at, 'play-circle', C.pine, 'Начало смены', 'Одометр ' + x.start_odo + ' км');
-        if (x.end_at) add(x.end_at, 'stop-circle', C.pine, 'Конец смены', 'Одометр ' + x.end_odo + ' км');
+        add(x.start_at, 'play-circle', C.pine, tr('Начало смены'), tr('Одометр ') + x.start_odo + tr(' км'));
+        if (x.end_at) add(x.end_at, 'stop-circle', C.pine, tr('Конец смены'), tr('Одометр ') + x.end_odo + tr(' км'));
       });
-      (wp.data || []).forEach((w) => add(w.at, 'camera', C.ok, 'Фото работ · ' + KIND_RU[w.kind], [w.object, w.note].filter(Boolean).join(' · '), w.path));
+      (wp.data || []).forEach((w) => add(w.at, 'camera', C.ok, tr('Фото работ · ') + tr(KIND_RU[w.kind]), [w.object, w.note].filter(Boolean).join(' · '), w.path));
       (bu.data || []).forEach((b) => {
         const what = (b.lines || []).map(lineText).join(', ');
-        add(b.created_at, b.source === 'warehouse' ? 'archive' : 'cart', C.info, b.source === 'warehouse' ? 'Взял со склада' : 'Закупка · ' + b.supplier, what + (b.source === 'warehouse' ? '' : ' · ' + money(b.amount)), b.photo);
-        if (b.delivered_at) add(b.delivered_at, 'checkmark-done', C.info, b.dest === 'warehouse' ? 'Сдал на склад' : 'Материал на объекте', what, b.delivered_photo);
-        if (b.left_at) add(b.left_at, 'return-down-back', C.info, 'Остаток сдан на склад', '', b.left_photo);
+        add(b.created_at, b.source === 'warehouse' ? 'archive' : 'cart', C.info, b.source === 'warehouse' ? tr('Взял со склада') : tr('Закупка · ') + b.supplier, what + (b.source === 'warehouse' ? '' : ' · ' + money(b.amount)), b.photo);
+        if (b.delivered_at) add(b.delivered_at, 'checkmark-done', C.info, b.dest === 'warehouse' ? tr('Сдал на склад') : tr('Материал на объекте'), what, b.delivered_photo);
+        if (b.left_at) add(b.left_at, 'return-down-back', C.info, tr('Остаток сдан на склад'), '', b.left_photo);
       });
-      (fu.data || []).forEach((r) => add(r.at, 'water', '#8a4fd8', 'Заправка', String(r.liters).replace('.', ',') + (st.staff.fuel_type === 'gas' ? ' м³' : ' л') + ' · ' + money(r.amount), r.photo));
-      (tk.data || []).forEach((t) => add(t.done_at, 'checkbox', C.ok, 'Задача выполнена', t.title));
-      (st.talks || []).forEach((x) => add(x.at, 'mic', C.info, 'Разговор с клиентом', (x.object || '') + ' · ' + Math.max(1, Math.round((x.duration_s || 0) / 60)) + ' мин'));
+      (fu.data || []).forEach((r) => add(r.at, 'water', '#8a4fd8', tr('Заправка'), String(r.liters).replace('.', ',') + (st.staff.fuel_type === 'gas' ? tr(' м³') : tr(' л')) + ' · ' + money(r.amount), r.photo));
+      (tk.data || []).forEach((t) => add(t.done_at, 'checkbox', C.ok, tr('Задача выполнена'), t.title));
+      (st.talks || []).forEach((x) => add(x.at, 'mic', C.info, tr('Разговор с клиентом'), (x.object || '') + ' · ' + Math.max(1, Math.round((x.duration_s || 0) / 60)) + tr(' мин')));
       out.sort((a, b) => a.at - b.at);
       setEv(out);
       const paths = out.map((e) => e.photo).filter(Boolean);
@@ -1304,17 +1308,17 @@ function MyDay({ ctx }) {
   const n = (ic) => (ev || []).filter((e) => e.icon === ic).length;
   return (
     <Page onRefresh={get} refreshing={busy}>
-      <Text style={{ fontSize: 15, color: C.muted }}>{new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
+      <Text style={{ fontSize: 15, color: C.muted }}>{new Date().toLocaleDateString(loc(), { weekday: 'long', day: 'numeric', month: 'long' })}</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Tile icon="time" value={mins ? Math.floor(mins / 60) + ':' + p2(Math.round(mins % 60)) : '—'} label="на смене" />
-        <Tile icon="camera" value={n('camera')} label="фото работ" tone={n('camera') ? 'ok' : 'note'} />
-        <Tile icon="cart" value={n('cart') + n('archive')} label="закупки и склад" />
-        <Tile icon="water" value={n('water')} label="заправки" />
+        <Tile icon="time" value={mins ? Math.floor(mins / 60) + ':' + p2(Math.round(mins % 60)) : '—'} label={tr('на смене')} />
+        <Tile icon="camera" value={n('camera')} label={tr('фото работ')} tone={n('camera') ? 'ok' : 'note'} />
+        <Tile icon="cart" value={n('cart') + n('archive')} label={tr('закупки и склад')} />
+        <Tile icon="water" value={n('water')} label={tr('заправки')} />
       </View>
-      {ctx.boxN ? <Flag kind="warn">Ждут отправки: {ctx.boxN} фото. В ленте появятся после отправки.</Flag> : null}
+      {ctx.boxN ? <Flag kind="warn">{tr('Ждут отправки:')}{' '}{ctx.boxN}{' '}{tr('фото. В ленте появятся после отправки.')}</Flag> : null}
       <Card>
-        <H2>Лента дня</H2>
-        {ev == null ? <Muted>Загружаю…</Muted> : !ev.length ? <Muted>Сегодня пока ничего не отмечено.</Muted> : ev.map((e, i) => (
+        <H2>{tr('Лента дня')}</H2>
+        {ev == null ? <Muted>{tr('Загружаю…')}</Muted> : !ev.length ? <Muted>{tr('Сегодня пока ничего не отмечено.')}</Muted> : ev.map((e, i) => (
           <View key={i} style={{ flexDirection: 'row', gap: 12 }}>
             <View style={{ alignItems: 'center', width: 40 }}>
               <Text style={{ fontSize: 12.5, color: C.muted, fontWeight: '600' }}>{hm(e.at)}</Text>
@@ -1335,7 +1339,7 @@ function MyDay({ ctx }) {
           </View>
         ))}
       </Card>
-      <Muted style={{ textAlign: 'center' }}>Руководитель видит этот же день в своей программе.</Muted>
+      <Muted style={{ textAlign: 'center' }}>{tr('Руководитель видит этот же день в своей программе.')}</Muted>
       <Modal visible={!!big} transparent animationType="fade" onRequestClose={() => setBig(null)}>
         <Pressable onPress={() => setBig(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center' }}>
           {big ? <Image source={{ uri: big }} style={{ width: '100%', height: '80%' }} resizeMode="contain" /> : null}
@@ -1386,23 +1390,23 @@ function History({ ctx }) {
   for (let i = 0; i < off; i++) cells.push(null);
   for (let d = 1; d <= days; d++) cells.push(d);
   const S = D[sel] || null;
-  const hh = (min) => Math.floor(min / 60) + ' ч ' + p2(Math.round(min % 60)) + ' мин';
+  const hh = (min) => Math.floor(min / 60) + tr(' ч ') + p2(Math.round(min % 60)) + tr(' мин');
   return (
     <Page onRefresh={get} refreshing={busy}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Pressable onPress={() => { setM(new Date(m.getFullYear(), m.getMonth() - 1, 1)); setSel(1); }} hitSlop={12} style={{ padding: 6 }} accessibilityLabel="Предыдущий месяц"><Icon name="chevron-back" size={24} color={C.pine} /></Pressable>
-        <Text style={{ fontSize: 19, fontWeight: '700', color: C.ink }}>{MONTHS[m.getMonth()]} {m.getFullYear()}</Text>
-        <Pressable disabled={isCur} onPress={() => { setM(new Date(m.getFullYear(), m.getMonth() + 1, 1)); setSel(1); }} hitSlop={12} style={{ padding: 6, opacity: isCur ? 0.3 : 1 }} accessibilityLabel="Следующий месяц"><Icon name="chevron-forward" size={24} color={C.pine} /></Pressable>
+        <Pressable onPress={() => { setM(new Date(m.getFullYear(), m.getMonth() - 1, 1)); setSel(1); }} hitSlop={12} style={{ padding: 6 }} accessibilityLabel={tr('Предыдущий месяц')}><Icon name="chevron-back" size={24} color={C.pine} /></Pressable>
+        <Text style={{ fontSize: 19, fontWeight: '700', color: C.ink }}>{tr(MONTHS[m.getMonth()])} {m.getFullYear()}</Text>
+        <Pressable disabled={isCur} onPress={() => { setM(new Date(m.getFullYear(), m.getMonth() + 1, 1)); setSel(1); }} hitSlop={12} style={{ padding: 6, opacity: isCur ? 0.3 : 1 }} accessibilityLabel={tr('Следующий месяц')}><Icon name="chevron-forward" size={24} color={C.pine} /></Pressable>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Tile icon="calendar" value={tot.sh} label="смен" />
-        <Tile icon="time" value={Math.round(tot.min / 60)} label="часов" />
-        <Tile icon="navigate" value={Math.round(tot.km)} label="км по GPS" />
-        <Tile icon="camera" value={tot.ph} label="фото работ" />
+        <Tile icon="calendar" value={tot.sh} label={tr('смен')} />
+        <Tile icon="time" value={Math.round(tot.min / 60)} label={tr('часов')} />
+        <Tile icon="navigate" value={Math.round(tot.km)} label={tr('км по GPS')} />
+        <Tile icon="camera" value={tot.ph} label={tr('фото работ')} />
       </View>
       <Card style={{ padding: 10 }}>
         <View style={{ flexDirection: 'row' }}>
-          {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((w) => <Text key={w} style={{ width: '14.285%', textAlign: 'center', fontSize: 12, color: C.muted, fontWeight: '700' }}>{w}</Text>)}
+          {[tr('Пн'), tr('Вт'), tr('Ср'), tr('Чт'), tr('Пт'), tr('Сб'), tr('Вс')].map((w) => <Text key={w} style={{ width: '14.285%', textAlign: 'center', fontSize: 12, color: C.muted, fontWeight: '700' }}>{w}</Text>)}
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
           {cells.map((d, i) => {
@@ -1415,7 +1419,7 @@ function History({ ctx }) {
               <Pressable key={i} onPress={() => setSel(d)} style={{ width: '14.285%', aspectRatio: 1, padding: 2 }}>
                 <View style={{ flex: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: has ? C.okSoft : 'transparent', borderWidth: sel === d ? 2 : isToday ? 1 : 0, borderColor: sel === d ? C.sun : C.pine, opacity: future ? 0.4 : 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: has ? '700' : '400', color: has ? C.ok : C.ink }}>{d}</Text>
-                  {has ? <Text style={{ fontSize: 10, color: C.ok }}>{Math.round(x.min / 60)} ч</Text> : null}
+                  {has ? <Text style={{ fontSize: 10, color: C.ok }}>{Math.round(x.min / 60)}{' '}{tr('ч')}</Text> : null}
                 </View>
               </Pressable>
             );
@@ -1424,16 +1428,16 @@ function History({ ctx }) {
       </Card>
       {data && S ? (
         <Card>
-          <H2>{sel} {MONTHS_G[m.getMonth()]}</H2>
-          {!S.sh.length ? <Muted>Смены не было.</Muted> : (
+          <H2>{sel} {tr(MONTHS_G[m.getMonth()])}</H2>
+          {!S.sh.length ? <Muted>{tr('Смены не было.')}</Muted> : (
             <>
-              {S.sh.map((x) => <Row key={x.id} icon="time" title={hm(x.start_at) + ' – ' + (x.end_at ? hm(x.end_at) : 'идёт')} sub={'Одометр ' + x.start_odo + (x.end_odo ? ' → ' + x.end_odo : '')} />)}
-              <Row icon="hourglass" title={hh(S.min)} sub="на смене" />
-              <Row icon="navigate" title={(Math.round(S.km * 10) / 10).toString().replace('.', ',') + ' км по GPS'} sub={S.odo ? 'по одометру ' + S.odo + ' км' : undefined} />
-              <Row icon="camera" title={'Фото работ: ' + S.ph} />
-              {S.tk ? <Row icon="checkbox" title={'Задачи: ' + S.td + ' из ' + S.tk} /> : null}
-              {S.bu ? <Row icon="cart" title={'Закупки и склад: ' + S.bu} /> : null}
-              <Row icon="water" title={S.fl ? 'Заправка: ' + (Math.round(S.fl * 10) / 10).toString().replace('.', ',') + ' · ' + money(S.fs) : 'Заправок не было'} last />
+              {S.sh.map((x) => <Row key={x.id} icon="time" title={hm(x.start_at) + ' – ' + (x.end_at ? hm(x.end_at) : tr('идёт'))} sub={tr('Одометр ') + x.start_odo + (x.end_odo ? ' → ' + x.end_odo : '')} />)}
+              <Row icon="hourglass" title={hh(S.min)} sub={tr('на смене')} />
+              <Row icon="navigate" title={(Math.round(S.km * 10) / 10).toString().replace('.', ',') + tr(' км по GPS')} sub={S.odo ? tr('по одометру ') + S.odo + tr(' км') : undefined} />
+              <Row icon="camera" title={tr('Фото работ: ') + S.ph} />
+              {S.tk ? <Row icon="checkbox" title={tr('Задачи: ') + S.td + tr(' из ') + S.tk} /> : null}
+              {S.bu ? <Row icon="cart" title={tr('Закупки и склад: ') + S.bu} /> : null}
+              <Row icon="water" title={S.fl ? tr('Заправка: ') + (Math.round(S.fl * 10) / 10).toString().replace('.', ',') + ' · ' + money(S.fs) : tr('Заправок не было')} last />
             </>
           )}
         </Card>
@@ -1445,16 +1449,16 @@ function History({ ctx }) {
 /* ---------------- помощь ---------------- */
 function Help({ ctx }) {
   const items = [
-    ['play-circle', 'Начало смены', 'Утром в офисе нажмите «Начать смену», сфотографируйте одометр и введите показания. Включится запись маршрута — это уведомление «Идёт смена».'],
-    ['camera', 'Фото работ', 'На каждом объекте снимайте «до» и «после». Выберите объект из списка или впишите имя клиента. Без интернета фото сохранится и отправится само.'],
-    ['checkbox', 'Задачи', 'Задачи на день ставит руководитель. Нажмите «Маршрут», чтобы доехать, и «Выполнено» на месте — с фото.'],
-    ['cart', 'Закупка', 'Купили что-то — сразу внесите: фото чека, что купили и сумма. Потом отметьте фото там, куда привезли: на складе или на объекте.'],
-    ['archive', 'Со склада', 'Берёте материал со склада на объект — запишите это. На объекте отметьте фото, остаток верните на склад.'],
-    ['mic', 'Разговор с клиентом', 'Предупредите клиента, что разговор записывается, отметьте его согласие и нажмите запись. Отчёт по разговору получит руководитель.'],
-    ['water', 'Заправка', 'После каждой заправки — фото чека, литры и сумма. Всё сверяется с выпиской по топливной карте.'],
-    ['stop-circle', 'Конец смены', 'Вечером в офисе нажмите «Закончить смену» и сфотографируйте одометр. Перед этим сдайте закупки.'],
-    ['notifications', 'Напоминания', 'Приложение напомнит начать и закончить смену, сдать закупку и снять фото работ.'],
-    ['shield-checkmark', 'Что записывается', 'Только во время смены: маршрут, время и место отметок. Вне смены местоположение не записывается.'],
+    ['play-circle', tr('Начало смены'), tr('Утром в офисе нажмите «Начать смену», сфотографируйте одометр и введите показания. Включится запись маршрута — это уведомление «Идёт смена».')],
+    ['camera', tr('Фото работ'), tr('На каждом объекте снимайте «до» и «после». Выберите объект из списка или впишите имя клиента. Без интернета фото сохранится и отправится само.')],
+    ['checkbox', tr('Задачи'), tr('Задачи на день ставит руководитель. Нажмите «Маршрут», чтобы доехать, и «Выполнено» на месте — с фото.')],
+    ['cart', tr('Закупка'), tr('Купили что-то — сразу внесите: фото чека, что купили и сумма. Потом отметьте фото там, куда привезли: на складе или на объекте.')],
+    ['archive', tr('Со склада'), tr('Берёте материал со склада на объект — запишите это. На объекте отметьте фото, остаток верните на склад.')],
+    ['mic', tr('Разговор с клиентом'), tr('Предупредите клиента, что разговор записывается, отметьте его согласие и нажмите запись. Отчёт по разговору получит руководитель.')],
+    ['water', tr('Заправка'), tr('После каждой заправки — фото чека, литры и сумма. Всё сверяется с выпиской по топливной карте.')],
+    ['stop-circle', tr('Конец смены'), tr('Вечером в офисе нажмите «Закончить смену» и сфотографируйте одометр. Перед этим сдайте закупки.')],
+    ['notifications', tr('Напоминания'), tr('Приложение напомнит начать и закончить смену, сдать закупку и снять фото работ.')],
+    ['shield-checkmark', tr('Что записывается'), tr('Только во время смены: маршрут, время и место отметок. Вне смены местоположение не записывается.')],
   ];
   return (
     <Page>
@@ -1474,6 +1478,27 @@ function Help({ ctx }) {
   );
 }
 
+/* ---------------- язык ---------------- */
+function LangRow({ last }) {
+  const cur = getLang();
+  const opt = (k, label) => (
+    <Pressable key={k} onPress={() => setLang(k)} accessibilityRole="radio" accessibilityState={{ selected: cur === k }}
+      style={{ flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center', backgroundColor: cur === k ? C.pine : 'transparent' }}>
+      <Text style={{ fontSize: 14.5, fontWeight: '700', color: cur === k ? C.pineInk : C.ink }}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: last ? 0 : 1, borderBottomColor: C.line }}>
+      <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="language" size={18} color={C.pine} /></View>
+      <Text style={{ fontSize: 15, color: C.ink, fontWeight: '600', flex: 1 }}>{tr('Язык')}</Text>
+      <View style={{ flexDirection: 'row', backgroundColor: C.surface2, borderRadius: 11, padding: 3, gap: 3, width: 190 }}>
+        {opt('hy', 'Հայերեն')}
+        {opt('ru', 'Русский')}
+      </View>
+    </View>
+  );
+}
+
 /* ---------------- профиль ---------------- */
 function Profile({ ctx }) {
   const { st, load } = ctx;
@@ -1482,11 +1507,11 @@ function Profile({ ctx }) {
   const [f, setF] = useState({ carModel: s.car_model || '', carPlate: s.car_plate || '', fuel: s.fuel_type || 'petrol', norm: String(s.norm_claimed || ''), tank: String(s.tank || '') });
   const [busy, setBusy] = useState(false);
   const set = (k) => (v) => setF((p) => ({ ...p, [k]: v }));
-  const unit = s.fuel_type === 'gas' ? 'м³' : 'л';
+  const unit = s.fuel_type === 'gas' ? tr('м³') : tr('л');
   const save = async () => {
     setBusy(true);
-    try { await rpc('update_car', { p_car_model: f.carModel, p_car_plate: f.carPlate, p_fuel_type: f.fuel, p_norm: num(f.norm), p_tank: num(f.tank) }); await load(); setEdit(false); Alert.alert('Сохранено', 'Новый расход начнёт учитываться после утверждения руководителем.'); }
-    catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
+    try { await rpc('update_car', { p_car_model: f.carModel, p_car_plate: f.carPlate, p_fuel_type: f.fuel, p_norm: num(f.norm), p_tank: num(f.tank) }); await load(); setEdit(false); Alert.alert(tr('Сохранено'), tr('Новый расход начнёт учитываться после утверждения руководителем.')); }
+    catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
   return (
     <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
@@ -1498,38 +1523,39 @@ function Profile({ ctx }) {
         <Muted>+{String(s.phone).replace(/\D/g, '')}</Muted>
       </View>
       <Card style={{ paddingVertical: 4 }}>
-        {st.cfg.office_phone ? <Row icon="call" title="Позвонить в офис" sub={st.cfg.office_phone} onPress={() => callOffice(st.cfg)} /> : null}
-        <Row icon="help-circle" title="Как пользоваться" onPress={() => ctx.nav('help')} />
-        <Row icon="shield-checkmark" title="Разрешения и уведомления" onPress={() => ctx.nav('perms')} last />
+        {st.cfg.office_phone ? <Row icon="call" title={tr('Позвонить в офис')} sub={st.cfg.office_phone} onPress={() => callOffice(st.cfg)} /> : null}
+        <Row icon="help-circle" title={tr('Как пользоваться')} onPress={() => ctx.nav('help')} />
+        <Row icon="shield-checkmark" title={tr('Разрешения и уведомления')} onPress={() => ctx.nav('perms')} />
+        <LangRow last />
       </Card>
       {!edit ? (
         <Card>
-          <Label>Машина</Label>
-          <T style={{ fontWeight: '700' }}>{s.car_model || 'не указана'}{s.car_plate ? ' · ' + s.car_plate : ''}</T>
-          <Muted>Расход: {s.norm_approved ? s.norm_approved + ' ' + unit + '/100 км, утверждён' : 'ждёт утверждения'}{s.norm_claimed && s.norm_approved && +s.norm_claimed !== +s.norm_approved ? ' · вы указали ' + s.norm_claimed + ', ждёт утверждения' : ''}</Muted>
-          <Btn kind="ghost" title="Изменить машину" onPress={() => setEdit(true)} />
+          <Label>{tr('Машина')}</Label>
+          <T style={{ fontWeight: '700' }}>{s.car_model || tr('не указана')}{s.car_plate ? ' · ' + s.car_plate : ''}</T>
+          <Muted>{tr('Расход:')}{' '}{s.norm_approved ? s.norm_approved + ' ' + unit + tr('/100 км, утверждён') : tr('ждёт утверждения')}{s.norm_claimed && s.norm_approved && +s.norm_claimed !== +s.norm_approved ? tr(' · вы указали ') + s.norm_claimed + tr(', ждёт утверждения') : ''}</Muted>
+          <Btn kind="ghost" title={tr('Изменить машину')} onPress={() => setEdit(true)} />
         </Card>
       ) : (
         <Card>
-          <Field label="Марка и модель" value={f.carModel} onChangeText={set('carModel')} />
-          <Field label="Номер" value={f.carPlate} onChangeText={set('carPlate')} autoCapitalize="characters" />
+          <Field label={tr('Марка и модель')} value={f.carModel} onChangeText={set('carModel')} />
+          <Field label={tr('Номер')} value={f.carPlate} onChangeText={set('carPlate')} autoCapitalize="characters" />
           <FuelSeg value={f.fuel} onChange={set('fuel')} />
-          <Field label="Расход на 100 км" value={f.norm} onChangeText={set('norm')} keyboardType="decimal-pad" />
-          <Field label="Объём бака" value={f.tank} onChangeText={set('tank')} keyboardType="decimal-pad" />
-          <Btn title="Сохранить" onPress={save} busy={busy} />
+          <Field label={tr('Расход на 100 км')} value={f.norm} onChangeText={set('norm')} keyboardType="decimal-pad" />
+          <Field label={tr('Объём бака')} value={f.tank} onChangeText={set('tank')} keyboardType="decimal-pad" />
+          <Btn title={tr('Сохранить')} onPress={save} busy={busy} />
         </Card>
       )}
       <Card>
-        <Label>Последние смены</Label>
+        <Label>{tr('Последние смены')}</Label>
         {st.shifts.length ? st.shifts.map((x) => (
           <View key={x.id} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <T>{new Date(x.start_at).toLocaleDateString('ru-RU')}</T>
-            <Muted>{hm(x.start_at)}–{x.end_at ? hm(x.end_at) : '…'}{x.end_odo ? ' · ' + (x.end_odo - x.start_odo) + ' км' : ''}</Muted>
+            <T>{new Date(x.start_at).toLocaleDateString(loc())}</T>
+            <Muted>{hm(x.start_at)}–{x.end_at ? hm(x.end_at) : '…'}{x.end_odo ? ' · ' + (x.end_odo - x.start_odo) + tr(' км') : ''}</Muted>
           </View>
-        )) : <Muted>Смен пока нет.</Muted>}
+        )) : <Muted>{tr('Смен пока нет.')}</Muted>}
       </Card>
-      {!st.open ? <Btn kind="ghost" title="Выйти из аккаунта" onPress={() => supabase.auth.signOut()} /> : <Muted style={{ textAlign: 'center' }}>Выйти можно после окончания смены.</Muted>}
-      <Muted style={{ textAlign: 'center', fontSize: 12 }}>Arev Service · версия {Application.nativeApplicationVersion || '—'}</Muted>
+      {!st.open ? <Btn kind="ghost" title={tr('Выйти из аккаунта')} onPress={() => supabase.auth.signOut()} /> : <Muted style={{ textAlign: 'center' }}>{tr('Выйти можно после окончания смены.')}</Muted>}
+      <Muted style={{ textAlign: 'center', fontSize: 12 }}>{tr('Arev Service · версия')}{' '}{Application.nativeApplicationVersion || '—'}</Muted>
     </Page>
   );
 }

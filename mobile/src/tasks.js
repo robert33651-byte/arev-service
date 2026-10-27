@@ -13,6 +13,7 @@ import { supabase, rpc } from './supabase';
 import { uploadPhoto } from './photo';
 import { deviceId } from './device';
 
+import { tr } from './i18n';
 // ---------- чтение ----------
 // Мои открытые задачи вместе с именами исполнителей: [{id,title,note,due,priority,status,disc_status,name1,name2,seen_at,seen2_at,...}]
 // Все открытые задачи, в том числе с местом: обсуждение доступно по каждой.
@@ -92,7 +93,7 @@ export async function registerPush() {
   try {
     if (!Device.isDevice) return null;
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('tasks', { name: 'Задачи', importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250] });
+      await Notifications.setNotificationChannelAsync('tasks', { name: tr('Задачи'), importance: Notifications.AndroidImportance.HIGH, vibrationPattern: [0, 250, 250, 250] });
     }
     let { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') status = (await Notifications.requestPermissionsAsync()).status;

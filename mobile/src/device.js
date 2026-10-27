@@ -3,6 +3,7 @@ import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
 import { Camera } from 'expo-camera';
 
+import { tr } from './i18n';
 NetInfo.configure({ shouldFetchWiFiSSID: true });
 
 // Постоянный идентификатор телефона (сбрасывается только при сбросе телефона к заводским)
@@ -36,9 +37,9 @@ export async function askPermissions() {
 
 export async function ensureLocationPermission() {
   const fg = await Location.requestForegroundPermissionsAsync();
-  if (fg.status !== 'granted') throw new Error('Без доступа к местоположению отметки невозможны. Разрешите доступ в настройках телефона.');
+  if (fg.status !== 'granted') throw new Error(tr('Без доступа к местоположению отметки невозможны. Разрешите доступ в настройках телефона.'));
   const on = await Location.hasServicesEnabledAsync();
-  if (!on) throw new Error('Включите геолокацию (GPS) на телефоне.');
+  if (!on) throw new Error(tr('Включите геолокацию (GPS) на телефоне.'));
 }
 
 // Текущая точка. mocked=true значит, что включена подмена местоположения.

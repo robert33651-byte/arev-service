@@ -3,6 +3,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { tr, getLang } from './i18n';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowAlert: true, shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
@@ -11,7 +12,7 @@ export async function setupNotify() {
   try {
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
-        name: 'Напоминания',
+        name: tr('Напоминания'),
         importance: Notifications.AndroidImportance.HIGH,
         vibrationPattern: [0, 250, 200, 250],
         lightColor: '#e9a11b',
@@ -38,7 +39,7 @@ export async function notifyNow(title, body) {
 let lastSig = '';
 // Пересобрать расписание по текущему состоянию. Вызывается после каждой загрузки данных.
 export async function planReminders({ cfg, open, startedToday, buys, wphCount, tasksLeft }) {
-  const sig = JSON.stringify([cfg && cfg.work_start, cfg && cfg.work_end, open && open.id, startedToday, (buys || []).map((b) => b.id), wphCount > 0, tasksLeft, new Date().toDateString()]);
+  const sig = JSON.stringify([getLang(), cfg && cfg.work_start, cfg && cfg.work_end, open && open.id, startedToday, (buys || []).map((b) => b.id), wphCount > 0, tasksLeft, new Date().toDateString()]);
   if (sig === lastSig) return;
   lastSig = sig;
   try {
@@ -61,24 +62,24 @@ export async function planReminders({ cfg, open, startedToday, buys, wphCount, t
       if (wd === 0 || wd === 6) continue;
       if (i === 0 && (open || startedToday)) continue;
       d.setHours(sh || 9, (sm || 0) + 10, 0, 0);
-      await add(d, 'Смена не начата', 'Начните смену в офисе: фото одометра и показания.', 'start' + i);
+      await add(d, tr('Смена не начата'), tr('Начните смену в офисе: фото одометра и показания.'), 'start' + i);
     }
     if (open) {
       const e = new Date(); e.setHours(eh || 18, (em || 0) + 20, 0, 0);
-      await add(e, 'Не забудьте закончить смену', 'Вернитесь в офис и отметьте конец смены с фото одометра.', 'end');
+      await add(e, tr('Не забудьте закончить смену'), tr('Вернитесь в офис и отметьте конец смены с фото одометра.'), 'end');
       if (!wphCount) {
         const t = new Date(new Date(open.start_at).getTime() + 3 * 3600000);
-        await add(t, 'Нет фото работ', 'За смену ещё нет ни одного фото работ. Снимите работу до и после.', 'photo');
+        await add(t, tr('Нет фото работ'), tr('За смену ещё нет ни одного фото работ. Снимите работу до и после.'), 'photo');
       }
       if (tasksLeft) {
         const t = new Date(); t.setHours((eh || 18) - 1, em || 0, 0, 0);
-        await add(t, 'Остались задачи', 'Не выполнено задач на сегодня: ' + tasksLeft + '.', 'tasks');
+        await add(t, tr('Остались задачи'), tr('Не выполнено задач на сегодня: ') + tasksLeft + '.', 'tasks');
       }
     }
     for (const b of buys || []) {
       const t = new Date(new Date(b.created_at).getTime() + 3 * 3600000);
       const what = (b.lines || []).map((l) => l.name).join(', ');
-      await add(t, 'Не сдана закупка', what + '. Сдайте на склад или отметьте на объекте.', 'buy' + b.id);
+      await add(t, tr('Не сдана закупка'), what + tr('. Сдайте на склад или отметьте на объекте.'), 'buy' + b.id);
     }
   } catch (e) {}
 }

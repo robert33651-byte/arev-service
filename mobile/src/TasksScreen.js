@@ -10,6 +10,7 @@ import { supabase, errText } from './supabase';
 import { CameraSheet } from './photo';
 import { getFix, distM } from './device';
 import { C } from './ui';
+import { tr, getLang } from './i18n';
 import {
   myTasks, taskLog, signedUrls, taskSeen, taskReport, taskReportGeo, taskSetPlace, taskPost, taskSelfAdd, uploadTaskPhoto,
   startVoice, stopVoice, uploadVoice, playVoice,
@@ -28,7 +29,7 @@ const TXT = {
     addPlace: '📍 Добавить место', changePlace: '📍 Изменить место', buy: '🛒 Закупка', placeTitle: 'Место для задачи', myPos: '📡 Моё текущее местоположение', placeSaved: 'Место добавлено', noPlaces: 'В списке пока нет мест',
     route: '🗺 Маршрут', place: 'Место', geoHint: 'Фото на месте сохранится с геолокацией для менеджера', fromPlace: 'м от места', geoErr: 'Отключите подмену местоположения и сфотографируйте снова.', rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
     selfNote: 'Менеджер увидит, что вы добавили задачу сами', noteLbl: 'Заметка', youLbl: 'Вы',
-    ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => 'Назначено: ' + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => 'Срок или важность изменены: ' + b, done_field: '✅ Выполнено на месте', status: (b) => 'Статус: ' + b, purchase: (b) => '🛒 Закупка: ' + b, overdue: (b) => '⏰ Просрочено, срок ' + b, place_set: (b) => '📍 Место: ' + b },
+    ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => tr('Назначено: ') + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => tr('Срок или важность изменены: ') + b, done_field: '✅ Выполнено на месте', status: (b) => tr('Статус: ') + b, purchase: (b) => tr('🛒 Закупка: ') + b, overdue: (b) => tr('⏰ Просрочено, срок ') + b, place_set: (b) => tr('📍 Место: ') + b },
   },
   hy: {
     title: 'Իմ առաջադրանքները', add: '＋ Ինձ', empty: 'Բաց առաջադրանքներ չկան', loadErr: 'Չհաջողվեց բեռնել առաջադրանքները', due: 'Ժամկետ', noDue: 'առանց ժամկետի', overdue: 'ժամկետանց',
@@ -43,7 +44,8 @@ const TXT = {
     ev: { created: 'Առաջադրանքը ստեղծվեց', self_added: 'Ավելացվեց աշխատակցի կողմից', assigned: (b) => 'Նշանակվեց՝ ' + b, seen: '👀 Բացվեց', reported: '✅ Զեկուցվեց կատարման մասին', confirmed: '✔ Ընդունվեց մենեջերի կողմից', reopened: '↩ Վերադարձվեց աշխատանքի', reminder: '⏰ Հիշեցում', disc_open: '💬 Քննարկում բացվեց', disc_closed: '✔ Հարցը լուծվեց', due_changed: (b) => 'Ժամկետը կամ կարևորությունը փոխվեց՝ ' + b, done_field: '✅ Կատարվեց տեղում', status: (b) => 'Կարգավիճակ՝ ' + b, purchase: (b) => '🛒 Գնում՝ ' + b, overdue: (b) => '⏰ Ժամկետանց՝ ' + b, place_set: (b) => '📍 Վայր՝ ' + b },
   },
 };
-const L = TXT[TASKS_LANG] || TXT.ru;
+// язык берётся из общего переключателя приложения (Профиль)
+const L = new Proxy({}, { get: (_, k) => (TXT[getLang()] || TXT.ru)[k] });
 
 const P = {
   bg: '#eef2f0', card: '#ffffff', ink: '#14211d', muted: '#5b6a65', line: '#d9e1dd', pine: (C && C.pine) || '#123a33', sun: (C && C.sun) || '#e9a11b', sunInk: (C && C.sunInk) || '#2e1f00',
@@ -56,7 +58,7 @@ const fday = (s) => { if (!s) return ''; const a = String(s).slice(0, 10).split(
 const ymd = (ts) => { const d = new Date(ts); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); };
 const plusDays = (n) => ymd(Date.now() + n * 864e5);
 const isOver = (t) => t.due && String(t.due).slice(0, 10) < ymd(Date.now());
-const PRI = { urgent: [L.urgent, P.bad, P.badSoft], important: [L.important, P.warn, P.warnSoft] };
+const PRI = new Proxy({}, { get: (_, k) => ({ urgent: [L.urgent, P.bad, P.badSoft], important: [L.important, P.warn, P.warnSoft] })[k] });
 
 function Chip({ text, fg, bg }) {
   return <View style={[st.chip, { backgroundColor: bg }]}><Text style={[st.chipT, { color: fg }]}>{text}</Text></View>;
