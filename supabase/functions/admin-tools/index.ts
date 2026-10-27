@@ -6,6 +6,9 @@
 // Что умеет:
 //   action "ai"        — ИИ проверяет фото одометров, чеков АЗС и чеков закупок, которые ещё не проверены
 //   action "reset_pin" — новый PIN-код сотруднику, который его забыл
+//   action "rename_staff" — изменить имя сотрудника
+//   action "delete_staff" — убрать сотрудника (archive — закрыть вход, full — удалить со всей историей)
+//   action "restore_staff" — вернуть архивного сотрудника
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const CORS = {
@@ -72,6 +75,56 @@ Deno.serve(async (req) => {
       const pin = String(body.pin || '');
       if (!/^\d{6,12}$/.test(pin)) return json({ error: 'PIN-код — от 6 до 12 цифр' }, 400);
       const { error } = await admin.auth.admin.updateUserById(String(body.staff_id), { password: pin });
+      if (error) return json({ error: error.message }, 400);
+      return json({ ok: true });
+    }
+
+    // переименовать сотрудника: имя в анкете и в уже написанной переписке по задачам
+    if (body.action === 'rename_staff') {
+      const id = String(body.staff_id || ''); const name = String(body.name || '').trim();
+      if (!id || name.length < 2) return json({ error: 'Укажите имя' }, 400);
+      const { error } = await admin.from('staff').update({ name }).eq('id', id);
+      if (error) return json({ error: error.message }, 400);
+      await admin.from('task_log').update({ actor_name: name }).eq('actor_id', id); // таблица может отсутствовать — не страшно
+      return json({ ok: true });
+    }
+
+    // убрать сотрудника: archive — закрыть вход, история остаётся; full — удалить аккаунт со всей историей и файлами
+    if (body.action === 'delete_staff') {
+      const id = String(body.staff_id || ''); const mode = body.mode === 'full' ? 'full' : 'archive';
+      if (!id) return json({ error: 'Нет сотрудника' }, 400);
+      if (mode === 'archive') {
+        const { error } = await admin.from('staff').update({ status: 'blocked', note: 'Удалён из штата' }).eq('id', id);
+        if (error) return json({ error: error.message }, 400);
+        await admin.from('shifts').update({ end_at: new Date().toISOString() }).eq('staff_id', id).is('end_at', null);
+        const b = await admin.auth.admin.updateUserById(id, { ban_duration: '876000h' });
+        if (b.error) return json({ error: b.error.message }, 400);
+        return json({ ok: true, mode });
+      }
+      // полное удаление: снять с заказов, удалить файлы, удалить вход (остальное удалится каскадом)
+      await admin.from('tickets').update({ staff_id: null }).eq('staff_id', id);
+      await admin.from('ticket_photos').update({ staff_id: null }).eq('staff_id', id);
+      let removed = 0;
+      for (let i = 0; i < 50; i++) {
+        const { data: files } = await admin.storage.from('photos').list(id, { limit: 1000 });
+        if (!files || !files.length) break;
+        const paths = files.map((f: { name: string }) => id + '/' + f.name);
+        const r = await admin.storage.from('photos').remove(paths);
+        if (r.error) break;
+        removed += paths.length;
+      }
+      const d = await admin.auth.admin.deleteUser(id);
+      if (d.error) return json({ error: d.error.message }, 400);
+      await admin.from('staff').delete().eq('id', id); // на случай, если каскад не сработал
+      return json({ ok: true, mode, files: removed });
+    }
+
+    // вернуть архивного сотрудника: снять запрет входа
+    if (body.action === 'restore_staff') {
+      const id = String(body.staff_id || '');
+      const b = await admin.auth.admin.updateUserById(id, { ban_duration: 'none' });
+      if (b.error) return json({ error: b.error.message }, 400);
+      const { error } = await admin.from('staff').update({ status: 'approved', note: null }).eq('id', id);
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });
     }
