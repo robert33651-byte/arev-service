@@ -210,7 +210,8 @@ function renderTasks(d) {
   if (emp) sh.getRange(DATA, C_WHO, N, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInRange(emp.getRange(DATA, 1, 300, 1), true).setAllowInvalid(true).build());
   sh.getRange(DATA, C_ST, N, 1).setDataValidation(mk([ST_NEW, ST_REVIEW, ST_DONE]));
   sh.getRange(DATA, C_PRIO, N, 1).setDataValidation(mk(['Սովորական', 'Կարևոր', 'Հրատապ']));
-  sh.getRange(DATA, 1, N, TASK_H.length).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREEN, false, false);
+  try { sh.getBandings().forEach(function (x) { x.remove(); }); } catch (e) { /* нет */ }
+  try { sh.getRange(DATA, 1, N, TASK_H.length).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREEN, false, false); } catch (e) { Logger.log('banding: ' + e); }
   const col = function (c, v, bg, fg) { return SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(v).setBackground(bg).setFontColor(fg || '#000000').setRanges([sh.getRange(DATA, c, N, 1)]).build(); };
   sh.setConditionalFormatRules([
     col(C_ST, ST_NEW, '#BDBDBD', '#FFFFFF'), col(C_ST, ST_REVIEW, '#FFD60A'), col(C_ST, ST_DONE, '#34C759', '#FFFFFF'),
