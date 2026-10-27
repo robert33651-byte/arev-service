@@ -24,7 +24,7 @@ const TXT = {
     doneTitle: 'Отметить как готовое', note: 'Комментарий (не обязательно)', sendDone: '✅ Отправить менеджеру', cancel: 'Отмена',
     newTitle: 'Новая задача для себя', what: 'Что нужно сделать', deadline: 'Срок', today: 'Сегодня', d1: '1 день', d3: '3 дня', noDl: 'Без срока',
     priority: 'Важность', normal: 'Обычная', important: 'Важно', urgent: 'Срочно', save: 'Добавить', history: 'История', manager: 'Менеджер',
-    close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
+    rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
     selfNote: 'Менеджер увидит, что вы добавили задачу сами', noteLbl: 'Заметка', youLbl: 'Вы',
     ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => 'Назначено: ' + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => 'Срок или важность изменены: ' + b, done_field: '✅ Выполнено на месте', status: (b) => 'Статус: ' + b },
   },
@@ -35,7 +35,7 @@ const TXT = {
     doneTitle: 'Նշել որպես կատարված', note: 'Նշում (ոչ պարտադիր)', sendDone: '✅ Ուղարկել մենեջերին', cancel: 'Չեղարկել',
     newTitle: 'Նոր առաջադրանք ինձ համար', what: 'Ի՞նչ անել', deadline: 'Ժամկետ', today: 'Այսօր', d1: '1 օր', d3: '3 օր', noDl: 'Առանց ժամկետի',
     priority: 'Կարևորություն', normal: 'Սովորական', important: 'Կարևոր', urgent: 'Հրատապ', save: 'Ավելացնել', history: 'Պատմություն', manager: 'Մենեջեր',
-    close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
+    rec: '● Ձայնագրություն', close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
     selfNote: 'Մենեջերը կտեսնի, որ դուք ինքներդ եք ավելացրել', noteLbl: 'Նշում', youLbl: 'Դուք',
     ev: { created: 'Առաջադրանքը ստեղծվեց', self_added: 'Ավելացվեց աշխատակցի կողմից', assigned: (b) => 'Նշանակվեց՝ ' + b, seen: '👀 Բացվեց', reported: '✅ Զեկուցվեց կատարման մասին', confirmed: '✔ Ընդունվեց մենեջերի կողմից', reopened: '↩ Վերադարձվեց աշխատանքի', reminder: '⏰ Հիշեցում', disc_open: '💬 Քննարկում բացվեց', disc_closed: '✔ Հարցը լուծվեց', due_changed: (b) => 'Ժամկետը կամ կարևորությունը փոխվեց՝ ' + b, done_field: '✅ Կատարվեց տեղում', status: (b) => 'Կարգավիճակ՝ ' + b },
   },
@@ -80,6 +80,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [recSec, setRecSec] = useState(0);            // секунды идущей записи
   const [playing, setPlaying] = useState(null);
   const [cam, setCam] = useState(null);                 // 'post' | 'report' | null
   const [doneOpen, setDoneOpen] = useState(false);
@@ -89,6 +90,12 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
   const [form, setForm] = useState({ title: '', note: '', due: '', priority: 'normal' });
   const [zoom, setZoom] = useState(null);
   const stopPlay = useRef(null);
+  useEffect(() => {
+    if (!recording) { setRecSec(0); return undefined; }
+    const t0 = Date.now();
+    const i = setInterval(() => setRecSec(Math.floor((Date.now() - t0) / 1000)), 250);
+    return () => clearInterval(i);
+  }, [recording]);
   const openRef = useRef(null);
   openRef.current = openId;
 
@@ -134,6 +141,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
     } catch (e) { /* не критично: повторится при следующем открытии */ }
   }
   function closeTask() {
+    if (recording) { setRecording(false); stopVoice().catch(() => {}); }
     if (stopPlay.current) { stopPlay.current(); stopPlay.current = null; setPlaying(null); }
     setOpenId(null); openRef.current = null; load(true);
   }
@@ -250,11 +258,17 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
               <Text style={st.label}>{L.history}</Text>
               {log.map((l) => <LogRow key={l.id} l={l} mine={uid && l.actor_id === uid} urls={urls} playing={playing} onPlay={play} onZoom={setZoom} />)}
 
-              <TextInput style={st.input} value={text} onChangeText={setText} placeholder={L.msgHint} multiline accessibilityLabel={L.msgHint} />
+              <TextInput style={st.input} value={text} onChangeText={setText} placeholder={L.msgHint} multiline submitBehavior="submit" returnKeyType="send" onSubmitEditing={sendText} accessibilityLabel={L.msgHint} />
+              {recording && (
+                <View style={[st.flag, { backgroundColor: P.badSoft, flexDirection: 'row', alignItems: 'center', gap: 10 }]} accessibilityLiveRegion="polite">
+                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: P.bad }} />
+                  <Text style={{ color: P.bad, fontWeight: '800', fontSize: 18 }}>{L.rec} {Math.floor(recSec / 60)}:{p2(recSec % 60)}</Text>
+                </View>
+              )}
               <View style={st.row}>
                 <Btn label={L.send} small onPress={sendText} disabled={!text.trim() || busy} />
                 <Btn label={'📷 ' + L.photo} small kind="ghost" onPress={() => setCam('post')} disabled={busy} />
-                <Btn label={recording ? L.stop : '🎤 ' + L.voice} small kind={recording ? 'danger' : 'ghost'} onPress={toggleVoice} disabled={busy && !recording} />
+                <Btn label={recording ? L.stop + ' · ' + Math.floor(recSec / 60) + ':' + p2(recSec % 60) : '🎤 ' + L.voice} small kind={recording ? 'danger' : 'ghost'} onPress={toggleVoice} disabled={busy && !recording} />
               </View>
               {busy && <ActivityIndicator color={P.pine} />}
               {task.status === 'new' && <Btn label={L.done} kind="dark" onPress={() => setDoneOpen(true)} />}
