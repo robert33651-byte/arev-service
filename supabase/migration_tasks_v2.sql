@@ -128,6 +128,7 @@ create function public._actor_name(p_uid uuid) returns text
 language sql stable security definer set search_path = public, auth as $$
   select coalesce((select name from public.staff where id = p_uid),
                   (select nullif(trim(name), '') from public.admins where user_id = p_uid),
+                  (select nullif(trim(raw_user_meta_data->>'name'), '') from auth.users where id = p_uid),
                   (select split_part(email, '@', 1) from auth.users where id = p_uid),
                   'Система')
 $$;
