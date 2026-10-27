@@ -78,13 +78,26 @@ function ymdToDate(s) { if (!s) return ''; const a = String(s).slice(0, 10).spli
 function first(n) { return String(n || '').split(/\s+/)[0]; }
 function num(v) { const x = Number(v); return isFinite(x) ? x : 0; }
 
+// Позиции ссылок в тексте с эмодзи: проверяем один раз, считает ли Google в UTF-16 или в символах
+let OFFS16 = null;
+function utf16Offsets() {
+  if (OFFS16 !== null) return OFFS16;
+  try { SpreadsheetApp.newRichTextValue().setText('a\uD83D\uDE00b').setLinkUrl(3, 4, 'https://example.com').build(); OFFS16 = true; } catch (e) { OFFS16 = false; }
+  return OFFS16;
+}
+function cpIndex(text, i) { return utf16Offsets() ? i : Array.from(text.slice(0, i)).length; }
+// Поставить ссылку; если не вышло, остаётся обычный текст (синхронизация не прерывается)
+function setLink(b, text, s, e, u) {
+  try { b.setLinkUrl(cpIndex(text, s), cpIndex(text, e), u); } catch (err) { Logger.log('link skipped: ' + err); }
+}
+
 // Ячейка со ссылками: «🎤1  🎤2» (каждое слово — своя ссылка)
 function linksRich(urls, icon) {
   const list = (urls || []).filter(Boolean);
   let text = '', marks = [];
   list.forEach(function (u, i) { const t = icon + (i + 1); marks.push({ s: text.length, e: text.length + t.length, u: u }); text += t + (i < list.length - 1 ? '  ' : ''); });
   const b = SpreadsheetApp.newRichTextValue().setText(text);
-  marks.forEach(function (m) { b.setLinkUrl(m.s, m.e, m.u); });
+  marks.forEach(function (m) { setLink(b, text, m.s, m.e, m.u); });
   return b.build();
 }
 function plainRich(t) { return SpreadsheetApp.newRichTextValue().setText(t == null ? '' : String(t)).build(); }
@@ -124,17 +137,17 @@ function syncAll() {
 }
 function syncLocked() {
   const d = api('export');
-  renderStaff(d);          // первым: из него берётся список исполнителей
-  renderTasks(d);
-  renderDisc(d);
-  renderArchive(d);
-  renderTrips(d);
-  renderFuel(d);
-  renderBuys(d);
-  renderSummary(d);
+  const errs = [];
+  // каждый лист строится отдельно: ошибка одного не мешает остальным
+  [['Աշխատակիցներ', renderStaff], ['Առաջադրանքներ', renderTasks], ['Քննարկումներ', renderDisc], ['Արխիվ', renderArchive],
+   ['Ճանապարհ', renderTrips], ['Վառելիք', renderFuel], ['Գնումներ', renderBuys], ['Վիճակագրություն', renderSummary]].forEach(function (x) {
+    try { x[1](d); } catch (e) { errs.push(x[0] + ': ' + (e && e.message ? e.message : e)); Logger.log(x[0] + ' → ' + (e && e.stack ? e.stack : e)); }
+  });
+  PropertiesService.getScriptProperties().setProperty('lastError', errs.join(' | '));
   PropertiesService.getScriptProperties().setProperty('lastSync', new Date().toISOString());
   const s = ss().getSheetByName(SH_TASKS);
   if (s) s.getRange(2, 1).setValue('Обновлено: ' + fdt(d.now)).setFontColor('#777777').setFontSize(9);
+  if (errs.length) { try { ss().toast(errs.join(' | ').slice(0, 300), 'Arev: սխալ', 20); } catch (e) { /* нет */ } throw new Error(errs.join(' | ')); }
 }
 
 // ---------- Առաջադրանքներ (живые задачи, редактируются) ----------
@@ -252,7 +265,7 @@ function chronoRich(t, log) {
   });
   if (text.length > 45000) { text = text.slice(0, 45000) + '\n… (շարունակությունը՝ «Քննարկումներ» թերթում)'; marks = marks.filter(function (m) { return m.e <= 45000; }); }
   const b = SpreadsheetApp.newRichTextValue().setText(text);
-  marks.forEach(function (m) { b.setLinkUrl(m.s, m.e, m.u); });
+  marks.forEach(function (m) { setLink(b, text, m.s, m.e, m.u); });
   return b.build();
 }
 function renderArchive(d) {
