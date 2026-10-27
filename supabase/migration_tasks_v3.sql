@@ -97,3 +97,32 @@ begin
   end loop;
   return n;
 end $$;
+
+-- 4) Просроченная, но открытая и не выполненная задача: одно напоминание в день, в 09:00 по Еревану (05:00 UTC).
+alter table public.tasks add column if not exists overdue_remind_on date;
+create or replace function public.queue_overdue_reminders() returns int
+language plpgsql security definer set search_path = public as $$
+declare t record; n int := 0; today date := (now() at time zone 'Asia/Yerevan')::date;
+begin
+  for t in select * from public.tasks
+            where status = 'new' and archived_at is null and due is not null and due < today
+              and seen_at is not null
+              and (overdue_remind_on is null or overdue_remind_on < today)
+  loop
+    perform public._notify(t.staff_id, false, 'Задача просрочена ⏰', t.title || ' (срок ' || to_char(t.due, 'DD.MM') || ')', t.id);
+    if t.staff2_id is not null then
+      perform public._notify(t.staff2_id, false, 'Задача просрочена ⏰', t.title || ' (срок ' || to_char(t.due, 'DD.MM') || ')', t.id);
+    end if;
+    perform public._log(t.id, null, 'system', 'event', 'overdue', to_char(t.due, 'DD.MM'), null);
+    update public.tasks set overdue_remind_on = today where id = t.id;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+revoke all on function public.queue_overdue_reminders() from public, anon, authenticated;
+do $$ begin
+  if exists(select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'task-overdue';
+    perform cron.schedule('task-overdue', '0 5 * * *', 'select public.queue_overdue_reminders()');
+  end if;
+end $$;

@@ -44,6 +44,7 @@ const EVT = {
   confirmed: function () { return '✔ Ընդունվեց'; },
   reopened: function () { return '↩ Վերադարձվեց աշխատանքի'; },
   reminder: function () { return '⏰ Հիշեցում ուղարկվեց'; },
+  overdue: function (b) { return '⏰ Ժամկետանց՝ ' + b; },
   purchase: function (b) { return '🛒 Գնում՝ ' + b; },
   place_set: function (b) { return '📍 Վայր՝ ' + b; },
   disc_open: function () { return '💬 Քննարկում բացվեց'; },
