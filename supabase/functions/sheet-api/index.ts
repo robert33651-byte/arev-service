@@ -50,12 +50,13 @@ const iso = (d: number) => new Date(Date.now() - d * 864e5).toISOString();
 
 async function doExport() {
   const since365 = iso(365), since120 = iso(120);
-  const [staff, tasks, shifts, fuel, buys] = await Promise.all([
+  const [staff, tasks, shifts, fuel, buys, wph] = await Promise.all([
     pages(() => db.from('staff').select('id,name,phone,status,car_model,car_plate,fuel_type,norm_approved').order('name')),
     pages(() => db.from('tasks').select('*').neq('status', 'cancelled').or(`archived_at.is.null,archived_at.gte.${since365}`).order('created_at')),
     pages(() => db.from('shifts').select('*').gte('start_at', since120).order('start_at')),
     pages(() => db.from('fuel').select('*').gte('at', since120).order('at')),
     pages(() => db.from('purchases').select('*').gte('created_at', since120).order('created_at')),
+    pages(() => db.from('work_photos').select('staff_id,at,taken_at').gte('at', since120).order('at')),
   ]);
   const name = new Map<string, string>(staff.map((s) => [s.id, s.name]));
   const ids = tasks.map((t) => t.id);
@@ -99,6 +100,7 @@ async function doExport() {
     now: new Date().toISOString(),
     staff: staff.map((s) => ({ name: s.name, phone: s.phone, status: s.status, car: [s.car_model, s.car_plate].filter(Boolean).join(' '), norm: s.norm_approved })),
     tasks: tasksOut, log: logOut, shifts: shiftsOut, fuel: fuelOut, purchases: buysOut,
+    photos: wph.map((w) => ({ who: name.get(w.staff_id) || '', at: w.taken_at || w.at })),
   };
 }
 

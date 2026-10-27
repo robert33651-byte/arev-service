@@ -24,6 +24,8 @@ const SH_EMP   = 'Աշխատակիցներ';
 const SH_TRIPS = 'Ճանապարհ';
 const SH_FUEL  = 'Վառելիք';
 const SH_BUYS  = 'Գնումներ';
+const SH_WEEK  = 'Շաբաթական հաշվետվություն';
+const SH_MONTH = 'Ամսական հաշվետվություն';
 const SH_STAT  = 'ՎԻՃԱԿԱԳՐՈՒԹՅՈՒՆ (ԱՎՏՈՄԱՏ ՀԱՇՎԱՐԿ)';
 const HEAD = 4, DATA = 5;               // шапка в 4-й строке, данные с 5-й (как в офисном варианте)
 const GREEN = '#0F7B3F';
@@ -143,7 +145,7 @@ function syncLocked() {
   const errs = [];
   // каждый лист строится отдельно: ошибка одного не мешает остальным
   [['Աշխատակիցներ', renderStaff], ['Առաջադրանքներ', renderTasks], ['Քննարկումներ', renderDisc], ['Արխիվ', renderArchive],
-   ['Ճանապարհ', renderTrips], ['Վառելիք', renderFuel], ['Գնումներ', renderBuys], ['Վիճակագրություն', renderSummary]].forEach(function (x) {
+   ['Շաբաթական', renderWeekly], ['Ամսական', renderMonthly], ['Ճանապարհ', renderTrips], ['Վառելիք', renderFuel], ['Գնումներ', renderBuys], ['Վիճակագրություն', renderSummary]].forEach(function (x) {
     try { x[1](d); } catch (e) {
       const msg = e && e.message ? e.message : String(e);
       errs.push(x[0] + ': ' + msg); Logger.log(x[0] + ' → ' + (e && e.stack ? e.stack : e));
@@ -295,6 +297,76 @@ function renderArchive(d) {
   }
   lockedNote(sh, H.length);
 }
+
+// ---------- Հաշվետվություն: շաբաթական / ամսական (по сотрудникам) ----------
+function ymdOf(iso) { return Utilities.formatDate(new Date(iso), TZ, 'yyyy-MM-dd'); }
+function weekKey(ymd) {            // понедельник той недели, yyyy-MM-dd
+  const p = ymd.split('-'); const t = Date.UTC(+p[0], +p[1] - 1, +p[2]); const wd = (new Date(t).getUTCDay() + 6) % 7;
+  const m = new Date(t - wd * 864e5); return m.getUTCFullYear() + '-' + ('0' + (m.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + m.getUTCDate()).slice(-2);
+}
+function weekLabel(mon) {
+  const p = mon.split('-'); const t = Date.UTC(+p[0], +p[1] - 1, +p[2]); const e = new Date(t + 6 * 864e5); const s = new Date(t);
+  const f = function (x) { return ('0' + x.getUTCDate()).slice(-2) + '.' + ('0' + (x.getUTCMonth() + 1)).slice(-2); };
+  return f(s) + ' – ' + f(e) + '.' + e.getUTCFullYear();
+}
+const REPORT_H = ['Շրջան', 'Աշխատակից', 'Հերթափոխ', 'Ժամ', 'Կմ (հոդաչափ)', 'Առաջադրանք տրված', 'Կատարված', 'Ժամկետում', 'Ժամկետանց (չկատարված)',
+  'Բացում, ր (միջին)', 'Աշխատանքի ֆոտո', 'Գնումներ', 'Գումար ֏', 'Չհանձնված'];
+// mode: 'week' | 'month'. Возвращает строки: период по убыванию, внутри — по имени.
+function reportRows(d, mode) {
+  const keyOf = function (iso) { const y = ymdOf(iso); return mode === 'week' ? weekKey(y) : y.slice(0, 7); };
+  const people = d.staff.filter(function (s) { return s.status === 'approved'; }).map(function (s) { return s.name; });
+  const m = {};
+  const cell = function (k, who) {
+    const id = k + '|' + who;
+    return m[id] || (m[id] = { k: k, who: who, days: {}, hrs: 0, km: 0, given: 0, done: 0, ontime: 0, late: 0, opens: [], ph: 0, nb: 0, sb: 0, open: 0 });
+  };
+  const today = ymdOf(d.now);
+  d.shifts.forEach(function (s) {
+    if (!s.who) return;
+    const c = cell(keyOf(s.start_at), s.who); c.days[ymdOf(s.start_at)] = 1;
+    const end = s.end_at ? new Date(s.end_at).getTime() : Math.min(new Date(d.now).getTime(), new Date(s.start_at).getTime() + 16 * 36e5);
+    c.hrs += (end - new Date(s.start_at).getTime()) / 36e5;
+    if (s.start_odo != null && s.end_odo != null && s.end_odo >= s.start_odo) c.km += s.end_odo - s.start_odo;
+  });
+  d.tasks.forEach(function (t) {
+    [[t.assignee, t.seen], [t.assignee2, t.seen2]].forEach(function (a) {
+      if (!a[0]) return;
+      const c = cell(keyOf(t.created_at), a[0]); c.given++;
+      if (a[1]) { const mm = (new Date(a[1]).getTime() - new Date(t.created_at).getTime()) / 60000; if (mm >= 0) c.opens.push(mm); }
+      if (t.status === 'done' && (t.done_at || t.archived_at)) {
+        const dn = t.done_at || t.archived_at; const cd = cell(keyOf(dn), a[0]); cd.done++;
+        if (!t.due || ymdOf(dn) <= String(t.due).slice(0, 10)) cd.ontime++;
+      }
+      if (t.status === 'new' && !t.archived_at && t.due && String(t.due).slice(0, 10) < today) cell(keyOf(String(t.due).slice(0, 10) + 'T12:00:00Z'), a[0]).late++;
+    });
+  });
+  (d.photos || []).forEach(function (p) { if (p.who) cell(keyOf(p.at), p.who).ph++; });
+  d.purchases.forEach(function (b) {
+    if (b.status === 'cancelled' || !b.who) return;
+    const c = cell(keyOf(b.at), b.who); c.nb++; c.sb += num(b.amount);
+    if (b.status === 'bought' || b.status === 'partial') c.open++;
+  });
+  const keys = {}; Object.keys(m).forEach(function (id) { keys[m[id].k] = 1; });
+  const order = Object.keys(keys).sort().reverse().slice(0, mode === 'week' ? 16 : 12);
+  const rows = [];
+  order.forEach(function (k) {
+    const names = people.slice(); Object.keys(m).forEach(function (id) { if (m[id].k === k && names.indexOf(m[id].who) < 0) names.push(m[id].who); });
+    names.sort().forEach(function (who) {
+      const c = m[k + '|' + who]; if (!c) return;
+      const avg = c.opens.length ? Math.round(c.opens.reduce(function (a, b) { return a + b; }, 0) / c.opens.length) : '';
+      rows.push([mode === 'week' ? weekLabel(k) : k, who, Object.keys(c.days).length, Math.round(c.hrs * 10) / 10, Math.round(c.km), c.given, c.done, c.ontime, c.late, avg, c.ph, c.nb, Math.round(c.sb), c.open]);
+    });
+  });
+  return rows;
+}
+function renderReport(d, mode) {
+  const sh = prepare(mode === 'week' ? SH_WEEK : SH_MONTH, mode === 'week' ? '📈 ՇԱԲԱԹԱԿԱՆ ՀԱՇՎԵՏՎՈՒԹՅՈՒՆ' : '📈 ԱՄՍԱԿԱՆ ՀԱՇՎԵՏՎՈՒԹՅՈՒՆ', REPORT_H, [150, 150, 90, 80, 100, 110, 100, 100, 130, 110, 110, 90, 100, 100]);
+  const rows = reportRows(d, mode);
+  put(sh, rows, REPORT_H.length);
+  lockedNote(sh, REPORT_H.length);
+}
+function renderWeekly(d) { renderReport(d, 'week'); }
+function renderMonthly(d) { renderReport(d, 'month'); }
 
 // ---------- Աշխատակիցներ ----------
 function renderStaff(d) {
