@@ -229,7 +229,7 @@ function Main({ session }) {
   const refresh = async () => { setRefreshing(true); await load(); await syncBox(); setRefreshing(false); };
   const nav = (name, p) => setView({ name, ...(p || {}) });
   const goTab = (t) => { setTab(t); setView({ name: 'home' }); };
-  const ctx = { uid, phone: String(session.user.email || '').split('@')[0], st, load, nav, goTab, refreshing, refresh, boxN, setBoxN, syncBox };
+  const ctx = { uid, setOpenTask, phone: String(session.user.email || '').split('@')[0], st, load, nav, goTab, refreshing, refresh, boxN, setBoxN, syncBox };
 
   if (st.loading) return <Splash />;
   if (!st.staff) return <Register ctx={ctx} />;
@@ -240,7 +240,7 @@ function Main({ session }) {
     if (view.name === 'shift') body = <ShiftScreen ctx={ctx} />;
     else if (view.name === 'fuel') body = <FuelScreen ctx={ctx} />;
     else if (view.name === 'ticket') body = <TicketScreen ctx={ctx} id={view.id} pooled={view.pooled} />;
-    else if (view.name === 'purchase') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} />;
+    else if (view.name === 'purchase') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} task={view.task} />;
     else if (view.name === 'take') body = <PurchaseScreen ctx={ctx} ticket={view.ticket} source="warehouse" />;
     else if (view.name === 'deliver') body = <DeliverScreen ctx={ctx} id={view.id} />;
     else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
@@ -258,7 +258,7 @@ function Main({ session }) {
   if (tab === 'day') body = <MyDay ctx={ctx} />;
   else if (tab === 'history') body = <History ctx={ctx} />;
   else if (tab === 'profile') body = <Profile ctx={ctx} />;
-  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} places={st.places} />;
+  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} places={st.places} onPurchase={(id) => nav('purchase', { task: id })} />;
   else body = <Home ctx={ctx} />;
   const left = st.buys.length + st.tasks.filter((t) => t.status === 'new').length;
   return (
@@ -492,9 +492,9 @@ function Home({ ctx }) {
       {ctx.boxN ? <Flag kind="warn">Без интернета сохранено фото: {ctx.boxN}. Они отправятся сами, когда появится связь.</Flag> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         <Tile icon="camera" value={st.wph.length} label="фото работ" tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />
-        <Tile icon="checkbox" value={tasks.length ? (tasks.length - tLeft) + '/' + tasks.length : '—'} label="задачи" tone={tasks.length && !tLeft ? 'ok' : 'note'} />
-        <Tile icon="cube" value={st.buys.length} label="не сдано" tone={st.buys.length ? 'bad' : 'ok'} />
-        <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label="заправка сегодня" />
+        <Tile icon="checkbox" value={st.nTasks || 0} label="задачи" tone={st.nTasks ? 'warn' : 'ok'} onPress={() => ctx.goTab('tasks')} />
+        <Tile icon="cube" value={st.buys.length} label="не сдано" tone={st.buys.length ? 'bad' : 'ok'} onPress={st.buys.length ? () => nav('deliver', { id: st.buys[0].id }) : undefined} />
+        <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label="заправка сегодня" onPress={() => nav('fuel')} />
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         <Action icon="camera" title="Фото работ" sub="до и после" kind="primary" onPress={() => nav('work')} />
@@ -915,7 +915,7 @@ function TicketBuys({ ctx, t }) {
   );
 }
 
-function PurchaseScreen({ ctx, ticket, source }) {
+function PurchaseScreen({ ctx, ticket, source, task }) {
   const { st, uid, load, nav } = ctx;
   const wh = source === 'warehouse';
   const active = st.mine.filter((t) => ['assigned', 'enroute', 'onsite'].includes(t.status));
@@ -946,9 +946,10 @@ function PurchaseScreen({ ctx, ticket, source }) {
     if (dest === 'site' && !site.trim()) return Alert.alert('Объект', 'Укажите, для какого объекта: клиент или адрес');
     setBusy(true);
     try {
-      await rpc('add_purchase', { p_source: wh ? 'warehouse' : 'shop', p_supplier: wh ? '' : supplier, p_lines: clean, p_amount: wh ? 0 : a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' || dest === 'site' ? null : dest, p_site: dest === 'site' ? site : null });
+      await rpc('add_purchase', { p_source: wh ? 'warehouse' : 'shop', p_supplier: wh ? '' : supplier, p_lines: clean, p_amount: wh ? 0 : a, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_device: deviceId(), p_ticket: dest === 'warehouse' || dest === 'site' ? null : dest, p_site: dest === 'site' ? site : null, p_task: task || null });
       await load();
-      if (dest === 'warehouse' || dest === 'site') nav('home'); else nav('ticket', { id: dest });
+      if (task) { ctx.setOpenTask(task); ctx.goTab('tasks'); }
+      else if (dest === 'warehouse' || dest === 'site') nav('home'); else nav('ticket', { id: dest });
     } catch (e) { Alert.alert('Не получилось', errText(e)); } finally { setBusy(false); }
   };
   return (

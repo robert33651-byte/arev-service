@@ -445,7 +445,7 @@ function buyDeliv(b){const c=S.cfg,radO=+c.office_radius||150,radC=+c.client_rad
 function buyRows(list,showName){return '<div class="tblw flat"><table class="tbl"><thead><tr><th>Куплено</th>'+(showName?'<th class="l">Сотрудник</th>':'')+'<th class="l">Где и что</th><th>Сумма</th><th>Чек</th><th class="l">Куда</th><th class="l">Сдача</th><th class="l">Статус</th><th class="l">Отклонения</th><th></th></tr></thead><tbody>'+
  (list.length?list.map(b=>{const m=tech(b.masterId);const t=b.ticket_id?T(b.ticket_id):null;const st=BST[b.status]||BST.bought;
   return '<tr><td>'+fT(b.at)+'<br>'+(b.loc?'<a class="tiny" href="'+mapUrl(b.loc)+'" target="_blank" rel="noopener">где купил</a>':'')+'</td>'+(showName?'<td class="l"><button class="lnk" data-act="ago" data-v="a-emp" data-id="'+h(b.masterId)+'">'+h(m?m.name:'—')+'</button></td>':'')+
-  '<td class="l wrapc"><b>'+(b.source==='warehouse'?'<span class="chip c-info">Со склада</span>':h(b.supplier))+'</b><div class="small">'+(b.lines||[]).map(lineTxt).join('<br>')+'</div></td><td class="num">'+(b.source==='warehouse'?'—':money(b.amount))+'</td><td>'+thumb(b.photo)+'</td>'+
+  '<td class="l wrapc"><b>'+(b.source==='warehouse'?'<span class="chip c-info">Со склада</span>':h(b.supplier))+'</b>'+(b.task_id?(()=>{const tk=S.tasks.find(x=>x.id===b.task_id);return '<div class="tiny">Задача: '+h(tk?tk.title:'…')+'</div>'})():'')+'<div class="small">'+(b.lines||[]).map(lineTxt).join('<br>')+'</div></td><td class="num">'+(b.source==='warehouse'?'—':money(b.amount))+'</td><td>'+thumb(b.photo)+'</td>'+
   '<td class="l">'+(b.dest==='ticket'?(t?'<button class="lnk" data-act="ago" data-v="a-order" data-id="'+h(t.id)+'">Объект '+h(t.num)+'</button><div class="tiny muted">'+h(t.address)+'</div>':'Объект'):b.dest==='site'?'Объект<div class="tiny muted">'+h(b.site||'')+'</div>':'Склад')+'</td>'+
   '<td class="l wrapc">'+buyDeliv(b)+'</td><td class="l"><span class="chip '+st[1]+'">'+(b.status==='delivered'&&b.dest!=='warehouse'&&!leftLines(b).length?'Ждёт проверки':st[0])+'</span>'+(b.accepted_lines&&b.status==='accepted'?'<div class="tiny muted">принято: '+b.accepted_lines.map(lineTxt).join(', ')+'</div>':'')+'</td>'+
   '<td class="l wrapc">'+flagCell(buyFlags(b))+'</td><td><div class="row" style="justify-content:flex-end;gap:6px">'+(b.status==='delivered'?'<button class="btn primary sm" data-act="buyacc" data-id="'+h(b.id)+'">'+(acceptLines(b).length?'Принять':'Подтвердить')+'</button>':'')+(['bought','partial','delivered'].includes(b.status)?'<button class="btn ghost sm" data-act="buycancel" data-id="'+h(b.id)+'">Отменить</button>':'')+'</div></td></tr>'}).join(''):'<tr><td colspan="10" class="l muted">Закупок нет</td></tr>')+'</tbody></table></div>'}
@@ -630,7 +630,7 @@ function vTasks(){const mode=S.tmode||'open';const today=ymd(Date.now());S.taskD
  s+='<section class="card tight">'+(mode==='review'?'<p class="small muted" style="margin:0">Сотрудник нажал «Готово». Откройте задачу и нажмите «Принять»: она уйдёт в архив вместе с перепиской и файлами.</p>':mode==='disc'?'<p class="small muted" style="margin:0">Сотрудник задал вопрос. Ответьте текстом, голосом или фото. Закрыть вопрос может только менеджер.</p>':mode==='arch'?'<p class="small muted" style="margin:0">Завершённые задачи. Откройте любую, чтобы увидеть хронологию: кто, что и когда сказал, с фото и голосовыми.</p>':'')+taskRows(lists[mode])+'</section>';
  return s}
 
-const EVT={created:()=>'Задача создана',self_added:()=>'Сотрудник добавил задачу себе',assigned:b=>'Назначено: '+b,seen:()=>'👀 открыл(а) задачу',reported:()=>'✅ Сообщили о готовности',confirmed:()=>'✔ Принято менеджером',reopened:()=>'↩ Возвращена в работу',reminder:()=>'⏰ Отправлено напоминание: задачу не открыли',disc_open:()=>'💬 Открыто обсуждение',disc_closed:()=>'✔ Вопрос решён',due_changed:b=>'Срок или важность изменены: '+b,done_field:()=>'✅ Выполнено на месте (проверка GPS)',status:b=>'Статус: '+b};
+const EVT={created:()=>'Задача создана',self_added:()=>'Сотрудник добавил задачу себе',assigned:b=>'Назначено: '+b,seen:()=>'👀 открыл(а) задачу',reported:()=>'✅ Сообщили о готовности',confirmed:()=>'✔ Принято менеджером',reopened:()=>'↩ Возвращена в работу',reminder:()=>'⏰ Отправлено напоминание: задачу не открыли',disc_open:()=>'💬 Открыто обсуждение',disc_closed:()=>'✔ Вопрос решён',due_changed:b=>'Срок или важность изменены: '+b,done_field:()=>'✅ Выполнено на месте (проверка GPS)',purchase:b=>'🛒 Закупка: '+b,place_set:b=>'📍 Место: '+b,status:b=>'Статус: '+b};
 function logHtml(t,log){if(!log.length)return '<p class="small muted">Записей пока нет.</p>';let day='',s='';
  log.forEach(l=>{const d=fDay(ms(l.at));if(d!==day){day=d;s+='<div class="label" style="margin-top:8px">'+h(d)+'</div>'}
   const who=h(l.actor_name)+(l.actor_role==='admin'?' <span class="tiny muted">менеджер</span>':l.actor_role==='staff'?' <span class="tiny muted">сотрудник</span>':'');
@@ -646,6 +646,7 @@ function taskSheet(t,log){const live=!t.archived_at&&t.status!=='cancelled';
  const fin=t.status==='done';
  return '<h2>'+h(t.title)+'</h2><div class="row wrapx" style="gap:6px">'+taskChips(t)+'</div>'+
   '<dl class="kv"><dt>Кто</dt><dd>'+h(tnames(t))+'</dd><dt>Срок</dt><dd>'+dueText(t)+'</dd><dt>Создана</dt><dd>'+fT(ms(t.created_at))+'</dd><dt>Открыл</dt><dd>'+(seenText(t)||'—')+'</dd>'+(t.report_at?'<dt>Сообщили о готовности</dt><dd>'+fT(ms(t.report_at))+'</dd>':'')+(t.place_id||t.lat!=null?'<dt>Место</dt><dd>'+h((S.places.find(p=>p.id===t.place_id)||{}).name||'')+(t.lat!=null?' <a class="chip c-muted" href="'+mapUrl({lat:t.lat,lng:t.lng})+'" target="_blank" rel="noopener">на карте</a>':'')+'</dd>':'')+(t.done_lat!=null?'<dt>Фото сделано</dt><dd>'+dChip(t.done_lat,t.done_lng,t.done_dist,((S.places.find(p=>p.id===t.place_id)||{}).radius)||+S.cfg.client_radius||200,'места')+'</dd>':'')+'</dl>'+
+  (()=>{const tb=S.buys.filter(b=>b.task_id===t.id&&b.status!=='cancelled');return tb.length?'<div class="label">Закупки по задаче</div>'+tb.map(b=>'<div class="small" style="margin-bottom:6px"><b>'+(b.source==='warehouse'?'Со склада':h(b.supplier)+' · '+money(b.amount))+'</b> <span class="muted">'+fT(b.at)+'</span><br>'+(b.lines||[]).map(lineTxt).join(', ')+'</div>').join('')+'<button class="btn ghost sm" data-act="kgo" data-v="a-buys|all">Открыть историю закупок</button>':''})()+
   (t.note?'<div class="flag note">'+h(t.note)+'</div>':'')+(t.done_note?'<div class="flag note">Сотрудник: '+h(t.done_note)+'</div>':'')+
   '<hr class="sep"><div class="label">Хронология</div>'+logHtml(t,log)+
   (live||fin?'<hr class="sep"><div class="field"><label for="tr-text">Ответ или комментарий</label><textarea id="tr-text" class="inp" placeholder="Напишите ответ, можно добавить фото или голосовое"></textarea></div>'+
@@ -654,6 +655,7 @@ function taskSheet(t,log){const live=!t.archived_at&&t.status!=='cancelled';
    (t.disc_status==='open'?'<button class="btn ghost sm" data-act="tdisc">✔ Вопрос решён</button>':'')+
    (live&&(t.status==='new'||t.status==='report')?'<button class="btn dark sm" data-act="tconfirm">✔ Принять и в архив</button>':'')+
    ((t.status==='report'||fin)?'<button class="btn ghost sm" data-act="treopen">↩ Вернуть в работу</button>':'')+
+   (live?'<button class="btn ghost sm" data-act="tplace">'+I.pin+(t.place_id||t.lat!=null?'Изменить место':'Добавить место')+'</button>':'')+
    (live&&t.status==='new'?'<button class="btn danger sm" data-act="tcancel">Отменить задачу</button>':'')+'</div>'+
   '<button class="btn ghost block" data-act="sheet" data-v="">Закрыть</button>'}
 async function openTask(id,keep){const t=S.tasks.find(x=>x.id===id);if(!t)return;
@@ -726,6 +728,11 @@ const ACT={
   mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
   mr.onstop=async()=>{stream.getTracks().forEach(t=>t.stop());recSt=null;recUi(false);await sendTaskMedia('voice',new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'}))};
   recSt=mr;mr.start();recUi(true)},
+ async tplace(){const id=S.tcur;const t=S.tasks.find(x=>x.id===id);if(!t)return;const pls=S.places.filter(p=>p.active!==false);
+  await sheet('<h2>Место для задачи</h2><p class="small">Сотрудник увидит кнопку «Маршрут». Фото на месте сохранится с геолокацией.</p><div class="field"><label for="tp-sel">Место</label><select id="tp-sel" class="inp"><option value="">— без места —</option>'+pls.map(p=>'<option value="'+h(p.id)+'"'+(p.id===t.place_id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div><button class="btn primary block" data-act="tplaceok" data-id="'+h(id)+'">Сохранить</button><button class="btn ghost block" data-act="tplaceno" data-id="'+h(id)+'">Отмена</button>');},
+ async tplaceno(d){await openTask(d.id)},
+ async tplaceok(d){const v=(document.getElementById('tp-sel')||{}).value||'';const pl=S.places.find(p=>p.id===v);
+  const ok=await upd('tasks',d.id,{place_id:pl?pl.id:null,lat:pl?pl.lat:null,lng:pl?pl.lng:null},pl?'Место добавлено':'Место убрано');closeSheet(null);if(ok)await openTask(d.id)},
  async tdisc(){try{await rpcA('task_close_discussion',{p_id:S.tcur});await afterTask('Вопрос закрыт, сотрудники получили уведомление')}catch(e){toast(aErr(e))}},
  async tconfirm(){try{await rpcA('task_confirm',{p_id:S.tcur});toast('Принято, задача в архиве');S.tcur=null;closeSheet(null);await load()}catch(e){toast(aErr(e))}},
  async treopen(){const tx=document.getElementById('tr-text');try{await rpcA('task_reopen',{p_id:S.tcur,p_note:tx?tx.value.trim()||null:null});if(tx)tx.value='';await afterTask('Возвращено в работу')}catch(e){toast(aErr(e))}},
@@ -738,7 +745,7 @@ const ACT={
   const r=pl.id?await sb.from('places').update(row).eq('id',pl.id):await sb.from('places').insert(row);if(r.error)return toast('Ошибка: '+r.error.message);
   toast(pl.id?'Место сохранено':'Место добавлено: '+row.name);S.form.pl={kind:'client',radius:'200'};await load()},
  async pldel(d){const x=S.places.find(p=>p.id===d.id);if(await confirmBox('Удалить место?',h(x?x.name:'')+'. Стоянки здесь снова будут считаться неизвестными.','Удалить')!=='y')return;const r=await sb.from('places').delete().eq('id',d.id);if(r.error)return toast('Ошибка: '+r.error.message);toast('Удалено');await load()},
- kgo(d){const [v,x]=String(d.v).split('|');if(v==='a-shifts'||v==='a-fuel'){if(x){S.per=x;LS.set('per',x)}S.empF=null}if(v==='a-orders'&&x)S.filter=x;if(v==='a-buys'&&x){S.bf=x;S.empF=null}if(v==='a-issues'){S.ilv='bad';S.empF=null}go(v)},
+ kgo(d){closeSheet(null);const [v,x]=String(d.v).split('|');if(v==='a-shifts'||v==='a-fuel'){if(x){S.per=x;LS.set('per',x)}S.empF=null}if(v==='a-orders'&&x)S.filter=x;if(v==='a-buys'&&x){S.bf=x;S.empF=null}if(v==='a-issues'){S.ilv='bad';S.empF=null}go(v)},
  day(d){S.dayEmp=d.id;S.dayDate=ymd(Date.now());go('a-day')},
  dayopen(d){S.dayEmp=d.id;S.dayDate=d.v;go('a-day')},
  dayshift(d){const t=ymdTs(S.dayDate||ymd(Date.now()))+(+d.v)*864e5+36e5;if(t>Date.now()+864e5)return;S.dayDate=ymd(t);render(true)},

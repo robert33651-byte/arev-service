@@ -11,7 +11,7 @@ import { CameraSheet } from './photo';
 import { getFix, distM } from './device';
 import { C } from './ui';
 import {
-  myTasks, taskLog, signedUrls, taskSeen, taskReport, taskReportGeo, taskPost, taskSelfAdd, uploadTaskPhoto,
+  myTasks, taskLog, signedUrls, taskSeen, taskReport, taskReportGeo, taskSetPlace, taskPost, taskSelfAdd, uploadTaskPhoto,
   startVoice, stopVoice, uploadVoice, playVoice,
 } from './tasks';
 
@@ -25,9 +25,10 @@ const TXT = {
     doneTitle: 'Отметить как готовое', note: 'Комментарий (не обязательно)', sendDone: '✅ Отправить менеджеру', cancel: 'Отмена',
     newTitle: 'Новая задача для себя', what: 'Что нужно сделать', deadline: 'Срок', today: 'Сегодня', d1: '1 день', d3: '3 дня', noDl: 'Без срока',
     priority: 'Важность', normal: 'Обычная', important: 'Важно', urgent: 'Срочно', save: 'Добавить', history: 'История', manager: 'Менеджер',
+    addPlace: '📍 Добавить место', changePlace: '📍 Изменить место', buy: '🛒 Закупка', placeTitle: 'Место для задачи', myPos: '📡 Моё текущее местоположение', placeSaved: 'Место добавлено', noPlaces: 'В списке пока нет мест',
     route: '🗺 Маршрут', place: 'Место', geoHint: 'Фото на месте сохранится с геолокацией для менеджера', fromPlace: 'м от места', geoErr: 'Отключите подмену местоположения и сфотографируйте снова.', rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
     selfNote: 'Менеджер увидит, что вы добавили задачу сами', noteLbl: 'Заметка', youLbl: 'Вы',
-    ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => 'Назначено: ' + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => 'Срок или важность изменены: ' + b, done_field: '✅ Выполнено на месте', status: (b) => 'Статус: ' + b },
+    ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => 'Назначено: ' + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => 'Срок или важность изменены: ' + b, done_field: '✅ Выполнено на месте', status: (b) => 'Статус: ' + b, purchase: (b) => '🛒 Закупка: ' + b, place_set: (b) => '📍 Место: ' + b },
   },
   hy: {
     title: 'Իմ առաջադրանքները', add: '＋ Ինձ', empty: 'Բաց առաջադրանքներ չկան', loadErr: 'Չհաջողվեց բեռնել առաջադրանքները', due: 'Ժամկետ', noDue: 'առանց ժամկետի', overdue: 'ժամկետանց',
@@ -36,9 +37,10 @@ const TXT = {
     doneTitle: 'Նշել որպես կատարված', note: 'Նշում (ոչ պարտադիր)', sendDone: '✅ Ուղարկել մենեջերին', cancel: 'Չեղարկել',
     newTitle: 'Նոր առաջադրանք ինձ համար', what: 'Ի՞նչ անել', deadline: 'Ժամկետ', today: 'Այսօր', d1: '1 օր', d3: '3 օր', noDl: 'Առանց ժամկետի',
     priority: 'Կարևորություն', normal: 'Սովորական', important: 'Կարևոր', urgent: 'Հրատապ', save: 'Ավելացնել', history: 'Պատմություն', manager: 'Մենեջեր',
+    addPlace: '📍 Ավելացնել վայր', changePlace: '📍 Փոխել վայրը', buy: '🛒 Գնում', placeTitle: 'Վայր առաջադրանքի համար', myPos: '📡 Իմ տեղը հիմա', placeSaved: 'Վայրը ավելացվեց', noPlaces: 'Վայրերի ցանկը դատարկ է',
     route: '🗺 Երթուղի', place: 'Վայր', geoHint: 'Տեղում արված լուսանկարը կպահպանվի գտնվելու վայրի հետ մենեջերի համար', fromPlace: 'մ վայրից', geoErr: 'Անջատեք տեղադրության կեղծումը և նորից լուսանկարեք։', rec: '● Ձայնագրություն', close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
     selfNote: 'Մենեջերը կտեսնի, որ դուք ինքներդ եք ավելացրել', noteLbl: 'Նշում', youLbl: 'Դուք',
-    ev: { created: 'Առաջադրանքը ստեղծվեց', self_added: 'Ավելացվեց աշխատակցի կողմից', assigned: (b) => 'Նշանակվեց՝ ' + b, seen: '👀 Բացվեց', reported: '✅ Զեկուցվեց կատարման մասին', confirmed: '✔ Ընդունվեց մենեջերի կողմից', reopened: '↩ Վերադարձվեց աշխատանքի', reminder: '⏰ Հիշեցում', disc_open: '💬 Քննարկում բացվեց', disc_closed: '✔ Հարցը լուծվեց', due_changed: (b) => 'Ժամկետը կամ կարևորությունը փոխվեց՝ ' + b, done_field: '✅ Կատարվեց տեղում', status: (b) => 'Կարգավիճակ՝ ' + b },
+    ev: { created: 'Առաջադրանքը ստեղծվեց', self_added: 'Ավելացվեց աշխատակցի կողմից', assigned: (b) => 'Նշանակվեց՝ ' + b, seen: '👀 Բացվեց', reported: '✅ Զեկուցվեց կատարման մասին', confirmed: '✔ Ընդունվեց մենեջերի կողմից', reopened: '↩ Վերադարձվեց աշխատանքի', reminder: '⏰ Հիշեցում', disc_open: '💬 Քննարկում բացվեց', disc_closed: '✔ Հարցը լուծվեց', due_changed: (b) => 'Ժամկետը կամ կարևորությունը փոխվեց՝ ' + b, done_field: '✅ Կատարվեց տեղում', status: (b) => 'Կարգավիճակ՝ ' + b, purchase: (b) => '🛒 Գնում՝ ' + b, place_set: (b) => '📍 Վայր՝ ' + b },
   },
 };
 const L = TXT[TASKS_LANG] || TXT.ru;
@@ -69,7 +71,7 @@ function Btn({ label, onPress, kind, disabled, small }) {
   );
 }
 
-export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask, places }) {
+export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask, places, onPurchase }) {
   const [uid, setUid] = useState(userId || null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -88,6 +90,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
   const [doneNote, setDoneNote] = useState('');
   const [donePhoto, setDonePhoto] = useState(null);     // {path, uri}
   const [addOpen, setAddOpen] = useState(false);
+  const [placeOpen, setPlaceOpen] = useState(false);
   const [form, setForm] = useState({ title: '', note: '', due: '', priority: 'normal' });
   const [zoom, setZoom] = useState(null);
   const stopPlay = useRef(null);
@@ -127,6 +130,18 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
   }, []);
 
   const fail = (e) => Alert.alert(L.error, errText(e));
+  const savePlace = async (placeId) => {
+    if (!openId || busy) return;
+    setBusy(true);
+    try {
+      let fix = null;
+      if (!placeId) { fix = await getFix(); if (fix.mocked) { Alert.alert(L.error, L.geoErr); return; } }
+      await taskSetPlace(openId, placeId, fix);
+      setPlaceOpen(false);
+      await load(true); await loadLog(openId);
+      Alert.alert(L.placeSaved);
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  };
   const placeOf = (t) => (places || []).find((p) => p.id === t.place_id) || null;
   const openRoute = (t) => {
     const pl = placeOf(t);
@@ -286,10 +301,29 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
               </View>
               {busy && <ActivityIndicator color={P.pine} />}
               {(task.place_id || task.lat != null) && <Btn label={L.route} kind="ghost" onPress={() => openRoute(task)} />}
+              <View style={st.row}>
+                <Btn label={task.place_id || task.lat != null ? L.changePlace : L.addPlace} small kind="ghost" onPress={() => setPlaceOpen(true)} disabled={busy} />
+                {onPurchase && <Btn label={L.buy} small kind="ghost" onPress={() => { const id = task.id; closeTask(); onPurchase(id); }} disabled={busy} />}
+              </View>
               {task.status === 'new' && <Btn label={L.done} kind="dark" onPress={() => setDoneOpen(true)} />}
             </ScrollView>
           </KeyboardAvoidingView>
         )}
+      </Modal>
+
+      {/* ----- место для задачи ----- */}
+      <Modal visible={placeOpen} transparent animationType="fade" onRequestClose={() => setPlaceOpen(false)}>
+        <View style={st.scrim}><View style={[st.sheet, { maxHeight: '80%' }]}>
+          <Text style={st.h2}>{L.placeTitle}</Text>
+          <Btn label={L.myPos} kind="dark" onPress={() => savePlace(null)} disabled={busy} />
+          <ScrollView style={{ maxHeight: 320 }}>
+            {(places || []).length === 0 && <Text style={st.muted}>{L.noPlaces}</Text>}
+            {(places || []).map((p) => (
+              <Pressable key={p.id} onPress={() => savePlace(p.id)} accessibilityRole="button" style={[st.seg, { marginBottom: 6 }]}><Text style={st.segT}>📍 {p.name}</Text></Pressable>
+            ))}
+          </ScrollView>
+          <Btn label={L.cancel} kind="ghost" onPress={() => setPlaceOpen(false)} />
+        </View></View>
       </Modal>
 
       {/* ----- «Готово» ----- */}
