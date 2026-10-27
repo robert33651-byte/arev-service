@@ -20,6 +20,7 @@ const I={
  route:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></svg>',
  more:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
+ mic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
  box:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
  pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
@@ -77,9 +78,11 @@ async function load(){
   pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false})),
   pages(()=>sb.from('work_photos').select('*').gte('at',from).order('at',{ascending:false})),
   pages(()=>sb.from('places').select('*').order('name')),
-  pages(()=>sb.from('tasks').select('*').or('day.gte.'+from.slice(0,10)+',archived_at.is.null').order('day').order('ord').order('created_at'))
+  pages(()=>sb.from('tasks').select('*').or('day.gte.'+from.slice(0,10)+',archived_at.is.null').order('day').order('ord').order('created_at')),
+  pages(()=>sb.from('talks').select('*').gte('at',from).order('at',{ascending:false})),
+  pages(()=>sb.from('talk_ai').select('*').gte('at',from))
  ]);
- const err=q.find(r=>r&&r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
+ const err=q.slice(0,13).find(r=>r&&r.error);if(err)toast('Ошибка загрузки: '+err.error.message);
  S.cfg=q[0].data||{};S.staff=q[1].data||[];
  S.shifts=(q[2].data||[]).map(x=>({...x,masterId:x.staff_id,startAt:ms(x.start_at),endAt:ms(x.end_at),
    start:{lat:x.start_lat,lng:x.start_lng,acc:x.start_acc,dist:x.start_dist,odo:x.start_odo,photo:x.start_photo,wifi:x.start_wifi_ok},
@@ -94,6 +97,7 @@ async function load(){
  S.track={};(q[8].data||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,acc:p.acc,at:ms(p.device_at||p.at),mocked:p.mocked,what:'трек'})});
  Object.values(S.track).forEach(a=>a.sort((x,y)=>x.at-y.at));
  S.wph=(q[10].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.taken_at||x.at),sentAt:ms(x.at),offline:!!x.taken_at&&ms(x.at)-ms(x.taken_at)>10*60000,loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
+ S.talks=(q[13].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));S.talkAi={};(q[14].data||[]).forEach(a=>S.talkAi[a.talk_id]=a);S.talksMissing=!!(q[13].error);
  S.tasks=(q[12].data||[]).map(x=>({...x,masterId:x.staff_id,dAt:ms(x.done_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
  S.places=(q[11].data||[]).filter(x=>x.active!==false);
  S.dayPts={};
@@ -109,7 +113,9 @@ function thumb(path,cls){if(!path)return '<span class="tiny muted">нет фот
  return '<span class="thw"><img class="'+(cls||'thumb')+'" alt="Фото" data-path="'+h(path)+'" '+(u?'src="'+h(u)+'"':'')+' data-act="view">'+(ch?'<span class="aib" title="Проверено ИИ">ИИ</span>':'')+'</span>'}
 async function signPending(){const list=[...pending].filter(p=>!S.urls[p]);pending.clear();if(!list.length)return;
  const r=await sb.storage.from('photos').createSignedUrls(list,3600);(r.data||[]).forEach(x=>{if(x.signedUrl)S.urls[x.path]=x.signedUrl});
- document.querySelectorAll('img[data-path]').forEach(im=>{const u=S.urls[im.dataset.path];if(u&&!im.getAttribute('src'))im.src=u})}
+ document.querySelectorAll('img[data-path]').forEach(im=>{const u=S.urls[im.dataset.path];if(u&&!im.getAttribute('src'))im.src=u});
+ document.querySelectorAll('audio[data-apath]').forEach(a=>{const u=S.urls[a.dataset.apath];if(u&&!a.getAttribute('src'))a.src=u})}
+function audioEl(path){if(!path)return '';const u=S.urls[path];if(!u){pending.add(path);clearTimeout(pendT);pendT=setTimeout(signPending,30)}return '<audio controls preload="none" data-apath="'+h(path)+'" '+(u?'src="'+h(u)+'"':'')+' style="width:100%;max-width:420px"></audio>'}
 
 /* ---------- расчёты и отклонения ---------- */
 function routeKm(sh){return sh.route_km!=null?+sh.route_km:0}
@@ -256,6 +262,7 @@ function allIssues(from){const out=[];const t0=dayStart(Date.now());
   if(m.norm_claimed&&+m.norm_claimed!==+m.norm_approved)out.push({lv:'warn',t:'Расход машины ждёт утверждения: '+n1(m.norm_claimed),who:m.id,at:ms(m.created_at),kind:'Профиль',go:['a-emp',m.id]})});
  S.shifts.filter(s=>s.startAt>=from).forEach(s=>shiftFlags(s).forEach(f=>out.push({lv:f.lv,t:f.t,who:s.masterId,at:s.startAt,kind:'Смена',go:['a-emp',s.masterId]})));
  S.fuel.filter(r=>r.at>=from).forEach(r=>fuelFlags(r).forEach(f=>out.push({lv:f.lv,t:f.t,who:r.masterId,at:r.at,kind:'Заправка',go:['a-fuel','']})));
+ (S.talks||[]).filter(t=>t.at>=from).forEach(t=>talkFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t+' ('+(t.object||'разговор')+')',who:t.masterId,at:t.at,kind:'Разговор',go:['a-talks','']})));
  S.tasks.filter(t=>ymdTs(t.day)>=dayStart(from)).forEach(t=>taskFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t,who:t.masterId,at:t.dAt||ymdTs(t.day)+18*36e5,kind:'Задача',go:['a-tasks','']})));
  S.buys.filter(b=>b.at>=from||['bought','partial','delivered'].includes(b.status)).forEach(b=>buyFlags(b).forEach(f=>out.push({lv:f.lv,t:f.t+' ('+b.supplier+', '+money(b.amount)+')',who:b.masterId,at:b.at,kind:'Закупка',go:['a-buys','']})));
  S.tickets.filter(t=>(t.createdAt>=from||(t.times.done>=from))&&t.status!=='cancelled').forEach(t=>ticketFlags(t).forEach(f=>out.push({lv:f.lv,t:f.t,who:t.techId,at:t.times.done||t.times.onsite||t.createdAt,kind:'Заказ '+t.num,go:['a-order',t.id]})));
@@ -279,7 +286,7 @@ const perSeg=()=>'<div class="seg" style="width:min(100%,360px)">'+PERS.map(x=>'
 const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min(100%,260px);padding:9px 12px;font-size:14px"><option value="">Все сотрудники</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(S.empF===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select>';
 const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
 
-const ANAV=[['a-dash','Сводка','chart'],['a-report','Отчёт','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-buys','Закупки','box'],['a-places','Места','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
+const ANAV=[['a-dash','Сводка','chart'],['a-report','Отчёт','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-talks','Разговоры','mic'],['a-buys','Закупки','box'],['a-places','Места','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-order':'a-orders','a-new':'a-orders'}[n]||n;
  const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&(t.status==='report'||t.disc_status==='open')).length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  const MN=[['a-dash','Сводка','chart'],['a-day','Маршрут','route'],['a-buys','Закупки','box'],['a-photos','Фото','camera']];const inMN=MN.some(x=>x[0]===cur);
@@ -481,6 +488,7 @@ function dayEvents(id,a,b,pts,shs){const ev=[];const add=(at,lat,lng,c,lbl,t,ext
  S.fuel.filter(r=>r.masterId===id).forEach(r=>add(r.at,r.loc&&r.loc.lat,r.loc&&r.loc.lng,'#8a4fd8','А','Заправка '+n1(r.liters)+' '+fuelUnit(tech(id))+', '+money(r.sum),{photo:r.photo}));
  S.tickets.filter(t=>t.techId===id).forEach(t=>{const g=t.gps;if(g.onsite)add(t.times.onsite,g.onsite.lat,g.onsite.lng,'#e9a11b','№','Заказ '+t.num+': на месте');if(g.done)add(t.times.done,g.done.lat,g.done.lng,'#e9a11b','✓','Заказ '+t.num+': завершён')});
  S.tasks.filter(t=>t.masterId===id&&t.status==='done').forEach(t=>add(t.dAt,t.done_lat,t.done_lng,'#0f766e','✓','Задача выполнена: '+t.title+(t.done_dist!=null?' ('+fDist(t.done_dist)+' от места)':''),{photo:t.done_photo,bad:taskFlags(t).length>0}));
+ (S.talks||[]).filter(x=>x.masterId===id).forEach(x=>{const a=S.talkAi[x.id];add(x.at,x.lat,x.lng,'#0e7490','Р','Разговор с клиентом: '+(x.object||'')+' · '+Math.max(1,Math.round((x.duration_s||0)/60))+' мин'+(a&&a.summary&&a.summary.summary?' — '+a.summary.summary:''),{bad:talkFlags(x).some(f=>f.lv==='bad')})});
  S.alerts.filter(x=>x.staff_id===id).forEach(x=>add(x.at,null,null,'#c23d2c','!',x.message,{bad:1}));
  return ev.sort((x,y)=>x.at-y.at)}
 function vDay(){const list=approved();const emp=S.dayEmp&&tech(S.dayEmp)?S.dayEmp:(list[0]||{}).id;const date=S.dayDate||ymd(Date.now());S.dayEmp=emp;S.dayDate=date;
@@ -572,6 +580,29 @@ function vTasksDay(){const date=S.taskDate||ymd(Date.now());S.taskDate=date;cons
  s+=Object.keys(by).length?Object.keys(by).map(id=>{const m=tech(id);const ts=by[id];const dn=ts.filter(t=>t.status==='done').length;
   return '<section class="card"><div class="row between"><h2>'+h(m?m.name:'—')+'</h2><div class="row"><span class="chip '+(dn===ts.length?'c-ok':'c-info')+'">'+dn+' из '+ts.length+'</span><button class="btn ghost sm" data-act="dayopen" data-id="'+h(id)+'" data-v="'+h(date)+'">Маршрут дня</button></div></div><div class="tblw flat"><table class="tbl"><thead><tr><th class="l">Задача</th><th class="l">Место</th><th class="l">Статус</th><th>Фото</th><th class="l">Отклонения</th><th></th></tr></thead><tbody>'+
    ts.map(t=>{const pl=S.places.find(p=>p.id===t.place_id);return '<tr><td class="l wrapc"><b>'+h(t.title)+'</b>'+(t.note?'<div class="tiny muted">'+h(t.note)+'</div>':'')+(t.done_note?'<div class="tiny">Сотрудник: '+h(t.done_note)+'</div>':'')+'</td><td class="l">'+(pl?'<a href="'+mapUrl(pl)+'" target="_blank" rel="noopener">'+h(pl.name)+'</a>':'—')+'</td><td class="l">'+(t.status==='done'?'<span class="chip c-ok">выполнено '+fHM(t.dAt)+'</span>'+(t.done_dist!=null?'<div class="tiny muted">'+fDist(t.done_dist)+' от места</div>':''):'<span class="chip c-warn">не выполнено</span>')+'</td><td>'+(t.done_photo?thumb(t.done_photo):'—')+'</td><td class="l wrapc">'+flagCell(taskFlags(t))+'</td><td>'+(t.status==='new'?'<button class="btn ghost sm" data-act="tdel" data-id="'+h(t.id)+'">Отменить</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div></section>'}).join(''):'<div class="empty" style="padding:18px"><p>На этот день задач нет.</p></div>';
+ return s}
+
+/* ---------- разговоры с клиентами ---------- */
+const MOOD={positive:['доволен','c-ok'],neutral:['спокоен','c-muted'],negative:['недоволен','c-bad']};
+const TKST={new:['ждёт обработки','c-muted'],processing:['ИИ готовит отчёт','c-info'],done:['отчёт готов','c-ok'],error:['ошибка обработки','c-bad']};
+function talkFlags(t){const a=S.talkAi[t.id];const f=[];if(a)(a.flags||[]).forEach(x=>f.push({lv:x.level==='bad'?'bad':'warn',t:'Разговор: '+x.text}));if(a&&a.mood==='negative')f.push({lv:'warn',t:'Разговор: клиент недоволен'});if(t.status==='error')f.push({lv:'warn',t:'Разговор не обработан ИИ'});return f}
+function vTalks(){const from=perFrom(S.per);const tf=S.tf||'all';let list=(S.talks||[]).filter(t=>t.at>=from&&(!S.empF||t.masterId===S.empF));
+ const nFlag=list.filter(t=>talkFlags(t).some(f=>f.lv==='bad')).length;const nNeg=list.filter(t=>(S.talkAi[t.id]||{}).mood==='negative').length;const mins=list.reduce((a,t)=>a+(t.duration_s||0),0)/60;
+ if(tf==='flags')list=list.filter(t=>talkFlags(t).length);else if(tf==='err')list=list.filter(t=>t.status!=='done');
+ const F=[['all','Все'],['flags','С флагами'],['err','Без отчёта']];
+ let s=atop('Разговоры с клиентами','<div class="row wrapx">'+empSel()+perSeg()+'<div class="filters">'+F.map(x=>'<button class="'+(tf===x[0]?'on':'')+'" data-act="tfilter" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div></div>');
+ if(S.talksMissing)return s+'<div class="flag warn">'+I.alert+'<span>Раздел ещё не включён на сервере. Выполните в Supabase файл migration_talks.sql и разверните функцию talk-ai.</span></div>';
+ s+='<div class="kgrid">'+kpi(list.length,'записей')+kpi(Math.round(mins),'минут разговоров')+kpi(nFlag,'с серьёзными флагами',nFlag>0)+kpi(nNeg,'клиент недоволен',nNeg>0)+'</div>';
+ s+='<div class="card tight"><p class="small" style="margin:0">Сотрудник записывает разговор на объекте только после того, как отметил согласие клиента. ИИ распознаёт армянскую речь, переводит на русский и делает отчёт. Флаги: работа или оплата мимо компании, несогласованные обещания, недовольство клиента. Распознавание бывает с ошибками — спорные места проверяйте по записи.</p></div>';
+ s+=list.length?list.map(t=>{const m=tech(t.masterId);const a=S.talkAi[t.id];const sm=(a&&a.summary)||{};const st=TKST[t.status]||TKST.new;const fl=talkFlags(t);
+  const li=x=>Array.isArray(x)&&x.length?'<ul style="margin:4px 0 0;padding-left:18px">'+x.map(i=>'<li>'+h(i)+'</li>').join('')+'</ul>':'<span class="muted">—</span>';
+  return '<section class="card"><div class="row between wrapx"><div><b>'+h(t.object||'Без объекта')+'</b><div class="tiny muted">'+h(m?m.name:'—')+' · '+fT(t.at)+' · '+Math.max(1,Math.round((t.duration_s||0)/60))+' мин'+(t.loc?' · <a href="'+mapUrl(t.loc)+'" target="_blank" rel="noopener">где</a>':'')+'</div></div><div class="row wrapx">'+(t.consent?'<span class="chip c-ok">клиент согласен</span>':'<span class="chip c-bad">нет согласия</span>')+'<span class="chip '+st[1]+'">'+st[0]+'</span>'+(a&&a.mood?'<span class="chip '+MOOD[a.mood][1]+'">клиент '+MOOD[a.mood][0]+'</span>':'')+'</div></div>'+
+   audioEl(t.path)+
+   (fl.length?'<div>'+fl.map(f=>'<div class="flag '+f.lv+'">'+I.alert+'<span>'+h(f.t.replace(/^Разговор: /,''))+'</span></div>').join('')+'</div>':'')+
+   (a?'<dl class="kv"><dt>Кратко</dt><dd>'+h(sm.summary||'—')+'</dd><dt>Проблема</dt><dd>'+h(sm.problem||'—')+'</dd><dt>Сделано</dt><dd>'+h(sm.done||'—')+'</dd><dt>Обещания</dt><dd>'+li(sm.promises)+'</dd><dt>Цена</dt><dd>'+h(sm.price||'—')+'</dd><dt>Дальше</dt><dd>'+li(sm.next_steps)+'</dd></dl>'+
+    '<details><summary class="small">Расшифровка на русском</summary><p class="small" style="white-space:pre-wrap">'+h(a.transcript_ru||'—')+'</p></details><details><summary class="small">Оригинал на армянском</summary><p class="small" lang="hy" style="white-space:pre-wrap">'+h(a.transcript||'—')+'</p></details>':'')+
+   (t.status==='error'&&t.error?'<p class="tiny" style="color:var(--bad)">'+h(t.error)+'</p>':'')+
+   '<div class="row wrapx">'+(t.status!=='processing'?'<button class="btn ghost sm" data-act="talkai" data-id="'+h(t.id)+'">'+(t.status==='done'?'Обработать заново':'Сделать отчёт')+'</button>':'<span class="tiny muted">Отчёт обычно готов через 1–2 минуты</span>')+'<button class="btn ghost sm" data-act="dayopen" data-id="'+h(t.masterId)+'" data-v="'+ymd(t.at)+'">Маршрут дня</button></div></section>'}).join(''):'<div class="empty" style="padding:18px"><p>Записей за этот период нет.</p></div>';
  return s}
 
 function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.work_start=String(f.c.work_start||'09:00').slice(0,5);f.c.work_end=String(f.c.work_end||'18:00').slice(0,5)}const c=f.c;
@@ -728,7 +759,7 @@ function rpCsv(){const rows=rpRows();const hd=['Сотрудник','Перио�
  const body=rows.map(x=>[x.m.name,per,x.days,Math.round(x.hrs*10)/10,Math.round(x.km),x.given,x.done,x.ontime,x.late,x.avgOpen==null?'':Math.round(x.avgOpen),x.ph,x.nb,Math.round(x.sb),x.byOpen,x.bad]);
  const csv='﻿'+[hd].concat(body).map(r=>r.map(q).join(';')).join('\r\n');
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const el=document.createElement('a');el.href=url;el.download='arev-otchet-'+per.replace(/[^0-9a-zа-я]+/gi,'_')+'.csv';document.body.appendChild(el);el.click();el.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
-const VIEWS={'a-report':vReport,'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-settings':vSettings};
+const VIEWS={'a-report':vReport,'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-talks':vTalks,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else root.innerHTML=shell((VIEWS[S.view.name]||vDash)());
@@ -753,6 +784,10 @@ const ACT={
  async install(){if(installEvt){installEvt.prompt();try{await installEvt.userChoice}catch(e){}installEvt=null;render(true);return}
   if(isIOS())await sheet('<h2>Установка на iPhone</h2><p class="small">1. Нажмите кнопку «Поделиться» внизу Safari (квадрат со стрелкой).<br>2. Выберите «На экран «Домой»».<br>3. Нажмите «Добавить». Иконка Arev Admin появится на главном экране.</p><button class="btn primary block" data-act="sheet" data-v="">Понятно</button>')},
  ilv(d){S.ilv=d.v;render(true)},
+ tfilter(d){S.tf=d.v;render(true)},
+ async talkai(d){const t=(S.talks||[]).find(x=>x.id===d.id);const r=await sb.functions.invoke('talk-ai',{body:{talk_id:d.id}});
+  if(r.error||(r.data&&r.data.error)){let m=(r.data&&r.data.error)||'';if(!m&&r.error&&r.error.context&&r.error.context.json){try{m=(await r.error.context.json()).error}catch(e){}}return toast('Не получилось: '+(m||(r.error&&r.error.message)||'ошибка'))}
+  if(t)t.status='processing';render(true);toast('ИИ готовит отчёт, обычно 1–2 минуты');setTimeout(()=>load(),60000);setTimeout(()=>load(),120000)},
  tdshift(d){S.taskDate=ymd(ymdTs(S.taskDate||ymd(Date.now()))+(+d.v)*864e5+36e5);render(true)},
  pltask(d){S.taskDate=S.taskDate||ymd(Date.now());go('a-tasks');S.form.tk={emp:S.empF||'',place:d.id};render()},
  async tadd(){const tk=S.form.tk||{};if(!tk.emp)return toast('Выберите сотрудника');const pl=S.places.find(p=>p.id===tk.place);const title=(tk.title||'').trim()||(pl?pl.name:'');if(!title)return toast('Напишите, что сделать');

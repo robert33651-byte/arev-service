@@ -21,6 +21,7 @@
     "expo-device": "~7.0.3",
     "expo-file-system": "~18.0.12",
     "expo-image-manipulator": "~13.0.6",
+    "expo-keep-awake": "~14.0.1",
     "expo-location": "~18.0.10",
     "expo-notifications": "~0.29.11",
     "expo-status-bar": "~2.0.1",

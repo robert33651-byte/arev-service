@@ -12,6 +12,7 @@ import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, A
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
 import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
 import TasksScreen from './src/TasksScreen';
+import { startTalk, stopTalk, uploadTalk, requestTalkAi, talkRecording, TALK_MAX_MS } from './src/talk';
 import { registerPush, onTaskNotificationTap, lastTaskTap } from './src/tasks';
 
 const CATS = { inverter: 'Не работает инвертор', output: 'Упала выработка', panel: 'Повреждена панель', wiring: 'Проводка и разъёмы', battery: 'Аккумулятор', cleaning: 'Чистка панелей', checkup: 'Плановый техосмотр', expand: 'Расширение или чужая станция', other: 'Другое' };
@@ -118,7 +119,7 @@ function Auth() {
 
 /* ---------------- основное приложение ---------------- */
 const TAB_TITLE = { home: 'Arev Service', tasks: 'Задачи', day: 'Мой день', history: 'История', profile: 'Профиль' };
-const SUB_TITLE = { shift: 'Смена', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
+const SUB_TITLE = { shift: 'Смена', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', talk: 'Разговор с клиентом', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
 
 function Main({ session }) {
   const uid = session.user.id;
@@ -133,7 +134,7 @@ function Main({ session }) {
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, fuR, ntR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, fuR, ntR, tlR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -144,6 +145,7 @@ function Main({ session }) {
         supabase.from('places').select('id,name,kind,lat,lng,radius').eq('active', true).order('name'),
         supabase.from('fuel').select('liters,amount,at').eq('staff_id', uid).gte('at', d0.toISOString()),
         supabase.rpc('my_tasks'),
+        supabase.from('talks').select('id,at,object,duration_s,status').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
       ]);
       const shifts = shiftR.data || [];
       const next = {
@@ -160,6 +162,7 @@ function Main({ session }) {
         tasks: [],   // задачи теперь только во вкладке «Задачи»
         nToday: (ntR.data || []).filter((t) => t.status === 'new' && (!t.due || String(t.due).slice(0, 10) <= ymd(new Date()))).length,
         fuelToday: fuR.data || [],
+        talks: tlR.data || [],
         nTasks: (ntR.data || []).filter((t) => t.status === 'new').length,
         err: staffR.error ? errText(staffR.error) : null,
       };
@@ -246,6 +249,7 @@ function Main({ session }) {
     else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
     else if (view.name === 'task') body = <TaskScreen ctx={ctx} id={view.id} />;
     else if (view.name === 'help') body = <Help ctx={ctx} />;
+    else if (view.name === 'talk') body = <TalkScreen ctx={ctx} />;
     else if (view.name === 'perms') body = <Page><PermCard always /><NotifyCard /></Page>;
     return (
       <>
@@ -501,6 +505,8 @@ function Home({ ctx }) {
         <Action icon="cart" title="Закупка" sub="купил в магазине" onPress={() => nav('purchase')} />
         <Action icon="archive" title="Со склада" sub="взял материал" onPress={() => nav('take')} />
         <Action icon="water" title="Заправка" sub="чек АЗС" onPress={() => nav('fuel')} />
+        <Action icon="mic" title="Разговор" sub="запись с клиентом" onPress={() => nav('talk')} />
+        <Action icon="help-circle" title="Помощь" sub="как пользоваться" onPress={() => nav('help')} />
       </View>
       {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
       <BuyList ctx={ctx} items={st.buys} />
@@ -1163,6 +1169,90 @@ function WorkScreen({ ctx, ticket }) {
   );
 }
 
+/* ---------------- разговор с клиентом ---------------- */
+const mmss = (ms) => { const t = Math.floor(ms / 1000); return Math.floor(t / 60) + ':' + p2(t % 60); };
+const TALK_ST = { new: ['Отправлено', 'note'], processing: ['Готовится отчёт', 'info'], done: ['Отчёт готов', 'ok'], error: ['Ошибка обработки', 'bad'] };
+function TalkScreen({ ctx }) {
+  const { st, uid, load } = ctx;
+  const [object, setObject] = useState((st.wph[0] && st.wph[0].object) || '');
+  const [consent, setConsent] = useState(false);
+  const [rec, setRec] = useState(false);
+  const [ms, setMs] = useState(0);
+  const [file, setFile] = useState(null); // {uri, ms}
+  const [busy, setBusy] = useState(false);
+  useEffect(() => () => { if (talkRecording()) stopTalk().catch(() => {}); }, []);
+  useEffect(() => { if (rec && ms >= TALK_MAX_MS) stop(); }, [ms, rec]);
+  const start = async () => {
+    if (!object.trim()) return Alert.alert('Объект', 'Укажите объект: имя клиента или адрес');
+    if (!consent) return Alert.alert('Согласие клиента', 'Сначала предупредите клиента, что разговор записывается, и отметьте его согласие.');
+    if (!st.open) return Alert.alert('Смена', 'Записывать разговор можно только во время смены.');
+    try { setFile(null); setMs(0); await startTalk(setMs); setRec(true); }
+    catch (e) { Alert.alert('Не получилось', String(e && e.message) === 'MIC_DENIED' ? 'Разрешите доступ к микрофону в настройках телефона.' : errText(e)); }
+  };
+  const stop = async () => {
+    setRec(false);
+    try { const r = await stopTalk(); if (r) setFile({ uri: r.uri, ms: r.ms || ms }); } catch (e) { Alert.alert('Не получилось', errText(e)); }
+  };
+  const send = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const fix = await getFix();
+      if (fix.mocked) throw new Error('MOCK_LOCATION');
+      const path = await uploadTalk(file.uri, uid);
+      const r = await rpc('add_talk', { p_path: path, p_object: object, p_duration: Math.round(file.ms / 1000), p_consent: consent, p_lat: fix.lat, p_lng: fix.lng, p_acc: fix.acc, p_mocked: fix.mocked, p_device: deviceId() });
+      if (r && r.id) requestTalkAi(r.id);
+      setFile(null); setMs(0); setConsent(false);
+      await load();
+      Alert.alert('Отправлено', 'Запись отправлена. Отчёт по разговору получит руководитель.');
+    } catch (e) {
+      Alert.alert('Не получилось', isNetErr(e) ? 'Нет интернета. Запись сохранена на этом экране — нажмите «Отправить», когда появится связь.' : errText(e));
+    } finally { setBusy(false); }
+  };
+  return (
+    <Page>
+      <H1>Разговор с клиентом</H1>
+      <Muted>Запишите разговор на объекте: что случилось, что сделали, о чём договорились. Руководитель получит краткий отчёт.</Muted>
+      <Card>
+        <Field label="Объект: клиент или адрес" value={object} onChangeText={setObject} placeholder="Ашот, Абовян, ул. ..." editable={!rec} />
+        <PlacePick places={st.places} value={object} onPick={setObject} />
+      </Card>
+      <Card style={{ borderLeftWidth: 4, borderLeftColor: consent ? C.ok : C.warn }}>
+        <T style={{ fontWeight: '700' }}>Согласие клиента</T>
+        <Muted>Скажите клиенту перед записью:</Muted>
+        <Text style={{ fontSize: 16, color: C.ink, fontStyle: 'italic' }}>«Մեր զրույցը ձայնագրվում է սպասարկման որակի համար։ Համաձա՞յն եք»</Text>
+        <Pressable onPress={() => !rec && setConsent(!consent)} style={{ flexDirection: 'row', gap: 10, alignItems: 'center', paddingVertical: 4 }} accessibilityRole="checkbox" accessibilityState={{ checked: consent }}>
+          <Icon name={consent ? 'checkbox' : 'square-outline'} size={26} color={consent ? C.ok : C.muted} />
+          <Text style={{ flex: 1, fontSize: 15, color: C.ink }}>Клиент предупреждён и согласен на запись</Text>
+        </Pressable>
+      </Card>
+      <View style={{ alignItems: 'center', gap: 10, paddingVertical: 8 }}>
+        <Pressable onPress={rec ? stop : start} disabled={busy} accessibilityLabel={rec ? 'Остановить запись' : 'Начать запись'}
+          style={({ pressed }) => ({ width: 112, height: 112, borderRadius: 56, backgroundColor: rec ? C.bad : C.pine, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.85 : 1, borderWidth: 6, borderColor: rec ? C.badSoft : C.surface2 })}>
+          <Icon name={rec ? 'stop' : 'mic'} size={46} color="#fff" />
+        </Pressable>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: rec ? C.bad : C.ink }}>{mmss(rec ? ms : file ? file.ms : 0)}</Text>
+        <Muted>{rec ? 'Идёт запись. Держите телефон рядом, экран можно не трогать.' : file ? 'Запись готова' : 'Нажмите, чтобы начать запись'}</Muted>
+      </View>
+      {file && !rec ? (
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Btn kind="ghost" title="Записать заново" onPress={() => Alert.alert('Удалить запись?', 'Текущая запись не будет отправлена.', [{ text: 'Нет' }, { text: 'Удалить', onPress: () => { setFile(null); setMs(0); } }])} style={{ flex: 1 }} />
+          <Btn title="Отправить" busy={busy} onPress={send} style={{ flex: 1 }} />
+        </View>
+      ) : null}
+      {(st.talks || []).length ? (
+        <Card>
+          <Label>Сегодня записано</Label>
+          {st.talks.map((x, i) => (
+            <Row key={x.id} icon="mic" title={(x.object || '—') + ' · ' + hm(x.at)} sub={Math.max(1, Math.round((x.duration_s || 0) / 60)) + ' мин'}
+              right={<Chip kind={(TALK_ST[x.status] || TALK_ST.new)[1]}>{(TALK_ST[x.status] || TALK_ST.new)[0]}</Chip>} last={i === st.talks.length - 1} />
+          ))}
+        </Card>
+      ) : null}
+    </Page>
+  );
+}
+
 /* ---------------- мой день ---------------- */
 const KIND_RU = { before: 'до работы', after: 'после работы', other: 'работа' };
 function MyDay({ ctx }) {
@@ -1197,6 +1287,7 @@ function MyDay({ ctx }) {
       });
       (fu.data || []).forEach((r) => add(r.at, 'water', '#8a4fd8', 'Заправка', String(r.liters).replace('.', ',') + (st.staff.fuel_type === 'gas' ? ' м³' : ' л') + ' · ' + money(r.amount), r.photo));
       (tk.data || []).forEach((t) => add(t.done_at, 'checkbox', C.ok, 'Задача выполнена', t.title));
+      (st.talks || []).forEach((x) => add(x.at, 'mic', C.info, 'Разговор с клиентом', (x.object || '') + ' · ' + Math.max(1, Math.round((x.duration_s || 0) / 60)) + ' мин'));
       out.sort((a, b) => a.at - b.at);
       setEv(out);
       const paths = out.map((e) => e.photo).filter(Boolean);
@@ -1359,6 +1450,7 @@ function Help({ ctx }) {
     ['checkbox', 'Задачи', 'Задачи на день ставит руководитель. Нажмите «Маршрут», чтобы доехать, и «Выполнено» на месте — с фото.'],
     ['cart', 'Закупка', 'Купили что-то — сразу внесите: фото чека, что купили и сумма. Потом отметьте фото там, куда привезли: на складе или на объекте.'],
     ['archive', 'Со склада', 'Берёте материал со склада на объект — запишите это. На объекте отметьте фото, остаток верните на склад.'],
+    ['mic', 'Разговор с клиентом', 'Предупредите клиента, что разговор записывается, отметьте его согласие и нажмите запись. Отчёт по разговору получит руководитель.'],
     ['water', 'Заправка', 'После каждой заправки — фото чека, литры и сумма. Всё сверяется с выпиской по топливной карте.'],
     ['stop-circle', 'Конец смены', 'Вечером в офисе нажмите «Закончить смену» и сфотографируйте одометр. Перед этим сдайте закупки.'],
     ['notifications', 'Напоминания', 'Приложение напомнит начать и закончить смену, сдать закупку и снять фото работ.'],
