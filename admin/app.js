@@ -645,7 +645,7 @@ function logHtml(t,log){if(!log.length)return '<p class="small muted">Запис
 function taskSheet(t,log){const live=!t.archived_at&&t.status!=='cancelled';
  const fin=t.status==='done';
  return '<h2>'+h(t.title)+'</h2><div class="row wrapx" style="gap:6px">'+taskChips(t)+'</div>'+
-  '<dl class="kv"><dt>Кто</dt><dd>'+h(tnames(t))+'</dd><dt>Срок</dt><dd>'+dueText(t)+'</dd><dt>Создана</dt><dd>'+fT(ms(t.created_at))+'</dd><dt>Открыл</dt><dd>'+(seenText(t)||'—')+'</dd>'+(t.report_at?'<dt>Сообщили о готовности</dt><dd>'+fT(ms(t.report_at))+'</dd>':'')+'</dl>'+
+  '<dl class="kv"><dt>Кто</dt><dd>'+h(tnames(t))+'</dd><dt>Срок</dt><dd>'+dueText(t)+'</dd><dt>Создана</dt><dd>'+fT(ms(t.created_at))+'</dd><dt>Открыл</dt><dd>'+(seenText(t)||'—')+'</dd>'+(t.report_at?'<dt>Сообщили о готовности</dt><dd>'+fT(ms(t.report_at))+'</dd>':'')+(t.place_id||t.lat!=null?'<dt>Место</dt><dd>'+h((S.places.find(p=>p.id===t.place_id)||{}).name||'')+(t.lat!=null?' <a class="chip c-muted" href="'+mapUrl({lat:t.lat,lng:t.lng})+'" target="_blank" rel="noopener">на карте</a>':'')+'</dd>':'')+(t.done_lat!=null?'<dt>Фото сделано</dt><dd>'+dChip(t.done_lat,t.done_lng,t.done_dist,((S.places.find(p=>p.id===t.place_id)||{}).radius)||+S.cfg.client_radius||200,'места')+'</dd>':'')+'</dl>'+
   (t.note?'<div class="flag note">'+h(t.note)+'</div>':'')+(t.done_note?'<div class="flag note">Сотрудник: '+h(t.done_note)+'</div>':'')+
   '<hr class="sep"><div class="label">Хронология</div>'+logHtml(t,log)+
   (live||fin?'<hr class="sep"><div class="field"><label for="tr-text">Ответ или комментарий</label><textarea id="tr-text" class="inp" placeholder="Напишите ответ, можно добавить фото или голосовое"></textarea></div>'+

@@ -133,7 +133,7 @@ function Main({ session }) {
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, tkR, fuR, ntR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, fuR, ntR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -142,7 +142,6 @@ function Main({ session }) {
         supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
         supabase.from('work_photos').select('id,at,kind,object,note,path').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
         supabase.from('places').select('id,name,kind,lat,lng,radius').eq('active', true).order('name'),
-        supabase.from('tasks').select('*').eq('staff_id', uid).eq('day', ymd(new Date())).neq('status', 'cancelled').or('place_id.not.is.null,lat.not.is.null').order('ord').order('created_at'),
         supabase.from('fuel').select('liters,amount,at').eq('staff_id', uid).gte('at', d0.toISOString()),
         supabase.rpc('my_tasks'),
       ]);
@@ -158,7 +157,8 @@ function Main({ session }) {
         buys: buyR.data || [],
         wph: wpR.data || [],
         places: plR.data || [],
-        tasks: tkR.data || [],
+        tasks: [],   // задачи теперь только во вкладке «Задачи»
+        nToday: (ntR.data || []).filter((t) => t.status === 'new' && (!t.due || String(t.due).slice(0, 10) <= ymd(new Date()))).length,
         fuelToday: fuR.data || [],
         nTasks: (ntR.data || []).filter((t) => t.status === 'new').length,
         err: staffR.error ? errText(staffR.error) : null,
@@ -175,7 +175,7 @@ function Main({ session }) {
         planReminders({
           cfg: c, open: next.open, buys: next.buys, wphCount: next.wph.length,
           startedToday: shifts.some((x) => new Date(x.start_at) >= d0),
-          tasksLeft: next.tasks.filter((t) => t.status === 'new').length,
+          tasksLeft: next.nToday,
         });
       }
     } catch (e) {
@@ -258,7 +258,7 @@ function Main({ session }) {
   if (tab === 'day') body = <MyDay ctx={ctx} />;
   else if (tab === 'history') body = <History ctx={ctx} />;
   else if (tab === 'profile') body = <Profile ctx={ctx} />;
-  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} places={st.places} gpsTaskIds={st.tasks.map((t) => t.id)} onGpsDone={(id) => nav('task', { id })} />;
+  else if (tab === 'tasks') body = <TasksScreen userId={uid} embedded openTaskId={openTask} onOpenedTask={() => setOpenTask(null)} places={st.places} />;
   else body = <Home ctx={ctx} />;
   const left = st.buys.length + st.tasks.filter((t) => t.status === 'new').length;
   return (

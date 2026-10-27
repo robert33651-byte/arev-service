@@ -2,13 +2,13 @@
   "expo": {
     "name": "Arev Service",
     "slug": "arev-service-maste",
-    "version": "1.5.3",
+    "version": "1.5.4",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#123a33",
     "android": {
       "package": "am.arevservice.master",
-      "versionCode": 10,
+      "versionCode": 11,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

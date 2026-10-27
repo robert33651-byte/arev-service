@@ -11,6 +11,7 @@ import Constants from 'expo-constants';
 import { decode } from 'base64-arraybuffer';
 import { supabase, rpc } from './supabase';
 import { uploadPhoto } from './photo';
+import { deviceId } from './device';
 
 // ---------- чтение ----------
 // Мои открытые задачи вместе с именами исполнителей: [{id,title,note,due,priority,status,disc_status,name1,name2,seen_at,seen2_at,...}]
@@ -37,6 +38,8 @@ export async function signedUrls(paths) {
 // ---------- действия ----------
 export const taskSeen = (id) => rpc('task_seen', { p_id: id });                       // 👀 открыл (вызывать при открытии карточки)
 export const taskReport = (id, photoPath, note) => rpc('task_report', { p_id: id, p_photo: photoPath || null, p_note: note || null }); // ✅ Готово
+// ✅ Готово с фото на месте: фото + геолокация (проверка подмены и расстояния до места на сервере)
+export const taskReportGeo = (id, photoPath, fix, note) => rpc('task_report_geo', { p_id: id, p_photo: photoPath, p_lat: fix.lat, p_lng: fix.lng, p_acc: fix.acc, p_mocked: !!fix.mocked, p_device: deviceId(), p_note: note || null });
 export const taskPost = (id, kind, body, path) => rpc('task_post', { p_id: id, p_kind: kind, p_body: body || null, p_path: path || null }); // 💬 текст / голос / фото
 export const taskSelfAdd = (title, note, due, priority) => rpc('task_self_add', { p_title: title, p_note: note || null, p_due: due || null, p_priority: priority || 'normal' });
 

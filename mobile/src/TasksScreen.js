@@ -8,9 +8,10 @@ import {
 } from 'react-native';
 import { supabase, errText } from './supabase';
 import { CameraSheet } from './photo';
+import { getFix, distM } from './device';
 import { C } from './ui';
 import {
-  myTasks, taskLog, signedUrls, taskSeen, taskReport, taskPost, taskSelfAdd, uploadTaskPhoto,
+  myTasks, taskLog, signedUrls, taskSeen, taskReport, taskReportGeo, taskPost, taskSelfAdd, uploadTaskPhoto,
   startVoice, stopVoice, uploadVoice, playVoice,
 } from './tasks';
 
@@ -24,7 +25,7 @@ const TXT = {
     doneTitle: 'Отметить как готовое', note: 'Комментарий (не обязательно)', sendDone: '✅ Отправить менеджеру', cancel: 'Отмена',
     newTitle: 'Новая задача для себя', what: 'Что нужно сделать', deadline: 'Срок', today: 'Сегодня', d1: '1 день', d3: '3 дня', noDl: 'Без срока',
     priority: 'Важность', normal: 'Обычная', important: 'Важно', urgent: 'Срочно', save: 'Добавить', history: 'История', manager: 'Менеджер',
-    route: '🗺 Маршрут', doneGps: '✅ Готово на месте (фото)', place: 'Место', rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
+    route: '🗺 Маршрут', place: 'Место', geoHint: 'Фото на месте сохранится с геолокацией для менеджера', fromPlace: 'м от места', geoErr: 'Отключите подмену местоположения и сфотографируйте снова.', rec: '● Запись', close: 'Закрыть', error: 'Ошибка', opened: '👀 открыто', listen: '▶ Слушать', playing: '⏸ Играет…', photoAdded: 'Фото добавлено', reportSent: 'Отправлено менеджеру',
     selfNote: 'Менеджер увидит, что вы добавили задачу сами', noteLbl: 'Заметка', youLbl: 'Вы',
     ev: { created: 'Задача создана', self_added: 'Добавлена сотрудником', assigned: (b) => 'Назначено: ' + b, seen: '👀 Открыта', reported: '✅ Сообщено о готовности', confirmed: '✔ Принято менеджером', reopened: '↩ Возвращена в работу', reminder: '⏰ Напоминание', disc_open: '💬 Обсуждение открыто', disc_closed: '✔ Вопрос решён', due_changed: (b) => 'Срок или важность изменены: ' + b, done_field: '✅ Выполнено на месте', status: (b) => 'Статус: ' + b },
   },
@@ -35,7 +36,7 @@ const TXT = {
     doneTitle: 'Նշել որպես կատարված', note: 'Նշում (ոչ պարտադիր)', sendDone: '✅ Ուղարկել մենեջերին', cancel: 'Չեղարկել',
     newTitle: 'Նոր առաջադրանք ինձ համար', what: 'Ի՞նչ անել', deadline: 'Ժամկետ', today: 'Այսօր', d1: '1 օր', d3: '3 օր', noDl: 'Առանց ժամկետի',
     priority: 'Կարևորություն', normal: 'Սովորական', important: 'Կարևոր', urgent: 'Հրատապ', save: 'Ավելացնել', history: 'Պատմություն', manager: 'Մենեջեր',
-    route: '🗺 Երթուղի', doneGps: '✅ Կատարված է տեղում (լուսանկար)', place: 'Վայր', rec: '● Ձայնագրություն', close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
+    route: '🗺 Երթուղի', place: 'Վայր', geoHint: 'Տեղում արված լուսանկարը կպահպանվի գտնվելու վայրի հետ մենեջերի համար', fromPlace: 'մ վայրից', geoErr: 'Անջատեք տեղադրության կեղծումը և նորից լուսանկարեք։', rec: '● Ձայնագրություն', close: 'Փակել', error: 'Սխալ', opened: '👀 բացվել է', listen: '▶ Լսել', playing: '⏸ Նվագում է…', photoAdded: 'Լուսանկարը ավելացվեց', reportSent: 'Ուղարկվեց մենեջերին',
     selfNote: 'Մենեջերը կտեսնի, որ դուք ինքներդ եք ավելացրել', noteLbl: 'Նշում', youLbl: 'Դուք',
     ev: { created: 'Առաջադրանքը ստեղծվեց', self_added: 'Ավելացվեց աշխատակցի կողմից', assigned: (b) => 'Նշանակվեց՝ ' + b, seen: '👀 Բացվեց', reported: '✅ Զեկուցվեց կատարման մասին', confirmed: '✔ Ընդունվեց մենեջերի կողմից', reopened: '↩ Վերադարձվեց աշխատանքի', reminder: '⏰ Հիշեցում', disc_open: '💬 Քննարկում բացվեց', disc_closed: '✔ Հարցը լուծվեց', due_changed: (b) => 'Ժամկետը կամ կարևորությունը փոխվեց՝ ' + b, done_field: '✅ Կատարվեց տեղում', status: (b) => 'Կարգավիճակ՝ ' + b },
   },
@@ -68,7 +69,7 @@ function Btn({ label, onPress, kind, disabled, small }) {
   );
 }
 
-export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask, places, gpsTaskIds, onGpsDone }) {
+export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask, places }) {
   const [uid, setUid] = useState(userId || null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -161,8 +162,13 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
     const purpose = cam; setCam(null);
     setBusy(true);
     try {
+      let fix = null;
+      if (purpose === 'report' && task && (task.place_id || task.lat != null)) {
+        fix = await getFix();
+        if (fix.mocked) { Alert.alert(L.error, L.geoErr); return; }
+      }
       const path = await uploadTaskPhoto(uri, uid);
-      if (purpose === 'report') { setDonePhoto({ path, uri }); }
+      if (purpose === 'report') { setDonePhoto({ path, uri, fix, dist: fix && task.lat != null ? distM(fix, { lat: task.lat, lng: task.lng }) : null }); }
       else { await taskPost(openId, 'photo', text.trim() || null, path); setText(''); await loadLog(openId); load(true); }
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -191,7 +197,8 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
     if (busy) return;
     setBusy(true);
     try {
-      await taskReport(openId, donePhoto ? donePhoto.path : null, doneNote.trim() || null);
+      if (donePhoto && donePhoto.fix) await taskReportGeo(openId, donePhoto.path, donePhoto.fix, doneNote.trim() || null);
+      else await taskReport(openId, donePhoto ? donePhoto.path : null, doneNote.trim() || null);
       setDoneOpen(false); setDonePhoto(null); setDoneNote('');
       await load(true); await loadLog(openId);
       Alert.alert(L.reportSent);
@@ -279,9 +286,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
               </View>
               {busy && <ActivityIndicator color={P.pine} />}
               {(task.place_id || task.lat != null) && <Btn label={L.route} kind="ghost" onPress={() => openRoute(task)} />}
-              {task.status === 'new' && (gpsTaskIds && gpsTaskIds.includes(task.id) && onGpsDone
-                ? <Btn label={L.doneGps} kind="dark" onPress={() => { const id = task.id; closeTask(); onGpsDone(id); }} />
-                : <Btn label={L.done} kind="dark" onPress={() => setDoneOpen(true)} />)}
+              {task.status === 'new' && <Btn label={L.done} kind="dark" onPress={() => setDoneOpen(true)} />}
             </ScrollView>
           </KeyboardAvoidingView>
         )}
@@ -296,6 +301,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
             <Btn label={'📷 ' + L.photo} small kind="ghost" onPress={() => setCam('report')} disabled={busy} />
             {donePhoto && <Image source={{ uri: donePhoto.uri }} style={st.thumb} accessibilityLabel={L.photoAdded} />}
           </View>
+          {task && (task.place_id || task.lat != null) && <Text style={st.muted}>📍 {L.geoHint}{donePhoto && donePhoto.dist != null ? ' · ' + donePhoto.dist + ' ' + L.fromPlace : ''}</Text>}
           <Btn label={L.sendDone} onPress={submitDone} disabled={busy} />
           <Btn label={L.cancel} kind="ghost" onPress={() => setDoneOpen(false)} />
         </View></View>
