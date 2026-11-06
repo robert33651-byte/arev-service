@@ -6,6 +6,7 @@ alter table public.purchases add column if not exists task_id uuid references pu
 create index if not exists purchases_task on public.purchases(task_id);
 
 drop function if exists public.add_purchase(text, jsonb, int, text, double precision, double precision, real, boolean, text, uuid, text, text);
+drop function if exists public.add_purchase(text, jsonb, int, text, double precision, double precision, real, boolean, text, uuid, text, text, uuid);
 create function public.add_purchase(p_supplier text, p_lines jsonb, p_amount int, p_photo text, p_lat double precision,
   p_lng double precision, p_acc real, p_mocked boolean, p_device text, p_ticket uuid default null, p_site text default null,
   p_source text default 'shop', p_task uuid default null)

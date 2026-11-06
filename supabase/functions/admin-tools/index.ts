@@ -69,6 +69,12 @@ Deno.serve(async (req) => {
     const { data: isAdmin } = await userClient.rpc('is_admin');
     if (!isAdmin) return json({ error: 'Только для администратора' }, 403);
     const admin = createClient(URL_, SERVICE);
+    const { data: who } = await userClient.auth.getUser();
+    const callerId = who && who.user ? who.user.id : null;
+    const logIt = async (action: string, tbl: string, rowId: string | null, title: string | null, changes: unknown) => {
+      try { await admin.rpc('admin_log_write', { p_uid: callerId, p_action: action, p_tbl: tbl, p_row_id: rowId, p_title: title, p_changes: changes }); } catch (_) { /* журнал может быть ещё не включён */ }
+    };
+    const staffName = async (id: string) => { const { data } = await admin.from('staff').select('name').eq('id', id).maybeSingle(); return data ? data.name : null; };
     const body = await req.json().catch(() => ({}));
 
     if (body.action === 'reset_pin') {
@@ -76,6 +82,7 @@ Deno.serve(async (req) => {
       if (!/^\d{6,12}$/.test(pin)) return json({ error: 'PIN-код — от 6 до 12 цифр' }, 400);
       const { error } = await admin.auth.admin.updateUserById(String(body.staff_id), { password: pin });
       if (error) return json({ error: error.message }, 400);
+      await logIt('reset_pin', 'staff', String(body.staff_id), await staffName(String(body.staff_id)), null);
       return json({ ok: true });
     }
 
@@ -83,8 +90,10 @@ Deno.serve(async (req) => {
     if (body.action === 'rename_staff') {
       const id = String(body.staff_id || ''); const name = String(body.name || '').trim();
       if (!id || name.length < 2) return json({ error: 'Укажите имя' }, 400);
+      const old = await staffName(id);
       const { error } = await admin.from('staff').update({ name }).eq('id', id);
       if (error) return json({ error: error.message }, 400);
+      await logIt('rename', 'staff', id, name, { name: { from: old, to: name } });
       await admin.from('task_log').update({ actor_name: name }).eq('actor_id', id); // таблица может отсутствовать — не страшно
       return json({ ok: true });
     }
@@ -99,9 +108,11 @@ Deno.serve(async (req) => {
         await admin.from('shifts').update({ end_at: new Date().toISOString() }).eq('staff_id', id).is('end_at', null);
         const b = await admin.auth.admin.updateUserById(id, { ban_duration: '876000h' });
         if (b.error) return json({ error: b.error.message }, 400);
+        await logIt('archive', 'staff', id, await staffName(id), null);
         return json({ ok: true, mode });
       }
       // полное удаление: снять с заказов, удалить файлы, удалить вход (остальное удалится каскадом)
+      const delName = await staffName(id);
       await admin.from('tickets').update({ staff_id: null }).eq('staff_id', id);
       await admin.from('ticket_photos').update({ staff_id: null }).eq('staff_id', id);
       let removed = 0;
@@ -116,6 +127,7 @@ Deno.serve(async (req) => {
       const d = await admin.auth.admin.deleteUser(id);
       if (d.error) return json({ error: d.error.message }, 400);
       await admin.from('staff').delete().eq('id', id); // на случай, если каскад не сработал
+      await logIt('delete_full', 'staff', id, delName, { files: removed });
       return json({ ok: true, mode, files: removed });
     }
 
@@ -126,6 +138,7 @@ Deno.serve(async (req) => {
       if (b.error) return json({ error: b.error.message }, 400);
       const { error } = await admin.from('staff').update({ status: 'approved', note: null }).eq('id', id);
       if (error) return json({ error: error.message }, 400);
+      await logIt('restore', 'staff', id, await staffName(id), null);
       return json({ ok: true });
     }
 

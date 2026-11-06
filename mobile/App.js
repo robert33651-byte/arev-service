@@ -138,7 +138,7 @@ function Main({ session }) {
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, fuR, ntR, tlR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, eqR, fuR, ntR, tlR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -146,7 +146,8 @@ function Main({ session }) {
         supabase.rpc('get_pool'),
         supabase.from('purchases').select('*').eq('staff_id', uid).in('status', ['bought', 'partial']).order('created_at'),
         supabase.from('work_photos').select('id,at,kind,object,note,path').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
-        supabase.from('places').select('id,name,kind,lat,lng,radius').eq('active', true).order('name'),
+        supabase.from('places').select('id,name,kind,lat,lng,radius,client_name,phone,address,power_kw,installed_at,note').eq('active', true).order('name'),
+        supabase.from('equipment').select('id,place_id,kind,model,serial,qty,warranty_until,note').order('created_at'),
         supabase.from('fuel').select('liters,amount,at').eq('staff_id', uid).gte('at', d0.toISOString()),
         supabase.rpc('my_tasks'),
         supabase.from('talks').select('id,at,object,duration_s,status').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
@@ -163,6 +164,7 @@ function Main({ session }) {
         buys: buyR.data || [],
         wph: wpR.data || [],
         places: plR.data || [],
+        equip: eqR.data || [],
         tasks: [],   // задачи теперь только во вкладке «Задачи»
         nToday: (ntR.data || []).filter((t) => t.status === 'new' && (!t.due || String(t.due).slice(0, 10) <= ymd(new Date()))).length,
         fuelToday: fuR.data || [],
@@ -978,6 +980,7 @@ function PurchaseScreen({ ctx, ticket, source, task }) {
         {dest === 'site' ? <Muted>{tr('На объекте отметите материал фото. Остаток нужно будет сдать на склад.')}</Muted> : null}
         {dest !== 'warehouse' && dest !== 'site' ? <Muted>{(active.find((t) => t.id === dest) || {}).address}</Muted> : null}
       </Card>
+      {dest === 'site' ? <ObjectCard ctx={ctx} name={site} /> : null}
       <Card>
         <T style={{ fontWeight: '700' }}>{wh ? tr('2. Фото материала на складе') : tr('2. Фото чека или накладной')}</T>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 3 / 4, borderRadius: 10 }} /> : null}
@@ -1098,6 +1101,44 @@ function PlacePick({ places, value, onPick }) {
   );
 }
 
+// карточка объекта: клиент, адрес, что установлено
+const EQ_RU = { panel: 'Панели', inverter: 'Инвертор', battery: 'Аккумулятор', mount: 'Крепёж', meter: 'Счётчик', other: 'Другое' };
+function ObjectCard({ ctx, name }) {
+  const { st } = ctx;
+  const q = String(name || '').trim().toLowerCase();
+  const p = q ? (st.places || []).find((x) => x.name.trim().toLowerCase() === q) : null;
+  if (!p || p.kind !== 'client') return null;
+  const eq = (st.equip || []).filter((e) => e.place_id === p.id);
+  const info = [p.client_name, p.address].filter(Boolean).join(' · ');
+  return (
+    <Card style={{ borderLeftWidth: 4, borderLeftColor: C.info }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name="business" size={18} color={C.info} />
+        <T style={{ fontWeight: '700', flex: 1 }}>{p.name}</T>
+        {p.phone ? (
+          <Pressable onPress={() => Linking.openURL('tel:' + String(p.phone).replace(/[^\d+]/g, ''))} hitSlop={8} accessibilityLabel={tr('Позвонить клиенту')} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Icon name="call" size={16} color={C.info} /><Text style={{ color: C.info, fontWeight: '600' }}>{tr('Позвонить')}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {info ? <Muted>{info}</Muted> : null}
+      {p.power_kw != null ? <Muted>{tr('Станция')} {String(p.power_kw).replace('.', ',')} {tr('кВт')}{p.installed_at ? ' · ' + tr('монтаж') + ' ' + new Date(p.installed_at).toLocaleDateString(loc()) : ''}</Muted> : null}
+      {eq.length ? (
+        <View style={{ gap: 2 }}>
+          <Label>{tr('Что установлено')}</Label>
+          {eq.map((e) => (
+            <Text key={e.id} style={{ fontSize: 14, color: C.ink }}>
+              {tr(EQ_RU[e.kind] || e.kind)}: {e.model}{e.qty > 1 ? ' × ' + e.qty : ''}{e.serial ? ' · № ' + e.serial : ''}
+              {e.warranty_until && new Date(e.warranty_until) < new Date() ? <Text style={{ color: C.warn }}> · {tr('гарантия истекла')}</Text> : null}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      {p.note ? <Muted>{p.note}</Muted> : null}
+    </Card>
+  );
+}
+
 /* ---------------- фото работ ---------------- */
 const KINDS = [['before', 'До работы'], ['after', 'После работы'], ['other', 'Другое']];
 function WorkScreen({ ctx, ticket }) {
@@ -1147,6 +1188,9 @@ function WorkScreen({ ctx, ticket }) {
       <Card>
         <Field label={tr('Объект: клиент или адрес')} value={object} onChangeText={setObject} placeholder={tr('Ашот, Абовян, ул. ...')} />
         <PlacePick places={st.places} value={object} onPick={setObject} />
+      </Card>
+      <ObjectCard ctx={ctx} name={object} />
+      <Card>
         <Label>{tr('Что на фото')}</Label>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {KINDS.map(([k, l]) => <Btn key={k} kind={kind === k ? 'dark' : 'ghost'} title={tr(l)} onPress={() => setKind(k)} />)}
@@ -1221,6 +1265,7 @@ function TalkScreen({ ctx }) {
         <Field label={tr('Объект: клиент или адрес')} value={object} onChangeText={setObject} placeholder={tr('Ашот, Абовян, ул. ...')} editable={!rec} />
         <PlacePick places={st.places} value={object} onPick={setObject} />
       </Card>
+      <ObjectCard ctx={ctx} name={object} />
       <Card style={{ borderLeftWidth: 4, borderLeftColor: consent ? C.ok : C.warn }}>
         <T style={{ fontWeight: '700' }}>{tr('Согласие клиента')}</T>
         <Muted>{tr('Скажите клиенту перед записью:')}</Muted>
