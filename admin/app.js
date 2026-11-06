@@ -693,6 +693,7 @@ function vSettings(){const f=S.form;if(!f.c){f.c=Object.assign({},S.cfg);f.c.wor
   '<div class="cols">'+inp('office_radius','Радиус офиса, м')+inp('client_radius','Радиус у клиента, м')+'</div>'+
   '<div class="field"><label for="g-wll">Координаты склада (если склад не в офисе)</label><input id="g-wll" class="inp" data-c="wll" value="'+h(c.wll!=null?c.wll:(c.warehouse_lat!=null?c.warehouse_lat+', '+c.warehouse_lng:''))+'" placeholder="пусто — склад в офисе"></div></section>'+
   '<section class="card"><h2>Рабочий день и топливо</h2><div class="cols">'+inp('work_start','Начало дня','time')+inp('work_end','Конец дня','time')+inp('grace_min','Допуск опоздания, мин')+inp('max_idle_min','Пауза между заказами, мин')+inp('default_norm','Расход по умолчанию, л/100','number',' step="0.1"')+inp('route_k','Коэффициент дорог','number',' step="0.05"')+inp('photo_max_age_min','Фото действительно, мин')+inp('purchase_max_hours','Сдать закупку не позже, ч')+inp('stop_min','Стоянка считается от, мин')+inp('long_stop_min','Долгая стоянка от, мин')+'</div><div class="field"><label for="g-me">Моё имя (видно сотрудникам в переписке)</label><div class="row"><input id="g-me" class="inp" data-f="myname" value="'+h(S.form.myname!=null?S.form.myname:myName())+'" autocomplete="name"><button class="btn ghost sm" data-act="savemyname">Сохранить</button></div></div><div class="field"><label for="g-co">Название компании</label><input id="g-co" class="inp" data-c="company" value="'+h(c.company||'')+'"></div><div class="field"><label for="g-ph">Телефон офиса (кнопка «Позвонить» в приложении)</label><input id="g-ph" class="inp" data-c="office_phone" value="'+h(c.office_phone||'')+'" placeholder="+374 10 123456"></div></section></div>';
+ s+='<section class="card"><h2>Язык · Լեզու</h2><p class="small">Язык этой админки на этом устройстве. Данные, которые вводят сотрудники, не переводятся.</p><div class="row wrapx" style="gap:8px"><button class="btn '+(window.ARLANG==='hy'?'ghost':'primary')+'" data-act="lang" data-v="ru">Русский</button><button class="btn '+(window.ARLANG==='hy'?'primary':'ghost')+'" data-act="lang" data-v="hy">Հայերեն</button></div></section>';
  return s}
 
 /* ---------- задачи: в работе, на проверке, обсуждения, архив ---------- */
@@ -766,6 +767,7 @@ function taskSheet(t,log){const live=!t.archived_at&&t.status!=='cancelled';
    (t.disc_status==='open'?'<button class="btn ghost sm" data-act="tdisc">✔ Вопрос решён</button>':'')+
    (live&&(t.status==='new'||t.status==='report')?'<button class="btn dark sm" data-act="tconfirm">✔ Принять и в архив</button>':'')+
    ((t.status==='report'||fin)?'<button class="btn ghost sm" data-act="treopen">↩ Вернуть в работу</button>':'')+
+   (live?'<button class="btn ghost sm" data-act="tstaff">👥 Исполнители</button>':'')+
    (live?'<button class="btn ghost sm" data-act="tplace">'+I.pin+(t.place_id||t.lat!=null?'Изменить место':'Добавить место')+'</button>':'')+
    (live&&t.status==='new'?'<button class="btn danger sm" data-act="tcancel">Отменить задачу</button>':'')+'</div>'+
   '<button class="btn ghost block" data-act="sheet" data-v="">Закрыть</button>'}
@@ -853,6 +855,7 @@ async function upd(table,id,patch,msg){const r=await sb.from(table).update(patch
 /* ---------- действия ---------- */
 const ACT={
  sheet(d){closeSheet(d.v)},
+ lang(d){if(window.setAdminLang)window.setAdminLang(d.v)},
  nav(d){go(d.v)},
  ago(d){go(d.v,d.id?{id:d.id}:{})},
  per(d){S.per=d.v;LS.set('per',d.v);render(true)},
@@ -900,6 +903,16 @@ const ACT={
  rpcsv(){rpCsv()},
  async tplace(){const id=S.tcur;const t=S.tasks.find(x=>x.id===id);if(!t)return;const pls=S.places.filter(p=>p.active!==false);
   await sheet('<h2>Место для задачи</h2><p class="small">Сотрудник увидит кнопку «Маршрут». Фото на месте сохранится с геолокацией.</p><div class="field"><label for="tp-sel">Место</label><select id="tp-sel" class="inp"><option value="">— без места —</option>'+pls.map(p=>'<option value="'+h(p.id)+'"'+(p.id===t.place_id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div><button class="btn primary block" data-act="tplaceok" data-id="'+h(id)+'">Сохранить</button><button class="btn ghost block" data-act="tplaceno" data-id="'+h(id)+'">Отмена</button>');},
+ async tstaff(){const id=S.tcur;const t=S.tasks.find(x=>x.id===id);if(!t)return;
+  const act=S.staff.filter(m=>m.status==='approved'||m.id===t.staff_id||m.id===t.staff2_id);
+  const o=(v,none)=>(none?'<option value="">— нет —</option>':'')+act.map(m=>'<option value="'+h(m.id)+'"'+(m.id===v?' selected':'')+'>'+h(m.name)+'</option>').join('');
+  await sheet('<h2>Исполнители задачи</h2><p class="small">Добавленный сотрудник получит уведомление и увидит задачу с её перепиской и фото. Он сможет отвечать и отмечать работу.</p><div class="field"><label for="ts-1">Основной исполнитель</label><select id="ts-1" class="inp">'+o(t.staff_id)+'</select></div><div class="field"><label for="ts-2">Второй исполнитель</label><select id="ts-2" class="inp">'+o(t.staff2_id,1)+'</select></div><button class="btn primary block" data-act="tstaffok" data-id="'+h(id)+'">Сохранить</button><button class="btn ghost block" data-act="tplaceno" data-id="'+h(id)+'">Отмена</button>')},
+ async tstaffok(d){const a=(document.getElementById('ts-1')||{}).value||'';const b=(document.getElementById('ts-2')||{}).value||'';
+  if(!a)return toast('Выберите основного исполнителя');if(b&&a===b)return toast('Второй исполнитель должен отличаться от первого');
+  const t=S.tasks.find(x=>x.id===d.id);if(!t)return;
+  if(a===t.staff_id&&(b||null)===(t.staff2_id||null)){closeSheet(null);return openTask(d.id)}
+  const patch={staff_id:a,staff2_id:b||null};if(a!==t.staff_id)patch.seen_at=null;if((b||null)!==(t.staff2_id||null))patch.seen2_at=null;
+  const ok=await upd('tasks',d.id,patch,'Исполнители обновлены, уведомление отправлено');closeSheet(null);if(ok)await openTask(d.id)},
  async tplaceno(d){await openTask(d.id)},
  async tplaceok(d){const v=(document.getElementById('tp-sel')||{}).value||'';const pl=S.places.find(p=>p.id===v);
   const ok=await upd('tasks',d.id,{place_id:pl?pl.id:null,lat:pl?pl.lat:null,lng:pl?pl.lng:null},pl?'Место добавлено':'Место убрано');closeSheet(null);if(ok)await openTask(d.id)},
