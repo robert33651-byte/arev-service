@@ -73,7 +73,7 @@
 
 ## Как обновить систему после изменений
 
-1. Supabase → **SQL Editor** → **New query** → вставьте весь файл `supabase/schema.sql` → **Run**. Данные не удаляются, файл можно запускать повторно.
+1. Supabase → **SQL Editor** → **New query** → вставьте весь файл `supabase/ALL.sql` → **Run**. В нём вся база одним файлом (schema + все миграции). Данные не удаляются, файл можно запускать повторно. Отдельные файлы миграций нужны только разработчику; после их изменения запустите `supabase/build_all.sh`, чтобы пересобрать `ALL.sql`.
 2. Если менялась серверная функция: **Edge Functions** → `admin-tools` → **Code** → вставьте новый `supabase/functions/admin-tools/index.ts` → **Deploy**.
 3. Админка на Vercel обновляется сама за 1–2 минуты.
 4. Приложение: expo.dev → **Build from GitHub** → Profile `preview` → новую ссылку отправьте сотрудникам.
