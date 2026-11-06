@@ -62,3 +62,13 @@ begin
 end $$;
 revoke all on function public.add_talk from public, anon;
 grant execute on function public.add_talk to authenticated;
+
+-- связь с объектом (если реестр объектов, migration_registry.sql, уже включён)
+alter table public.talks add column if not exists place_id uuid references public.places(id) on delete set null;
+create index if not exists talks_place on public.talks(place_id);
+do $$ begin
+  if to_regproc('public._link_place') is not null then
+    drop trigger if exists link_place on public.talks;
+    create trigger link_place before insert on public.talks for each row execute function public._link_place();
+  end if;
+end $$;

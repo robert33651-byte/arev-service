@@ -28,10 +28,15 @@ alter table public.equipment enable row level security;
 -- связь записей с объектом
 alter table public.work_photos add column if not exists place_id uuid references public.places(id) on delete set null;
 alter table public.purchases   add column if not exists place_id uuid references public.places(id) on delete set null;
-alter table public.talks       add column if not exists place_id uuid references public.places(id) on delete set null;
 create index if not exists work_photos_place on public.work_photos(place_id);
 create index if not exists purchases_place on public.purchases(place_id);
-create index if not exists talks_place on public.talks(place_id);
+-- разговоры (migration_talks.sql) могут быть ещё не включены — тогда этот блок пропускается
+do $$ begin
+  if to_regclass('public.talks') is not null then
+    alter table public.talks add column if not exists place_id uuid references public.places(id) on delete set null;
+    create index if not exists talks_place on public.talks(place_id);
+  end if;
+end $$;
 
 -- объект по названию (мастер выбирает объект из списка, в запись попадает его название)
 create or replace function public._place_by_name(p text) returns uuid
@@ -53,13 +58,21 @@ drop trigger if exists link_place on public.work_photos;
 create trigger link_place before insert on public.work_photos for each row execute function public._link_place();
 drop trigger if exists link_place on public.purchases;
 create trigger link_place before insert on public.purchases for each row execute function public._link_place();
-drop trigger if exists link_place on public.talks;
-create trigger link_place before insert on public.talks for each row execute function public._link_place();
+do $$ begin
+  if to_regclass('public.talks') is not null then
+    drop trigger if exists link_place on public.talks;
+    create trigger link_place before insert on public.talks for each row execute function public._link_place();
+  end if;
+end $$;
 
 -- старые записи
 update public.work_photos set place_id = public._place_by_name(object) where place_id is null and object is not null;
 update public.purchases set place_id = public._place_by_name(site) where place_id is null and site is not null;
-update public.talks set place_id = public._place_by_name(object) where place_id is null and object is not null;
+do $$ begin
+  if to_regclass('public.talks') is not null then
+    update public.talks set place_id = public._place_by_name(object) where place_id is null and object is not null;
+  end if;
+end $$;
 
 -- ======================= 2. Живая карта: последняя точка каждого сотрудника =======================
 create or replace function public.last_positions()
