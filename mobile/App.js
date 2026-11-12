@@ -732,7 +732,7 @@ function ShiftScreen({ ctx }) {
       <H1>{ending ? tr('Закончить смену') : tr('Начать смену')}</H1>
       <Card>
         <T style={{ fontWeight: '700' }}>{tr('1. Фото одометра')}</T>
-        <Muted>{ending ? tr('Вернитесь в офис и сфотографируйте одометр.') : tr('Сфотографируйте одометр у офиса.')}{' '}{tr('Место и время запишутся вместе с фото.')}</Muted>
+        <Muted>{ending ? tr('Сфотографируйте одометр в офисе. Если в офис не возвращаетесь, закончите смену там, где вы сейчас: место будет видно руководителю на карте.') : tr('Сфотографируйте одометр у офиса.')}{' '}{tr('Место и время запишутся вместе с фото.')}</Muted>
         {shot ? <Image source={{ uri: shot.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: 10 }} /> : null}
         {shot ? (shot.dist == null ? <Flag kind="note">{tr('Координаты сохранены')}</Flag> : far ? <Flag kind="bad">{fDist(shot.dist)}{' '}{tr('от офиса. Отметка будет записана с отклонением.')}</Flag> : <Flag kind="ok">{tr('В офисе ·')}{' '}{fDist(shot.dist)}</Flag>) : null}
         <Btn kind={shot ? 'ghost' : 'dark'} title={shot ? tr('Переснять') : tr('Сфотографировать одометр')} onPress={() => setCam(true)} />

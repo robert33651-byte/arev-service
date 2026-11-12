@@ -204,7 +204,7 @@ function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const
  if(prev&&prev.end&&s.odo<prev.end.odo)f.push({lv:'bad',t:'Утром одометр меньше, чем был '+fDay(prev.endAt)+' вечером ('+(s.odo-prev.end.odo)+' км)'});
  f.push(...aiOdo(s));
  if(sh.endAt){const early=Math.round((hmToTs(sh.endAt,c.work_end)-sh.endAt)/60000);if(early>g)f.push({lv:'warn',t:'Ушёл раньше на '+fDur(early*60000)});
-  if(e.dist!=null&&e.dist>rad)f.push({lv:'bad',t:'Уход отмечен в '+fDist(e.dist)+' от офиса'});
+  if(e.dist!=null&&e.dist>rad)f.push({lv:'warn',t:'Смена закрыта не в офисе: '+fDist(e.dist)+' от офиса (место — на карте маршрута, метка «К»)'});
   if(c.office_wifi&&e.wifi===false)f.push({lv:'warn',t:'При уходе телефон не видел офисный Wi-Fi'});
   const ok=odoKm(sh),rk=routeKm(sh),gk=shiftGps(sh);if(ok!=null&&ok>rk*1.3+10)f.push({lv:'bad',t:'Пробег за смену '+ok+' км, по заказам '+n1(rk)+' км'});
   if(ok!=null&&gk!=null&&gk>=1&&ok>gk*1.25+10)f.push({lv:'bad',t:'По одометру '+ok+' км, а по GPS '+n1(gk)+' км'});
