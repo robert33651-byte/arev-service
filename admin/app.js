@@ -746,11 +746,16 @@ function vTasks(){
  const lists={open:live.filter(t=>t.status==='new').sort(sorter),review:live.filter(t=>t.status==='report').sort(sorter),
   disc:live.filter(t=>t.disc_status==='open').sort(sorter),
   arch:S.tasks.filter(t=>t.status==='done'&&mine(t)).sort((a,b)=>(ms(b.archived_at||b.done_at)||0)-(ms(a.archived_at||a.done_at)||0))};
- const tabs=[['open','В работе'],['review','На проверке'],['disc','Обсуждения'],['arch','Архив'],['day','На день (GPS)']];
+ // «За период»: все задачи сотрудника за неделю, месяц или всё загруженное время — открытые, выполненные и отменённые вместе
+ const tper=S.tper||LS.get('tper','month');const d1=new Date();d1.setDate(1);d1.setHours(0,0,0,0);
+ const pFrom=tper==='week'?Date.now()-7*864e5:tper==='month'?d1.getTime():0;
+ const tAt=t=>ms(t.created_at)||ymdTs(t.day)||0;
+ lists.all=S.tasks.filter(t=>mine(t)&&(tAt(t)>=pFrom||(!t.archived_at&&(t.status==='new'||t.status==='report'))||(ms(t.done_at)||0)>=pFrom)).sort((a,b)=>tAt(b)-tAt(a));
+ const tabs=[['open','В работе'],['review','На проверке'],['disc','Обсуждения'],['arch','Архив'],['all','За период'],['day','На день (GPS)']];
  let s=atop('Задачи','<div class="row wrapx">'+empSel()+'<button class="btn primary sm" data-act="tnew">'+I.plus+(S.tnew?'Скрыть форму':'Новая задача')+'</button></div>');
- s+='<div class="filters">'+tabs.map(x=>'<button class="'+(mode===x[0]?'on':'')+'" data-act="tmode" data-v="'+x[0]+'">'+x[1]+(lists[x[0]]&&lists[x[0]].length&&x[0]!=='arch'?' · '+lists[x[0]].length:'')+'</button>').join('')+'</div>';
+ s+='<div class="filters">'+tabs.map(x=>'<button class="'+(mode===x[0]?'on':'')+'" data-act="tmode" data-v="'+x[0]+'">'+x[1]+(lists[x[0]]&&lists[x[0]].length&&x[0]!=='arch'&&x[0]!=='all'?' · '+lists[x[0]].length:'')+'</button>').join('')+'</div>';
  if(S.tnew)s+=taskForm(S.form.tk,today,false);
- s+='<section class="card tight">'+(mode==='review'?'<p class="small muted" style="margin:0">Сотрудник нажал «Готово». Откройте задачу и нажмите «Принять»: она уйдёт в архив вместе с перепиской и файлами.</p>':mode==='disc'?'<p class="small muted" style="margin:0">Сотрудник задал вопрос. Ответьте текстом, голосом или фото. Закрыть вопрос может только менеджер.</p>':mode==='arch'?'<p class="small muted" style="margin:0">Завершённые задачи. Откройте любую, чтобы увидеть хронологию: кто, что и когда сказал, с фото и голосовыми.</p>':'')+taskRows(lists[mode])+'</section>';
+ s+='<section class="card tight">'+(mode==='review'?'<p class="small muted" style="margin:0">Сотрудник нажал «Готово». Откройте задачу и нажмите «Принять»: она уйдёт в архив вместе с перепиской и файлами.</p>':mode==='disc'?'<p class="small muted" style="margin:0">Сотрудник задал вопрос. Ответьте текстом, голосом или фото. Закрыть вопрос может только менеджер.</p>':mode==='all'?'<div class="row wrapx between" style="gap:8px"><div class="filters" style="margin:0">'+[['week','7 дней'],['month','Этот месяц'],['all','Всё время']].map(x=>'<button class="'+(tper===x[0]?'on':'')+'" data-act="tper" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div><span class="small muted">Всего: '+lists.all.length+' · выполнено: '+lists.all.filter(t=>t.status==='done').length+' · в работе: '+lists.all.filter(t=>t.status==='new'||t.status==='report').length+' · отменено: '+lists.all.filter(t=>t.status==='cancelled').length+'</span></div><p class="small muted" style="margin:6px 0 0">Задачи выбранного сотрудника, поставленные или выполненные за период, и все ещё не закрытые. Сотрудник выбирается в списке справа вверху. «Всё время» — примерно два последних месяца.</p>':mode==='arch'?'<p class="small muted" style="margin:0">Завершённые задачи. Откройте любую, чтобы увидеть хронологию: кто, что и когда сказал, с фото и голосовыми.</p>':'')+taskRows(lists[mode])+'</section>';
  return s}
 
 const EVT={created:()=>'Задача создана',self_added:()=>'Сотрудник добавил задачу себе',assigned:b=>'Назначено: '+b,seen:()=>'👀 открыл(а) задачу',reported:()=>'✅ Сообщили о готовности',confirmed:()=>'✔ Принято менеджером',reopened:()=>'↩ Возвращена в работу',reminder:()=>'⏰ Отправлено напоминание: задачу не открыли',disc_open:()=>'💬 Открыто обсуждение',disc_closed:()=>'✔ Вопрос решён',due_changed:b=>'Срок или важность изменены: '+b,done_field:()=>'✅ Выполнено на месте (проверка GPS)',purchase:b=>'🛒 Закупка: '+b,overdue:b=>'⏰ Напоминание: задача просрочена, срок '+b,place_set:b=>'📍 Место: '+b,status:b=>'Статус: '+b};
@@ -895,6 +900,7 @@ const ACT={
  async tdel(d){if(await confirmBox('Отменить задачу?','Сотрудник перестанет её видеть.','Отменить задачу')!=='y')return;await upd('tasks',d.id,{status:'cancelled'},'Задача отменена')},
  tnew(){S.tnew=!S.tnew;render(true)},
  tmode(d){S.tmode=d.v;S.form={};render(true)},
+ tper(d){S.tper=d.v;LS.set('tper',d.v);render(true)},
  tdue(d){S.form.tk=S.form.tk||{};S.form.tk.due=d.v||'';render(true)},
  tpri(d){S.form.tk=S.form.tk||{};S.form.tk.pri=d.v;render(true)},
  topen(d){openTask(d.id)},
