@@ -71,7 +71,7 @@
       if (pe && pe.closest && pe.closest('[data-noi18n]')) return;
       var v = n.nodeValue, o = t(v); if (o !== v) n.nodeValue = o;
     } else if (n.nodeType === 1) {
-      var nm = n.nodeName; if (nm === 'SCRIPT' || nm === 'STYLE' || nm === 'TEXTAREA') return;
+      var nm = n.nodeName; if (nm === 'SCRIPT' || nm === 'STYLE') return;
       // то, что ввёл человек (заметки, расшифровки, названия задач), не переводим
       if (n.hasAttribute('data-noi18n') || n.isContentEditable) return;
       for (var i = 0; i < ATTRS.length; i++) {
@@ -79,6 +79,7 @@
         if (a) { var b = t(a); if (b !== a) n.setAttribute(ATTRS[i], b); }
       }
       if (nm === 'INPUT' && (n.type === 'button' || n.type === 'submit') && n.value) n.value = t(n.value);
+      if (nm === 'TEXTAREA') return;   // подсказку (placeholder) перевели выше, а введённый текст не трогаем
       for (var c = n.firstChild; c; c = c.nextSibling) node(c);
     }
   }
