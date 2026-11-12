@@ -5,7 +5,7 @@
 // Секреты (Edge Functions → Secrets):
 //   OPENAI_API_KEY    — ключ OpenAI для распознавания речи (армянский)
 //   ANTHROPIC_API_KEY — уже есть (тот же, что для проверки фото)
-// По желанию: TRANSCRIBE_MODEL (по умолчанию whisper-1), AI_MODEL (модель Claude).
+// По желанию: TRANSCRIBE_MODEL (по умолчанию gpt-4o-transcribe, запасная whisper-1), AI_MODEL (модель Claude).
 //
 // Вызов: POST { talk_id } от сотрудника, записавшего разговор, или от админа.
 // Отвечает сразу, обработка идёт в фоне; результат пишется в talk_ai, статус — в talks.status.
@@ -23,7 +23,7 @@ const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const OPENAI = Deno.env.get('OPENAI_API_KEY') || '';
 const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY') || '';
-const STT_MODEL = Deno.env.get('TRANSCRIBE_MODEL') || 'whisper-1';
+const STT_MODEL = Deno.env.get('TRANSCRIBE_MODEL') || 'gpt-4o-transcribe';
 const MODEL = Deno.env.get('AI_MODEL') || 'claude-sonnet-5-5';
 
 const PROMPT = (ctx: string, text: string) => `Ты помогаешь руководителю компании Arev Service (установка и обслуживание солнечных станций в Армении) контролировать выездных мастеров.
@@ -63,15 +63,25 @@ function parseJson(t: string) {
   return null;
 }
 
-async function transcribe(blob: Blob) {
+// Распознавание: сначала более точная модель, при её отказе — whisper-1 (она хуже понимает армянский).
+async function transcribeWith(model: string, blob: Blob) {
   const fd = new FormData();
   fd.append('file', blob, 'talk.m4a');
-  fd.append('model', STT_MODEL);
+  fd.append('model', model);
   fd.append('language', 'hy');
   fd.append('response_format', 'text');
   const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + OPENAI }, body: fd });
-  if (!r.ok) throw new Error('Распознавание речи (OpenAI) ' + r.status + ': ' + (await r.text()).slice(0, 300));
+  if (!r.ok) throw new Error('Распознавание речи (OpenAI, ' + model + ') ' + r.status + ': ' + (await r.text()).slice(0, 300));
   return (await r.text()).trim();
+}
+let usedStt = STT_MODEL;
+async function transcribe(blob: Blob) {
+  const models = STT_MODEL === 'whisper-1' ? ['whisper-1'] : [STT_MODEL, 'whisper-1'];
+  let last: unknown = null;
+  for (const m of models) {
+    try { const t = await transcribeWith(m, blob); usedStt = m; return t; } catch (e) { last = e; }
+  }
+  throw last;
 }
 
 async function analyze(ctx: string, text: string) {
@@ -103,7 +113,7 @@ async function processTalk(admin: ReturnType<typeof createClient>, id: string) {
     const a = await analyze(ctx, text);
     const flags = Array.isArray(a.flags) ? a.flags.filter((f: { text?: string }) => f && f.text).map((f: { level?: string; text: string; text_hy?: string }) => ({ level: f.level === 'bad' ? 'bad' : 'warn', text: String(f.text), text_hy: f.text_hy ? String(f.text_hy) : null })) : [];
     const summary = { summary: a.summary || null, problem: a.problem || null, done: a.done || null, promises: a.promises || [], price: a.price || null, next_steps: a.next_steps || [], hy: a.hy && typeof a.hy === 'object' ? a.hy : null };
-    await admin.from('talk_ai').upsert({ talk_id: id, transcript: text, transcript_ru: a.transcript_ru || null, summary, flags, mood: ['positive', 'neutral', 'negative'].includes(a.mood) ? a.mood : null, model: STT_MODEL + ' + ' + MODEL, at: new Date().toISOString() });
+    await admin.from('talk_ai').upsert({ talk_id: id, transcript: text, transcript_ru: a.transcript_ru || null, summary, flags, mood: ['positive', 'neutral', 'negative'].includes(a.mood) ? a.mood : null, model: usedStt + ' + ' + MODEL, at: new Date().toISOString() });
     await admin.from('talks').update({ status: 'done', error: null, processed_at: new Date().toISOString() }).eq('id', id);
   } catch (e) {
     await admin.from('talks').update({ status: 'error', error: String((e as Error).message || e).slice(0, 500) }).eq('id', id);
