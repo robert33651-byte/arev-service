@@ -505,7 +505,7 @@ function dayEvents(id,a,b,pts,shs){const ev=[];const add=(at,lat,lng,c,lbl,t,ext
  S.fuel.filter(r=>r.masterId===id).forEach(r=>add(r.at,r.loc&&r.loc.lat,r.loc&&r.loc.lng,'#8a4fd8','А','Заправка '+n1(r.liters)+' '+fuelUnit(tech(id))+', '+money(r.sum),{photo:r.photo}));
  S.tickets.filter(t=>t.techId===id).forEach(t=>{const g=t.gps;if(g.onsite)add(t.times.onsite,g.onsite.lat,g.onsite.lng,'#e9a11b','№','Заказ '+t.num+': на месте');if(g.done)add(t.times.done,g.done.lat,g.done.lng,'#e9a11b','✓','Заказ '+t.num+': завершён')});
  S.tasks.filter(t=>t.masterId===id&&t.status==='done').forEach(t=>add(t.dAt,t.done_lat,t.done_lng,'#0f766e','✓','Задача выполнена: '+t.title+(t.done_dist!=null?' ('+fDist(t.done_dist)+' от места)':''),{photo:t.done_photo,bad:taskFlags(t).length>0}));
- (S.talks||[]).filter(x=>x.masterId===id).forEach(x=>{const a=S.talkAi[x.id];add(x.at,x.lat,x.lng,'#0e7490','Р','Разговор с клиентом: '+(x.object||'')+' · '+Math.max(1,Math.round((x.duration_s||0)/60))+' мин'+(a&&a.summary&&a.summary.summary?' — '+a.summary.summary:''),{bad:talkFlags(x).some(f=>f.lv==='bad')})});
+ (S.talks||[]).filter(x=>x.masterId===id).forEach(x=>{const a=S.talkAi[x.id];add(x.at,x.lat,x.lng,'#0e7490','Р','Разговор с клиентом: '+(x.object||'')+' · '+Math.max(1,Math.round((x.duration_s||0)/60))+' мин'+(a&&a.summary&&a.summary.summary?' — '+((window.ARLANG==='hy'&&a.summary.hy&&a.summary.hy.summary)||a.summary.summary):''),{bad:talkFlags(x).some(f=>f.lv==='bad')})});
  S.alerts.filter(x=>x.staff_id===id).forEach(x=>add(x.at,null,null,'#c23d2c','!',x.message,{bad:1}));
  return ev.sort((x,y)=>x.at-y.at)}
 function vDay(){const list=approved();const emp=S.dayEmp&&tech(S.dayEmp)?S.dayEmp:(list[0]||{}).id;const date=S.dayDate||ymd(Date.now());S.dayEmp=emp;S.dayDate=date;

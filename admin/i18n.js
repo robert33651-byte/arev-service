@@ -56,6 +56,7 @@
     else {
       out = pass(s, false);
       if (out !== s || /\d/.test(s)) out = pass(out, true);
+      else { var o2 = pass(out, true); if (!CY.test(o2)) out = o2; }   // короткая подпись целиком из коротких слов («по GPS», «— нет —»)
       if (out !== s) out = out.replace(/([^\s]) {2,}/g, '$1 ');
     }
     if (++cacheN > 5000) { cache = Object.create(null); cacheN = 0; }
