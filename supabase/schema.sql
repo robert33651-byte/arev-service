@@ -162,6 +162,7 @@ create table if not exists public.track_points(
   acc real, speed real, mocked boolean not null default false
 );
 create index if not exists track_staff_time on public.track_points(staff_id, at desc);
+create index if not exists track_time on public.track_points(at);
 alter table public.track_points enable row level security;
 
 -- ---------- подозрительные события (подмена GPS, чужой телефон) ----------
@@ -327,7 +328,8 @@ do $$ begin
   drop policy if exists tasks_admin on public.tasks;
   create policy tasks_admin on public.tasks for all to authenticated using (public.is_admin()) with check (public.is_admin());
   drop policy if exists places_read on public.places;
-  create policy places_read on public.places for select to authenticated using (true);
+  create policy places_read on public.places for select to authenticated
+    using (public.is_admin() or exists(select 1 from public.staff st where st.id = auth.uid() and st.status = 'approved'));
   drop policy if exists places_admin on public.places;
   create policy places_admin on public.places for all to authenticated using (public.is_admin()) with check (public.is_admin());
   drop policy if exists work_photos_read on public.work_photos;
@@ -349,6 +351,9 @@ end $$;
 -- Изменить или удалить фото нельзя. Время загрузки ставит сервер.
 -- =====================================================================
 insert into storage.buckets(id, name, public) values ('photos','photos', false) on conflict (id) do nothing;
+do $$ begin  -- не больше 30 МБ на файл
+  update storage.buckets set file_size_limit = 31457280 where id = 'photos' and file_size_limit is null;
+exception when others then null; end $$;
 do $$ begin
   drop policy if exists photos_insert on storage.objects;
   create policy photos_insert on storage.objects for insert to authenticated
@@ -389,7 +394,8 @@ begin
   -- после сброса привязки админом сотрудник привязывается к телефону при первом действии
   if s.device_id is null and p_device is not null then
     update public.staff set device_id = p_device where id = s.id;
-  elsif s.device_id is not null and p_device is not null and s.device_id <> p_device then
+  elsif s.device_id is not null and (p_device is null or s.device_id <> p_device) then
+    -- пустой номер телефона тоже отказ: иначе привязку можно обойти, вызвав функцию напрямую
     insert into public.alerts(staff_id, kind, message) values (s.id, 'device', 'Попытка действия с другого телефона');
     return 'OTHER_DEVICE';
   end if;
@@ -410,6 +416,12 @@ begin
    where bucket_id = 'photos' and name = p_path and owner_id = auth.uid()::text;
   if c is null then return 'PHOTO_NOT_FOUND'; end if;
   if c < now() - make_interval(mins => lim) then return 'PHOTO_TOO_OLD'; end if;
+  -- одно фото — одна отметка: одометр, чек заправки и чек закупки нельзя использовать повторно
+  if exists(select 1 from public.shifts where start_photo = p_path or end_photo = p_path)
+     or exists(select 1 from public.fuel where photo = p_path)
+     or exists(select 1 from public.purchases where photo = p_path or delivered_photo = p_path or left_photo = p_path) then
+    return 'PHOTO_USED';
+  end if;
   return null;
 end $$;
 
@@ -533,13 +545,17 @@ end $$;
 -- точки фонового трека (пачкой)
 create function public.add_track(p_points jsonb, p_device text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; n int := 0; p jsonb; mocked int := 0;
+declare s public.staff; n int := 0; p jsonb; mocked int := 0; tp timestamptz;
 begin
   s := public._staff();
-  if s.device_id is not null and p_device is not null and s.device_id <> p_device then return jsonb_build_object('error','OTHER_DEVICE'); end if;
+  if s.device_id is not null and (p_device is null or s.device_id <> p_device) then return jsonb_build_object('error','OTHER_DEVICE'); end if;
+  if jsonb_array_length(coalesce(p_points,'[]'::jsonb)) > 2000 then return jsonb_build_object('error','TOO_MANY_POINTS'); end if;
   for p in select * from jsonb_array_elements(coalesce(p_points,'[]'::jsonb)) loop
+    -- время точки с телефона: не из будущего и не старше 3 суток (офлайн-очередь), иначе точка не принимается
+    tp := to_timestamp((p->>'t')::double precision / 1000);
+    if tp is null or tp > now() + interval '5 minutes' or tp < now() - interval '3 days' then continue; end if;
     insert into public.track_points(staff_id, device_at, lat, lng, acc, speed, mocked)
-    values (s.id, to_timestamp((p->>'t')::double precision / 1000), (p->>'lat')::double precision, (p->>'lng')::double precision,
+    values (s.id, tp, (p->>'lat')::double precision, (p->>'lng')::double precision,
             (p->>'acc')::real, (p->>'spd')::real, coalesce((p->>'mock')::boolean, false));
     if coalesce((p->>'mock')::boolean, false) then mocked := mocked + 1; end if;
     n := n + 1;
@@ -547,8 +563,27 @@ begin
   if mocked > 0 then
     insert into public.alerts(staff_id, kind, message) values (s.id, 'mock', 'В треке смены ' || mocked || ' точек с подменой местоположения');
   end if;
+  -- точки могли дойти уже после конца смены (не было связи) — пересчитываем км по GPS у недавних закрытых смен
+  if n > 0 then
+    update public.shifts sh set gps_km = public._gps_km(s.id, sh.start_at, sh.end_at)
+     where sh.staff_id = s.id and sh.end_at is not null and sh.end_at > now() - interval '3 days';
+  end if;
   return jsonb_build_object('ok', true, 'n', n);
 end $$;
+
+-- приложение увидело подмену местоположения и не дало сделать отметку — руководитель должен об этом узнать
+create or replace function public.report_mock() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff;
+begin
+  s := public._staff();
+  if not exists(select 1 from public.alerts where staff_id = s.id and kind = 'mock' and at > now() - interval '10 minutes') then
+    insert into public.alerts(staff_id, kind, message) values (s.id, 'mock', 'Попытка отметки с подменой местоположения');
+  end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.report_mock from public, anon;
+grant execute on function public.report_mock to authenticated;
 
 -- новые заказы для сотрудника на смене (без имени и телефона клиента)
 create function public.get_pool()
@@ -807,7 +842,9 @@ begin
     return jsonb_build_object('error','ADMIN_EXISTS');
   end if;
   select email into em from auth.users where id = auth.uid();
-  if em like '%@staff.arevservice.app' then return jsonb_build_object('error','STAFF_ACCOUNT'); end if;
+  if em is null or em like '%@staff.arevservice.app' then return jsonb_build_object('error','STAFF_ACCOUNT'); end if;
+  -- в работающей системе (есть утверждённые сотрудники) первого админа назначают только через SQL Editor
+  if exists(select 1 from public.staff where status = 'approved') then return jsonb_build_object('error','ADMIN_EXISTS'); end if;
   insert into public.admins(user_id) values (auth.uid());
   return jsonb_build_object('ok', true);
 end $$;

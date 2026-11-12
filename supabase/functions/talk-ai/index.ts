@@ -125,8 +125,14 @@ Deno.serve(async (req) => {
     if (!t) return json({ error: 'Запись не найдена' }, 404);
     const { data: isAdmin } = await userClient.rpc('is_admin');
     if (t.staff_id !== u.user.id && !isAdmin) return json({ error: 'Нет доступа' }, 403);
-    if (t.status === 'processing' && !isAdmin) return json({ ok: true, status: 'processing' });
-    await admin.from('talks').update({ status: 'processing', error: null }).eq('id', id);
+    if (isAdmin) {
+      await admin.from('talks').update({ status: 'processing', error: null }).eq('id', id);
+    } else {
+      // сотрудник запускает отчёт только один раз, по новой записи: повторный запуск — только у руководителя.
+      // Иначе можно было бы перезапускать отчёт, пока не исчезнут замечания, и тратить деньги на ИИ.
+      const { data: got } = await admin.from('talks').update({ status: 'processing', error: null }).eq('id', id).eq('status', 'new').select('id');
+      if (!got || !got.length) return json({ ok: true, status: t.status });
+    }
     // отвечаем сразу, обработка идёт в фоне
     // @ts-ignore EdgeRuntime есть в Supabase Edge Functions
     EdgeRuntime.waitUntil(processTalk(admin, id));

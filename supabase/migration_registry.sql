@@ -156,7 +156,8 @@ revoke all on function public.admin_log_write from public, anon, authenticated;
 -- ======================= права =======================
 do $$ begin
   drop policy if exists equipment_read on public.equipment;
-  create policy equipment_read on public.equipment for select to authenticated using (true);
+  create policy equipment_read on public.equipment for select to authenticated
+    using (public.is_admin() or exists(select 1 from public.staff st where st.id = auth.uid() and st.status = 'approved'));
   drop policy if exists equipment_admin on public.equipment;
   create policy equipment_admin on public.equipment for all to authenticated using (public.is_admin()) with check (public.is_admin());
   drop policy if exists admin_log_read on public.admin_log;

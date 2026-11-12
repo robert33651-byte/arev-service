@@ -127,10 +127,10 @@ function audioEl(path){if(!path)return '';const u=S.urls[path];if(!u){pending.ad
 function routeKm(sh){return sh.route_km!=null?+sh.route_km:0}
 const odoKm=sh=>sh.end&&sh.end.odo!=null&&sh.start.odo!=null?sh.end.odo-sh.start.odo:null;
 const normOf=m=>+(m&&m.norm_approved)||+S.cfg.default_norm||9;
-function aiOdo(mk){const f=[];const ch=mk&&mk.photo&&S.checks[mk.photo];if(!ch)return f;const r=ch.result||{};
+function aiOdo(mk){const f=[];const ch=mk&&mk.photo&&S.checks[mk.photo];if(!ch)return f;const r=ch.result||{};if(r.error){f.push({lv:'warn',t:'ИИ не смог проверить фото: файл не открывается'});return f}
  if(r.isDashboard===false)f.push({lv:'bad',t:'ИИ: на фото нет приборной панели'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
  if(r.odo!=null&&mk.odo!=null&&Math.abs(+r.odo-mk.odo)>2)f.push({lv:'bad',t:'ИИ: на фото '+(+r.odo).toLocaleString('ru-RU')+' км, введено '+mk.odo.toLocaleString('ru-RU')});return f}
-function aiRcpt(rec){const f=[];const ch=S.checks[rec.photo];if(!ch)return f;const r=ch.result||{};
+function aiRcpt(rec){const f=[];const ch=S.checks[rec.photo];if(!ch)return f;const r=ch.result||{};if(r.error){f.push({lv:'warn',t:'ИИ не смог проверить фото: файл не открывается'});return f}
  if(r.isReceipt===false)f.push({lv:'bad',t:'ИИ: на фото не чек'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
  if(r.liters!=null&&Math.abs(+r.liters-rec.liters)>0.5)f.push({lv:'bad',t:'ИИ: в чеке '+n1(r.liters)+', введено '+n1(rec.liters)});
  if(r.sum!=null&&rec.sum&&Math.abs(+r.sum-rec.sum)>Math.max(100,rec.sum*0.02))f.push({lv:'warn',t:'ИИ: в чеке сумма '+money(+r.sum)+', введено '+money(rec.sum)});
@@ -165,7 +165,7 @@ const BST={bought:['Не сдано','c-warn'],partial:['Остаток не с�
 const lineTxt=l=>h(l.name)+' — '+n1(l.qty)+(l.unit?' '+h(l.unit):'');
 const leftLines=b=>(b.left_lines||[]).filter(l=>+l.qty>0);
 const acceptLines=b=>b.dest!=='warehouse'?leftLines(b):(b.lines||[]);
-function aiBuy(b){const f=[];const ch=S.checks[b.photo];if(!ch)return f;const r=ch.result||{};
+function aiBuy(b){const f=[];const ch=S.checks[b.photo];if(!ch)return f;const r=ch.result||{};if(r.error){f.push({lv:'warn',t:'ИИ не смог проверить фото: файл не открывается'});return f}
  if(r.isReceipt===false)f.push({lv:'bad',t:'ИИ: на фото не чек и не накладная'});if(r.isScreen)f.push({lv:'bad',t:'ИИ: похоже на фото экрана или снимка'});
  if(r.handwritten)f.push({lv:'warn',t:'ИИ: документ написан от руки'});
  if(r.sum!=null&&b.amount&&Math.abs(+r.sum-b.amount)>Math.max(200,b.amount*0.03))f.push({lv:'bad',t:'ИИ: в чеке '+money(+r.sum)+', введено '+money(b.amount)});

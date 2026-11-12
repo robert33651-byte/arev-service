@@ -182,7 +182,7 @@ begin
 
   -- смена исполнителей
   if new.staff_id is distinct from old.staff_id or new.staff2_id is distinct from old.staff2_id then
-    names := public._actor_name(new.staff_id) || coalesce(' + ' || public._actor_name(new.staff2_id), '');
+    names := public._actor_name(new.staff_id) || case when new.staff2_id is not null then ' + ' || public._actor_name(new.staff2_id) else '' end;
     perform public._log(new.id, who, v_role, 'event', 'assigned', names, null);
     if new.staff_id is distinct from old.staff_id then perform public._notify(new.staff_id, false, 'Вам назначена задача', new.title, new.id); end if;
     if new.staff2_id is not null and new.staff2_id is distinct from old.staff2_id then

@@ -25,8 +25,16 @@ export async function flushTrack() {
   const batch = q.slice(0, 200);
   const { data, error } = await supabase.rpc('add_track', { p_points: batch, p_device: deviceId() });
   if (error || (data && data.error)) return 0;
-  await writeQ(q.slice(batch.length));
+  // пока шла отправка, фоновая задача могла дописать новые точки — читаем очередь заново и убираем только отправленные
+  const sent = new Set(batch.map((p) => p.t));
+  const now = await readQ();
+  await writeQ(now.filter((p) => !sent.has(p.t)));
   return batch.length;
+}
+
+// Отправить всю очередь (перед концом смены, чтобы км по GPS посчитались полностью).
+export async function flushAllTrack() {
+  for (let i = 0; i < 15; i++) { let n = 0; try { n = await flushTrack(); } catch (e) {} if (!n) break; }
 }
 
 // Задача должна быть объявлена при запуске приложения (см. index.js)
@@ -74,8 +82,8 @@ export async function startTrack() {
     const on = await Location.hasStartedLocationUpdatesAsync(TRACK_TASK).catch(() => false);
     if (on) return true;
     await Location.startLocationUpdatesAsync(TRACK_TASK, {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: 120000,
+      accuracy: Location.Accuracy.High,   // Balanced даёт точки по вышкам и Wi-Fi с ошибкой в сотни метров — км занижаются
+      timeInterval: 60000,
       distanceInterval: 0,
       pausesUpdatesAutomatically: false,
       foregroundService: {
@@ -96,5 +104,5 @@ export async function stopTrack() {
     const on = await Location.hasStartedLocationUpdatesAsync(TRACK_TASK);
     if (on) await Location.stopLocationUpdatesAsync(TRACK_TASK);
   } catch (e) {}
-  try { await flushTrack(); } catch (e) {}
+  await flushAllTrack();
 }

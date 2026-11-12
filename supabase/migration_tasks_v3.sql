@@ -58,6 +58,10 @@ begin
   s := public._staff();
   t := public._task_member(p_id);
   if t.archived_at is not null or t.status not in ('new','report') then return jsonb_build_object('error','TASK_CLOSED'); end if;
+  -- место, которое поставил руководитель, сотрудник изменить не может (иначе отметку «на месте» можно сделать где угодно)
+  if (t.place_id is not null or t.lat is not null) and not coalesce(t.self_added, false) then
+    return jsonb_build_object('error','PLACE_FIXED');
+  end if;
   if p_place is not null then
     select * into pl from public.places where id = p_place;
     if pl.id is null then return jsonb_build_object('error','NO_PLACE'); end if;

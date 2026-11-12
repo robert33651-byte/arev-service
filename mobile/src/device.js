@@ -45,7 +45,12 @@ export async function ensureLocationPermission() {
 // Текущая точка. mocked=true значит, что включена подмена местоположения.
 export async function getFix() {
   await ensureLocationPermission();
-  const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, mayShowUserSettingsDialog: true });
+  let timer;
+  const p = await Promise.race([
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, mayShowUserSettingsDialog: true }),
+    new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(tr('Не удалось определить местоположение. Выйдите на открытое место и попробуйте ещё раз.'))), 25000); }),
+  ]).finally(() => clearTimeout(timer));
+  if (p.mocked) { try { require('./supabase').supabase.rpc('report_mock').then(() => {}, () => {}); } catch (e) {} }
   return {
     lat: p.coords.latitude,
     lng: p.coords.longitude,

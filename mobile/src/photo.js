@@ -1,6 +1,6 @@
 // Съёмка только камерой (галерея недоступна) и загрузка в защищённое хранилище.
 import React, { useRef, useState } from 'react';
-import { Modal, View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { Alert, Modal, View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { decode } from 'base64-arraybuffer';
@@ -34,6 +34,8 @@ export function CameraSheet({ visible, title, onClose, onShot }) {
     try {
       const p = await ref.current.takePictureAsync({ quality: 0.8, skipProcessing: false });
       await onShot(p.uri);
+    } catch (e) {
+      Alert.alert(tr('Не получилось'), String((e && e.message) || e));
     } finally {
       setBusy(false);
     }

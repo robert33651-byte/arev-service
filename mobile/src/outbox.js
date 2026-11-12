@@ -38,7 +38,8 @@ export async function flushBox(uid) {
     for (const it of q.slice()) {
       try {
         const b64 = await FileSystem.readAsStringAsync(it.uri, { encoding: FileSystem.EncodingType.Base64 });
-        const path = uid + '/work-' + it.kind + '-' + it.id + '.jpg';
+        // после неудачной попытки грузим под новым именем: старый файл на сервере мог «устареть» для проверки
+        const path = uid + '/work-' + it.kind + '-' + it.id + (it.n ? '-' + it.n : '') + '.jpg';
         const up = await supabase.storage.from('photos').upload(path, decode(b64), { contentType: 'image/jpeg', upsert: false });
         if (up.error && !/exist|duplicate/i.test(String(up.error && up.error['message'] || ''))) throw up.error;
         await rpc('add_work_photo', {
@@ -50,6 +51,9 @@ export async function flushBox(uid) {
         if (isNetErr(e)) break; // связи нет — попробуем позже
         failed++;
         try { await AsyncStorage.setItem(K_ERR, String((e && e.message) || e)); } catch (x) {}
+        // фото не удаляем: оставляем в очереди и пробуем ещё (до 8 раз), только потом сдаёмся
+        const n = (it.n || 0) + 1;
+        if (n < 8) { q = q.map((x) => (x.id === it.id ? { ...x, n, err: String((e && e.message) || e).slice(0, 200) } : x)); await write(q); continue; }
       }
       q = q.filter((x) => x.id !== it.id);
       await write(q);

@@ -146,13 +146,19 @@ Deno.serve(async (req) => {
       if (!ANTHROPIC) return json({ error: 'Не задан секрет ANTHROPIC_API_KEY' }, 400);
       const since = new Date(Date.now() - 31 * 864e5).toISOString();
       const limit = Math.min(Number(body.limit) || 15, 30);
-      const [sh, fu, done, bu] = await Promise.all([
-        admin.from('shifts').select('start_photo,end_photo').gte('start_at', since),
-        admin.from('fuel').select('photo').gte('at', since),
-        admin.from('ai_checks').select('photo'),
-        admin.from('purchases').select('photo').eq('source', 'shop').gte('created_at', since),
+      const [sh, fu, bu] = await Promise.all([
+        admin.from('shifts').select('start_photo,end_photo').gte('start_at', since).limit(5000),
+        admin.from('fuel').select('photo').gte('at', since).limit(5000),
+        admin.from('purchases').select('photo').eq('source', 'shop').gte('created_at', since).limit(5000),
       ]);
-      const checked = new Set((done.data || []).map((x: { photo: string }) => x.photo));
+      // уже проверенные фото читаем постранично: за один запрос база отдаёт не больше 1000 строк,
+      // иначе после тысячи проверок старые фото проверялись бы (и оплачивались) заново
+      const checked = new Set<string>();
+      for (let from = 0; from < 200000; from += 1000) {
+        const { data: part } = await admin.from('ai_checks').select('photo').order('photo').range(from, from + 999);
+        (part || []).forEach((x: { photo: string }) => checked.add(x.photo));
+        if (!part || part.length < 1000) break;
+      }
       const todo: { photo: string; kind: 'odo' | 'receipt' | 'purchase' }[] = [];
       (sh.data || []).forEach((s: { start_photo: string; end_photo: string }) => {
         if (s.start_photo && !checked.has(s.start_photo)) todo.push({ photo: s.start_photo, kind: 'odo' });
@@ -169,7 +175,14 @@ Deno.serve(async (req) => {
           const result = await askClaude(it.kind === 'odo' ? PROMPT_ODO : it.kind === 'purchase' ? PROMPT_BUY : PROMPT_RCPT, b64(await file.arrayBuffer()));
           await admin.from('ai_checks').upsert({ photo: it.photo, kind: it.kind, result });
           ok++;
-        } catch (e) { errors.push(String((e as Error).message || e)); }
+        } catch (e) {
+          const msg = String((e as Error).message || e);
+          errors.push(msg);
+          // фото нет или ИИ не принимает этот файл — запоминаем, чтобы оно не блокировало очередь и не оплачивалось повторно
+          if (/фото не найдено|Claude API 400|Claude API 413/.test(msg)) {
+            await admin.from('ai_checks').upsert({ photo: it.photo, kind: it.kind, result: { error: msg.slice(0, 200) } });
+          }
+        }
       }
       return json({ ok: true, checked: ok, left: Math.max(0, todo.length - batch.length), errors: errors.slice(0, 3) });
     }

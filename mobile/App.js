@@ -6,7 +6,7 @@ import * as Application from 'expo-application';
 import { StatusBar } from 'expo-status-bar';
 import { supabase, rpc, errText, phoneEmail, normPhone } from './src/supabase';
 import { deviceId, getFix, officeWifiOk, distM, permStatus, askPermissions } from './src/device';
-import { startTrack, stopTrack, flushTrack } from './src/track';
+import { startTrack, stopTrack, flushTrack, flushAllTrack } from './src/track';
 import { CameraSheet, uploadPhoto, preparePhoto, uploadPrepared } from './src/photo';
 import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, Action, Row, Check, TabBar } from './src/ui';
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
@@ -152,8 +152,17 @@ function Main({ session }) {
         supabase.rpc('my_tasks'),
         supabase.from('talks').select('id,at,object,duration_s,status').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
       ]);
+      // нет связи: запрос не бросает ошибку, а возвращает её. Данные на экране не трогаем,
+      // иначе работник без интернета попадал на анкету регистрации и терял открытый экран.
+      if (staffR.error) {
+        let snap = null;
+        try { snap = JSON.parse((await AsyncStorage.getItem('arev.snap.' + uid)) || 'null'); } catch (e) {}
+        setSt((p) => (p.staff ? { ...p, loading: false, err: errText(staffR.error) } : { ...p, ...(snap || {}), loading: false, offline: !snap, err: errText(staffR.error) }));
+        return;
+      }
       const shifts = shiftR.data || [];
       const next = {
+        offline: false,
         loading: false,
         staff: staffR.data || null,
         cfg: cfgR.data || {},
@@ -173,6 +182,9 @@ function Main({ session }) {
         err: staffR.error ? errText(staffR.error) : null,
       };
       setSt(next);
+      if (next.staff) AsyncStorage.setItem('arev.snap.' + uid, JSON.stringify({ staff: next.staff, cfg: next.cfg, shifts: next.shifts.slice(0, 5), open: next.open, places: next.places, equip: next.equip, buys: next.buys })).catch(() => {});
+      // смена закрыта (в том числе если ответ сервера о закрытии потерялся) — запись маршрута выключаем
+      if (!next.open) stopTrack().catch(() => {});
       if (next.staff && next.staff.status === 'approved') {
         // офис, склад и поставщики — там напоминание «долго стоите без фото» не нужно
         const c = next.cfg;
@@ -241,6 +253,7 @@ function Main({ session }) {
   const ctx = { uid, setOpenTask, phone: String(session.user.email || '').split('@')[0], st, load, nav, goTab, refreshing, refresh, boxN, setBoxN, syncBox };
 
   if (st.loading) return <Splash />;
+  if (!st.staff && st.offline) return <Offline ctx={ctx} />;
   if (!st.staff) return <Register ctx={ctx} />;
   if (st.staff.status !== 'approved') return <Waiting ctx={ctx} />;
 
@@ -382,7 +395,7 @@ function Register({ ctx }) {
           <Muted style={{ flex: 1 }}>{tr('Согласен, что во время смены записывается моё местоположение, а фото одометра, чеков и работ сохраняются с координатами и временем и сверяются с выпиской по топливной карте.')}</Muted>
         </Pressable>
         <Btn title={tr('Отправить')} onPress={send} busy={busy} big />
-        <Btn kind="ghost" title={tr('Выйти')} onPress={() => supabase.auth.signOut()} />
+        <Btn kind="ghost" title={tr('Выйти')} onPress={() => { stopTrack().catch(() => {}); supabase.auth.signOut(); }} />
       </Page>
     </>
   );
@@ -405,6 +418,20 @@ function FuelSeg({ value, onChange }) {
   );
 }
 
+// Первый запуск без интернета: данных ещё нет, анкету показывать нельзя
+function Offline({ ctx }) {
+  return (
+    <>
+      <Header title="Arev Service" />
+      <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
+        <H1>{tr('Нет связи')}</H1>
+        <Flag kind="warn">{tr('Не удалось загрузить данные. Проверьте интернет и попробуйте ещё раз.')}</Flag>
+        <Btn title={tr('Попробовать ещё раз')} onPress={ctx.refresh} />
+      </Page>
+    </>
+  );
+}
+
 function Waiting({ ctx }) {
   const s = ctx.st.staff;
   const txt = s.status === 'pending' ? tr('Руководитель проверит анкету. После подтверждения здесь появится кнопка «Начать смену».')
@@ -417,7 +444,7 @@ function Waiting({ ctx }) {
         <Flag kind={s.status === 'pending' ? 'note' : 'warn'}>{txt}</Flag>
         {s.status === 'pending' ? <PermCard always /> : null}
         <Btn kind="ghost" title={tr('Проверить ещё раз')} onPress={ctx.refresh} />
-        <Btn kind="ghost" title={tr('Выйти')} onPress={() => supabase.auth.signOut()} />
+        <Btn kind="ghost" title={tr('Выйти')} onPress={() => { stopTrack().catch(() => {}); supabase.auth.signOut(); }} />
       </Page>
     </>
   );
@@ -685,7 +712,7 @@ function ShiftScreen({ ctx }) {
     try {
       const wifi = await officeWifiOk(st.cfg.office_wifi);
       const args = { p_odo: v, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_wifi_ok: wifi, p_device: deviceId() };
-      if (ending) { await rpc('end_shift', args); await stopTrack(); }
+      if (ending) { await flushAllTrack(); await rpc('end_shift', args); await stopTrack(); }
       else {
         await rpc('start_shift', args);
         const ok = await startTrack();
@@ -761,7 +788,7 @@ function FuelScreen({ ctx }) {
       </Card>
       <Card>
         <T style={{ fontWeight: '700' }}>{tr('2. Как в чеке')}</T>
-        <Field label={unit === 'м³' ? tr('Кубов') : tr('Литров')} value={liters} onChangeText={setLiters} keyboardType="decimal-pad" />
+        <Field label={st.staff.fuel_type === 'gas' ? tr('Кубов') : tr('Литров')} value={liters} onChangeText={setLiters} keyboardType="decimal-pad" />
         <Field label={tr('Сумма, ֏')} value={sum} onChangeText={setSum} keyboardType="number-pad" />
       </Card>
       <Btn title={tr('Сохранить заправку')} onPress={submit} busy={busy} big />
