@@ -142,6 +142,38 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    if (body.action === 'cleanup') {
+      // удаляем файлы старше срока из настроек (keep_photo_months; 0 — не удалять). Записи в базе остаются, пропадает только сам файл.
+      const { data: cfg } = await admin.from('config').select('keep_photo_months,cleaned_until').eq('id', 1).maybeSingle();
+      const months = Number(cfg?.keep_photo_months) || 0;
+      if (months < 3) return json({ ok: true, removed: 0, off: true });
+      const cut = new Date(Date.now() - months * 30.5 * 864e5).toISOString();
+      const from = cfg?.cleaned_until || '2000-01-01T00:00:00Z';   // до этой даты уже очищено
+      if (from >= cut) return json({ ok: true, removed: 0 });
+      const paths = new Set<string>();
+      const take = async (table: string, cols: string, timeCol: string) => {
+        for (let p = 0; p < 50; p++) {
+          const { data, error } = await admin.from(table).select(cols).gte(timeCol, from).lt(timeCol, cut).order(timeCol).range(p * 1000, p * 1000 + 999);
+          if (error) throw error;
+          (data || []).forEach((r: Record<string, string | null>) => cols.split(',').forEach((c) => { if (r[c]) paths.add(r[c] as string); }));
+          if (!data || data.length < 1000) break;
+        }
+      };
+      await take('shifts', 'start_photo,end_photo', 'start_at'); await take('fuel', 'photo', 'at');
+      await take('purchases', 'photo,delivered_photo,left_photo', 'created_at'); await take('work_photos', 'path', 'at');
+      await take('ticket_photos', 'path', 'at'); await take('talks', 'path', 'at');
+      try { await take('task_log', 'path', 'at'); } catch (_) { /* задачи могут быть не включены */ }
+      const all = [...paths]; let removed = 0; const t0 = Date.now(); let done = true;
+      for (let i = 0; i < all.length; i += 100) {
+        if (Date.now() - t0 > 90000) { done = false; break; }   // не успели за один вызов — продолжим в следующий раз
+        const { data } = await admin.storage.from('photos').remove(all.slice(i, i + 100));
+        removed += (data || []).length;
+      }
+      if (done) await admin.from('config').update({ cleaned_until: cut }).eq('id', 1);
+      if (removed) await logIt('cleanup', 'storage', null, 'файлы старше ' + months + ' мес.', { removed: { from: null, to: removed } });
+      return json({ ok: true, removed, more: !done });
+    }
+
     if (body.action === 'ai') {
       if (!ANTHROPIC) return json({ error: 'Не задан секрет ANTHROPIC_API_KEY' }, 400);
       const since = new Date(Date.now() - 31 * 864e5).toISOString();

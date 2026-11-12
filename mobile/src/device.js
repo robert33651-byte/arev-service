@@ -56,6 +56,7 @@ export async function getFix() {
     lng: p.coords.longitude,
     acc: p.coords.accuracy != null ? Math.round(p.coords.accuracy) : null,
     mocked: !!p.mocked,
+    t: p.timestamp || null,   // время точки от GPS: не зависит от того, что выставлено на часах телефона
   };
 }
 

@@ -3,7 +3,40 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { decode } from 'base64-arraybuffer';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+
+// Неотправленная запись хранится в памяти телефона, пока не уйдёт на сервер:
+// выход с экрана, закрытие приложения или потеря связи её не уничтожают.
+const K_PEND = 'arev.talkPending';
+export async function saveTalkPending(uri, meta) {
+  const dir = FileSystem.documentDirectory + 'talks/';
+  try { await FileSystem.makeDirectoryAsync(dir, { intermediates: true }); } catch (e) {}
+  let dest = uri;
+  if (uri.indexOf(dir) !== 0) {
+    dest = dir + 'talk-' + Date.now() + '.m4a';
+    try { await FileSystem.copyAsync({ from: uri, to: dest }); FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {}); } catch (e) { dest = uri; }
+  }
+  const item = { ...meta, uri: dest };
+  try { await AsyncStorage.setItem(K_PEND, JSON.stringify(item)); } catch (e) {}
+  return item;
+}
+export async function loadTalkPending() {
+  try {
+    const it = JSON.parse((await AsyncStorage.getItem(K_PEND)) || 'null');
+    if (!it || !it.uri) return null;
+    const info = await FileSystem.getInfoAsync(it.uri);
+    if (!info.exists) { await AsyncStorage.removeItem(K_PEND); return null; }
+    return it;
+  } catch (e) { return null; }
+}
+export async function clearTalkPending() {
+  try {
+    const it = JSON.parse((await AsyncStorage.getItem(K_PEND)) || 'null');
+    await AsyncStorage.removeItem(K_PEND);
+    if (it && it.uri) await FileSystem.deleteAsync(it.uri, { idempotent: true });
+  } catch (e) {}
+}
 
 export const TALK_MAX_MS = 60 * 60 * 1000;
 

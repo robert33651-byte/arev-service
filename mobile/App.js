@@ -13,7 +13,7 @@ import { setupNotify, planReminders, notifyGranted } from './src/notify';
 import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
 import TasksScreen from './src/TasksScreen';
 import { tr, loc, getLang, setLang, loadLang, onLang } from './src/i18n';
-import { startTalk, stopTalk, uploadTalk, requestTalkAi, talkRecording, TALK_MAX_MS } from './src/talk';
+import { startTalk, stopTalk, uploadTalk, requestTalkAi, talkRecording, TALK_MAX_MS, saveTalkPending, loadTalkPending, clearTalkPending } from './src/talk';
 import { registerPush, onTaskNotificationTap, lastTaskTap } from './src/tasks';
 
 const CATS = { inverter: 'Не работает инвертор', output: 'Упала выработка', panel: 'Повреждена панель', wiring: 'Проводка и разъёмы', battery: 'Аккумулятор', cleaning: 'Чистка панелей', checkup: 'Плановый техосмотр', expand: 'Расширение или чужая станция', other: 'Другое' };
@@ -353,6 +353,10 @@ function PermCard({ always }) {
       {!allOk ? <Muted>{tr('Без них приложение не сможет отмечать приход, уход и выезды.')}</Muted> : null}
       {!allOk ? <Btn title={tr('Выдать разрешения')} onPress={ask} busy={busy} /> : null}
       {!allOk && p.loc ? <Btn kind="ghost" title={tr('Открыть настройки приложения')} onPress={() => Linking.openSettings()} /> : null}
+      <View style={{ height: 1, backgroundColor: C.line, marginVertical: 4 }} />
+      <T style={{ fontWeight: '700' }}>{tr('Экономия батареи')}</T>
+      <Muted>{tr('Телефон может сам выключать запись маршрута, чтобы беречь батарею. Тогда руководитель видит, что маршрут пропал. Нажмите кнопку, найдите Arev Service и выберите «Не экономить» (без ограничений). На Xiaomi, Huawei, Samsung также включите «Автозапуск».')}</Muted>
+      <Btn kind="ghost" title={tr('Открыть настройки батареи')} onPress={() => { const f = () => Linking.openSettings(); try { Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(f); } catch (e) { f(); } }} />
     </Card>
   );
 }
@@ -1182,9 +1186,11 @@ function WorkScreen({ ctx, ticket }) {
   };
   const onShot = async (uri) => {
     let img = null, fix = null;
-    const takenAt = Date.now();
+    let takenAt = Date.now();
     try {
       fix = await getFix();
+      // время снимка берём от точки GPS, а не с часов телефона: часы можно перевести вручную
+      if (fix.t && fix.t > 1704067200000) takenAt = Math.round(fix.t);
       if (fix.mocked) { setCam(false); return Alert.alert(tr('Подмена местоположения'), tr('Отключите подмену местоположения и сфотографируйте снова.')); }
       img = await preparePhoto(uri);
       AsyncStorage.setItem('arev.lastWork', String(takenAt)).catch(() => {});
@@ -1255,7 +1261,14 @@ function TalkScreen({ ctx }) {
   const [ms, setMs] = useState(0);
   const [file, setFile] = useState(null); // {uri, ms}
   const [busy, setBusy] = useState(false);
-  useEffect(() => () => { if (talkRecording()) stopTalk().catch(() => {}); }, []);
+  const meta = useRef({ object, consent });
+  meta.current = { object, consent };
+  // неотправленная запись с прошлого раза (вышли с экрана, пропала связь, закрыли приложение)
+  useEffect(() => {
+    loadTalkPending().then((p) => { if (p && !talkRecording()) { setFile({ uri: p.uri, ms: p.ms || 0 }); if (p.object) setObject(p.object); setConsent(!!p.consent); } });
+    // ушли с экрана во время записи — останавливаем и сохраняем, а не выбрасываем
+    return () => { if (talkRecording()) stopTalk().then((r) => { if (r) return saveTalkPending(r.uri, { ms: r.ms, ...meta.current }); }).catch(() => {}); };
+  }, []);
   useEffect(() => { if (rec && ms >= TALK_MAX_MS) stop(); }, [ms, rec]);
   const start = async () => {
     if (!object.trim()) return Alert.alert(tr('Объект'), tr('Укажите объект: имя клиента или адрес'));
@@ -1266,7 +1279,7 @@ function TalkScreen({ ctx }) {
   };
   const stop = async () => {
     setRec(false);
-    try { const r = await stopTalk(); if (r) setFile({ uri: r.uri, ms: r.ms || ms }); } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); }
+    try { const r = await stopTalk(); if (r) { const it = await saveTalkPending(r.uri, { ms: r.ms || ms, object, consent }); setFile({ uri: it.uri, ms: r.ms || ms }); } } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); }
   };
   const send = async () => {
     if (!file) return;
@@ -1277,11 +1290,12 @@ function TalkScreen({ ctx }) {
       const path = await uploadTalk(file.uri, uid);
       const r = await rpc('add_talk', { p_path: path, p_object: object, p_duration: Math.round(file.ms / 1000), p_consent: consent, p_lat: fix.lat, p_lng: fix.lng, p_acc: fix.acc, p_mocked: fix.mocked, p_device: deviceId() });
       if (r && r.id) requestTalkAi(r.id);
+      await clearTalkPending();
       setFile(null); setMs(0); setConsent(false);
       await load();
       Alert.alert(tr('Отправлено'), tr('Запись отправлена. Отчёт по разговору получит руководитель.'));
     } catch (e) {
-      Alert.alert(tr('Не получилось'), isNetErr(e) ? tr('Нет интернета. Запись сохранена на этом экране — нажмите «Отправить», когда появится связь.') : errText(e));
+      Alert.alert(tr('Не получилось'), isNetErr(e) ? tr('Нет интернета. Запись сохранена в телефоне — откройте «Разговор» и нажмите «Отправить», когда появится связь.') : errText(e));
     } finally { setBusy(false); }
   };
   return (
@@ -1308,11 +1322,11 @@ function TalkScreen({ ctx }) {
           <Icon name={rec ? 'stop' : 'mic'} size={46} color="#fff" />
         </Pressable>
         <Text style={{ fontSize: 28, fontWeight: '800', color: rec ? C.bad : C.ink }}>{mmss(rec ? ms : file ? file.ms : 0)}</Text>
-        <Muted>{rec ? tr('Идёт запись. Держите телефон рядом, экран можно не трогать.') : file ? tr('Запись готова') : tr('Нажмите, чтобы начать запись')}</Muted>
+        <Muted>{rec ? tr('Идёт запись. Держите телефон рядом и не блокируйте экран: сам он не погаснет.') : file ? tr('Запись готова') : tr('Нажмите, чтобы начать запись')}</Muted>
       </View>
       {file && !rec ? (
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <Btn kind="ghost" title={tr('Записать заново')} onPress={() => Alert.alert(tr('Удалить запись?'), tr('Текущая запись не будет отправлена.'), [{ text: tr('Нет') }, { text: tr('Удалить'), onPress: () => { setFile(null); setMs(0); } }])} style={{ flex: 1 }} />
+          <Btn kind="ghost" title={tr('Записать заново')} onPress={() => Alert.alert(tr('Удалить запись?'), tr('Текущая запись не будет отправлена.'), [{ text: tr('Нет') }, { text: tr('Удалить'), onPress: () => { clearTalkPending(); setFile(null); setMs(0); } }])} style={{ flex: 1 }} />
           <Btn title={tr('Отправить')} busy={busy} onPress={send} style={{ flex: 1 }} />
         </View>
       ) : null}

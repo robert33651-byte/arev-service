@@ -278,6 +278,9 @@ alter table public.config add column if not exists warehouse_lat double precisio
 alter table public.config add column if not exists warehouse_lng double precision;
 alter table public.config add column if not exists purchase_max_hours int not null default 24;
 alter table public.config add column if not exists long_stop_min int not null default 30;
+alter table public.config add column if not exists keep_track_days int not null default 180;   -- сколько дней хранить точки маршрута
+alter table public.config add column if not exists cleaned_until timestamptz;                    -- до какой даты файлы уже очищены
+alter table public.config add column if not exists keep_photo_months int not null default 0;   -- через сколько месяцев удалять файлы фото и записей (0 — не удалять)
 alter table public.config add column if not exists stop_min int not null default 20;
 alter table public.shifts add column if not exists gps_km numeric;
 alter table public.purchases add column if not exists site text;
@@ -545,7 +548,7 @@ end $$;
 -- точки фонового трека (пачкой)
 create function public.add_track(p_points jsonb, p_device text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; n int := 0; p jsonb; mocked int := 0; tp timestamptz;
+declare s public.staff; n int := 0; p jsonb; mocked int := 0; tp timestamptz; late int := 0;
 begin
   s := public._staff();
   if s.device_id is not null and (p_device is null or s.device_id <> p_device) then return jsonb_build_object('error','OTHER_DEVICE'); end if;
@@ -554,6 +557,7 @@ begin
     -- время точки с телефона: не из будущего и не старше 3 суток (офлайн-очередь), иначе точка не принимается
     tp := to_timestamp((p->>'t')::double precision / 1000);
     if tp is null or tp > now() + interval '5 minutes' or tp < now() - interval '3 days' then continue; end if;
+    if tp < now() - interval '6 hours' then late := late + 1; end if;
     insert into public.track_points(staff_id, device_at, lat, lng, acc, speed, mocked)
     values (s.id, tp, (p->>'lat')::double precision, (p->>'lng')::double precision,
             (p->>'acc')::real, (p->>'spd')::real, coalesce((p->>'mock')::boolean, false));
@@ -563,6 +567,10 @@ begin
   if mocked > 0 then
     insert into public.alerts(staff_id, kind, message) values (s.id, 'mock', 'В треке смены ' || mocked || ' точек с подменой местоположения');
   end if;
+  -- точки пришли с большим опозданием: телефон был без связи или маршрут дописан задним числом — руководитель должен видеть
+  if late > 0 and not exists(select 1 from public.alerts where staff_id = s.id and kind = 'late_track' and at > now() - interval '6 hours') then
+    insert into public.alerts(staff_id, kind, message) values (s.id, 'late_track', 'Точки маршрута пришли с опозданием больше 6 часов (' || late || ' шт.)');
+  end if;
   -- точки могли дойти уже после конца смены (не было связи) — пересчитываем км по GPS у недавних закрытых смен
   if n > 0 then
     update public.shifts sh set gps_km = public._gps_km(s.id, sh.start_at, sh.end_at)
@@ -570,6 +578,24 @@ begin
   end if;
   return jsonb_build_object('ok', true, 'n', n);
 end $$;
+
+-- очистка старых данных (вызывает админка раз в день): точки маршрута и служебная очередь уведомлений
+create or replace function public.purge_old() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare d int; n bigint := 0; m bigint := 0;
+begin
+  if not public.is_admin() then return jsonb_build_object('error','NOT_ADMIN'); end if;
+  select greatest(coalesce(keep_track_days, 180), 30) into d from public.config where id = 1;
+  delete from public.track_points where at < now() - make_interval(days => coalesce(d, 180));
+  get diagnostics n = row_count;
+  if to_regclass('public.notify_queue') is not null then
+    execute 'delete from public.notify_queue where sent_at is not null and sent_at < now() - interval ''30 days''';
+    get diagnostics m = row_count;
+  end if;
+  return jsonb_build_object('ok', true, 'track', n, 'notify', m);
+end $$;
+revoke all on function public.purge_old from public, anon;
+grant execute on function public.purge_old to authenticated;
 
 -- приложение увидело подмену местоположения и не дало сделать отметку — руководитель должен об этом узнать
 create or replace function public.report_mock() returns jsonb

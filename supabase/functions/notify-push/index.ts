@@ -53,9 +53,13 @@ Deno.serve(async (req) => {
   if (!SECRET || req.headers.get('x-notify-secret') !== SECRET) return new Response('forbidden', { status: 403 });
   const db = createClient(URL_, SERVICE);
 
-  const { data: items, error } = await db.from('notify_queue').select('id,to_staff,to_admins,title,body,task_id')
-    .is('sent_at', null).order('id').limit(100);
+  const { data: found, error } = await db.from('notify_queue').select('id').is('sent_at', null).order('id').limit(100);
   if (error) return new Response(error.message, { status: 500 });
+  if (!found || !found.length) return Response.json({ sent: 0 });
+  // забираем строки одним действием: параллельный вызов функции их уже не получит, и уведомление не уйдёт дважды
+  const { data: items, error: e2 } = await db.from('notify_queue').update({ sent_at: new Date().toISOString() })
+    .in('id', found.map((x: { id: number }) => x.id)).is('sent_at', null).select('id,to_staff,to_admins,title,body,task_id');
+  if (e2) return new Response(e2.message, { status: 500 });
   if (!items || !items.length) return Response.json({ sent: 0 });
 
   const staffIds = [...new Set((items as Item[]).map((i) => i.to_staff).filter(Boolean))] as string[];
