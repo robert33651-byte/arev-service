@@ -304,7 +304,7 @@ const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не �
 
 const ANAV=[['a-dash','Сводка','chart'],['a-live','Где все сейчас','map'],['a-report','Отчёт','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-talks','Разговоры','mic'],['a-buys','Закупки','box'],['a-places','Объекты','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Смены','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-log','Журнал','book'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-place':'a-places','a-order':'a-orders','a-new':'a-orders'}[n]||n;
- const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&(t.status==='report'||t.disc_status==='open')).length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
+ const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&t.status!=='cancelled'&&t.status!=='done'&&(t.status==='report'||t.disc_status==='open')).length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  const MN=[['a-dash','Сводка','chart'],['a-live','Карта','map'],['a-day','Маршрут','route'],['a-buys','Закупки','box']];const inMN=MN.some(x=>x[0]===cur);
  const title=(ANAV.find(x=>x[0]===cur)||['','Arev Admin'])[1];
  const top='<header class="mtop"><span class="sunmark" aria-hidden="true"></span><b class="grow">'+h(title)+'</b>'+(installable()?'<button class="mtbtn" data-act="install">Установить</button>':'')+'<button class="mtbtn ic" data-act="reload" aria-label="Обновить данные">'+I.refresh+'</button></header>';
@@ -736,7 +736,8 @@ function taskForm(tk,date,dayMode){
   '<div class="field"><label for="t-pl">Место (для выезда с проверкой GPS)</label><select id="t-pl" class="inp" data-tk="place"><option value="">— без места —</option>'+S.places.map(p=>'<option value="'+h(p.id)+'"'+(tk.place===p.id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div></div>'+
   '<button class="btn primary" style="align-self:flex-start" data-act="tadd">Добавить задачу</button></section>'}
 
-function vTasks(){const mode=S.tmode||'open';const today=ymd(Date.now());if(mode!=='day')S.taskDate=today;S.taskDate=S.taskDate||today;
+function vTasks(){if(!S.tmode){const lv=S.tasks.filter(t=>!t.archived_at&&t.status!=='cancelled'&&t.status!=='done'&&(!S.empF||t.staff_id===S.empF||t.staff2_id===S.empF));S.tmode=lv.some(t=>t.status==='report')?'review':lv.some(t=>t.disc_status==='open')?'disc':'open'}
+ const mode=S.tmode||'open';const today=ymd(Date.now());if(mode!=='day')S.taskDate=today;S.taskDate=S.taskDate||today;
  if(mode==='day')return vTasksDay();
  if(!S.form.tk)S.form.tk={emp:S.empF||'',place:''};
  const mine=t=>!S.empF||t.staff_id===S.empF||t.staff2_id===S.empF;
