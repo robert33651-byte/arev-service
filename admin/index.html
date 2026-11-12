@@ -312,6 +312,11 @@ a.chip{text-decoration:none}
  .daymap{height:46vh}
 }
 @media (max-width:760px) and (prefers-color-scheme:dark){:root:not([data-theme="light"]) .mnav button.on{color:var(--sun)}}
+/* длинные армянские слова не вылезают за карточки */
+.mc small,.kpi b,.kpi span,.kpi small,.chip,.nav button,.mnav button,.btn{overflow-wrap:anywhere}
+.avatar{overflow:hidden}
+:root:lang(hy) .mc small{font-size:9.5px;letter-spacing:-.2px}
+:root:lang(hy) .kgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
 </style>
 </head>
 <body>
