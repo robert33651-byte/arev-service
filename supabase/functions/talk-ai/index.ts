@@ -45,14 +45,16 @@ ${text}
   "price": "какие суммы и условия оплаты звучали, или null",
   "next_steps": ["что нужно сделать дальше компании или мастеру"],
   "mood": "positive | neutral | negative — настроение клиента",
-  "flags": [{"level": "bad | warn", "text": "что настораживает"}],
+  "flags": [{"level": "bad | warn", "text": "что настораживает", "text_hy": "то же на армянском языке"}],
+  "hy": {"summary": "...", "problem": "...", "done": "...", "promises": ["..."], "price": "...", "next_steps": ["..."]},
   "transcript_ru": "перевод всей расшифровки на русский, по репликам, если можно понять, кто говорит — помечай «Мастер:» и «Клиент:»"
 }
 
 Что считать флагами:
 - bad: мастер предлагает работу или оплату мимо компании («без фирмы», «наличными мне», «дешевле, если напрямую»), просит не сообщать в офис, договаривается о личной подработке; клиент жалуется на обман, грубость, вымогательство; мастер называет цену и просит оплату себе.
 - warn: обещания, которые обычно согласуют с офисом (скидки, бесплатные работы, сроки), клиент недоволен или раздражён, спор о цене, мастер говорит неуверенно или некомпетентно, разговор не по работе большую часть времени.
-Если ничего подозрительного нет — "flags": [].`;
+Если ничего подозрительного нет — "flags": [].
+Блок "hy" — те же поля summary, problem, done, promises, price, next_steps, но на армянском языке (армянским письмом): руководитель может читать отчёт на армянском.`;
 
 function parseJson(t: string) {
   try { return JSON.parse(t); } catch (_) { /* ниже */ }
@@ -99,8 +101,8 @@ async function processTalk(admin: ReturnType<typeof createClient>, id: string) {
     const when = new Date(t.at).toLocaleString('ru-RU', { timeZone: 'Asia/Yerevan' });
     const ctx = `мастер ${st?.name || '—'}, объект «${t.object || '—'}», ${when}, длительность ${Math.round((t.duration_s || 0) / 60)} мин.`;
     const a = await analyze(ctx, text);
-    const flags = Array.isArray(a.flags) ? a.flags.filter((f: { text?: string }) => f && f.text).map((f: { level?: string; text: string }) => ({ level: f.level === 'bad' ? 'bad' : 'warn', text: String(f.text) })) : [];
-    const summary = { summary: a.summary || null, problem: a.problem || null, done: a.done || null, promises: a.promises || [], price: a.price || null, next_steps: a.next_steps || [] };
+    const flags = Array.isArray(a.flags) ? a.flags.filter((f: { text?: string }) => f && f.text).map((f: { level?: string; text: string; text_hy?: string }) => ({ level: f.level === 'bad' ? 'bad' : 'warn', text: String(f.text), text_hy: f.text_hy ? String(f.text_hy) : null })) : [];
+    const summary = { summary: a.summary || null, problem: a.problem || null, done: a.done || null, promises: a.promises || [], price: a.price || null, next_steps: a.next_steps || [], hy: a.hy && typeof a.hy === 'object' ? a.hy : null };
     await admin.from('talk_ai').upsert({ talk_id: id, transcript: text, transcript_ru: a.transcript_ru || null, summary, flags, mood: ['positive', 'neutral', 'negative'].includes(a.mood) ? a.mood : null, model: STT_MODEL + ' + ' + MODEL, at: new Date().toISOString() });
     await admin.from('talks').update({ status: 'done', error: null, processed_at: new Date().toISOString() }).eq('id', id);
   } catch (e) {
