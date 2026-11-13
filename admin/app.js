@@ -518,7 +518,7 @@ function dayTrips(id,a,b,pts,shs){const out=[];const wins=shs.length?shs.map(sh=
      // короткие остановки по дороге (5 мин и больше, но меньше порога «стоянки»)
      t.short=sh5.filter(z=>z.at>t.from+60000&&z.end<t.to-60000);
      // поездка «туда и обратно»: вернулся туда же, откуда выехал — отмечаем самую дальнюю точку
-     if(!live&&distM(seg[0],seg[seg.length-1])<=400&&m>=2000){let far=seg[0],fd=0;seg.forEach(x=>{const d=distM(seg[0],x);if(d>fd){fd=d;far=x}});if(fd>=700){t.far=far;t.farD=fd}}
+     if(!live&&m>=2000&&(distM(seg[0],seg[seg.length-1])<=400||(fromT===toT&&distM(seg[0],seg[seg.length-1])<=3000))){let far=seg[0],fd=0;seg.forEach(x=>{const d=distM(seg[0],x);if(d>fd){fd=d;far=x}});if(fd>=700){t.far=far;t.farD=fd}}
      out.push(t)}}};
   st.forEach(z=>{push(z.at,z.place.t);from=z.end;fromT=z.place.t});
   push(w[1],w[2]?'в пути':(shs.length?'Конец смены':'Конец дня'),w[2])});
