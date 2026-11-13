@@ -491,11 +491,17 @@ function vBuys(){const f=S.bf;let list=S.buys.filter(b=>!S.empF||b.masterId===S.
 const ymd=ts=>{const d=new Date(ts);return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
 const ymdTs=v=>{const a=String(v).split('-').map(Number);return new Date(a[0],a[1]-1,a[2]).getTime()};
 const WK={before:'до',after:'после',other:'работа'};
-async function loadDayPts(id,date){const key=id+'|'+date;if(S.dayPts[key]||S.dayLoading===key)return;S.dayLoading=key;const a=ymdTs(date),b=a+864e5;
+async function loadDayPts(id,date,force){const key=id+'|'+date;if((S.dayPts[key]&&!force)||S.dayLoading===key)return;S.dayLoading=key;const a=ymdTs(date),b=a+864e5;
  const r=await pages(()=>sb.from('track_points').select('at,device_at,lat,lng,acc,mocked').eq('staff_id',id).gte('at',new Date(a-36e5).toISOString()).lt('at',new Date(b+36e5).toISOString()).order('id'));
  if(r.error)toast('Маршрут не загрузился: '+r.error.message);
- S.dayPts[key]=(r.data||[]).map(p=>({lat:p.lat,lng:p.lng,acc:p.acc,mocked:p.mocked,at:ms(p.device_at||p.at)})).filter(p=>p.at>=a&&p.at<b).sort((x,y)=>x.at-y.at);
- S.dayLoading=null;if(S.view.name==='a-day')render(true)}
+ if(r.error&&force){S.dayLoading=null;return}
+ const old=S.dayPts[key];
+ // одинаковые точки (телефон отправил дважды) убираем
+ S.dayPts[key]=(r.data||[]).map(p=>({lat:p.lat,lng:p.lng,acc:p.acc,mocked:p.mocked,at:ms(p.device_at||p.at)})).filter(p=>p.at>=a&&p.at<b).sort((x,y)=>x.at-y.at).filter((p,i,q)=>!i||p.at!==q[i-1].at||p.lat!==q[i-1].lat||p.lng!==q[i-1].lng);
+ S.dayLoading=null;if(S.view.name!=='a-day')return;
+ if(force){if(old&&old.length===S.dayPts[key].length&&Date.now()-(S.dayDrawn||0)<5*60000)return;   // новых точек нет — карту не трогаем
+  if(S.map){try{S.keepView={c:S.map.getCenter(),z:S.map.getZoom()}}catch(e){}}}
+ S.dayDrawn=Date.now();render(true)}
 function dayEvents(id,a,b,pts,shs){const ev=[];const add=(at,lat,lng,c,lbl,t,extra)=>{if(at&&at>=a&&at<b)ev.push(Object.assign({at,lat,lng,c,lbl,t},extra||{}))};
  const lim=(+S.cfg.long_stop_min||30)*60000;
  shs.forEach(sh=>{add(sh.startAt,sh.start.lat,sh.start.lng,'#123a33','Н','Начало смены, одометр '+sh.start.odo+(sh.start.dist!=null?', '+fDist(sh.start.dist)+' от офиса':''),{photo:sh.start.photo});
@@ -562,11 +568,13 @@ function initDayMap(){const el=document.getElementById('daymap');if(S.map){try{S
    (t.short||[]).forEach(z=>L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',html:'<div class="mk sm" style="background:'+t.c+'">'+Math.round(z.dur/60000)+'м</div>',iconSize:null,iconAnchor:[9,9]}),zIndexOffset:350}).bindTooltip('Остановка '+fDur(z.dur)+' ('+fHM(z.at)+'–'+fHM(z.end)+')').addTo(map));
    const mid=t.pts[Math.floor(n*.35)];L.marker([mid.lat,mid.lng],{icon:L.divIcon({className:'',html:'<div class="mk" style="background:'+t.c+'">'+(t.i+1)+'</div>',iconSize:null,iconAnchor:[11,11]}),zIndexOffset:300}).bindTooltip(fHM(t.from)+'–'+(t.live?'сейчас':fHM(t.to))+' · '+h(t.fromT)+' → '+h(t.toT)+' · '+n1(t.km)+' км').addTo(map)})}
  else if(c.pts.length>1){const line=c.pts.map(p=>[p.lat,p.lng]);L.polyline(line,{color:'#2c67a6',weight:4,opacity:.75}).addTo(map);ll.push(...line)}
- if(c.live&&c.pts.length){const lp=c.pts[c.pts.length-1];L.marker([lp.lat,lp.lng],{icon:L.divIcon({className:'',html:'<div class="nowdot"></div>',iconSize:[18,18],iconAnchor:[9,9]}),zIndexOffset:2000}).bindTooltip('Сейчас здесь · '+fHM(lp.at),{permanent:true,direction:'top',offset:[0,-8]}).addTo(map)}
+ if(c.live&&c.pts.length){const lp=c.pts[c.pts.length-1];L.marker([lp.lat,lp.lng],{icon:L.divIcon({className:'',html:'<div class="nowdot'+(Date.now()-lp.at<6*60000?'':' old')+'"></div>',iconSize:[18,18],iconAnchor:[9,9]}),zIndexOffset:2000}).bindTooltip(Date.now()-lp.at<6*60000?'Сейчас здесь · '+fHM(lp.at):'Последняя точка '+fHM(lp.at)+' · '+fDur(Date.now()-lp.at)+' назад, новых данных с телефона нет',{permanent:true,direction:'top',offset:[0,-8]}).addTo(map)}
  c.bad.forEach(p=>L.circleMarker([p.lat,p.lng],{radius:5,color:'#c23d2c',fillOpacity:.8}).bindTooltip('Подмена GPS, '+fHM(p.at)).addTo(map));
  c.ev.filter(e=>e.lat!=null).forEach(e=>{const mk=L.marker([e.lat,e.lng],{icon:L.divIcon({className:'',html:'<div class="mk" style="background:'+e.c+'">'+h(e.lbl)+'</div>',iconSize:null,iconAnchor:[11,11]}),zIndexOffset:e.bad?1000:e.stop?500:0}).addTo(map);
   mk.bindPopup(()=>'<b>'+fHM(e.at)+'</b> '+h(e.t)+(e.u?hu(e.u):'')+(e.photo&&S.urls[e.photo]?'<img src="'+h(S.urls[e.photo])+'" alt="Фото">':''));ll.push([e.lat,e.lng])});
- if(fit||ll.length)map.fitBounds(fit||ll,{padding:[30,30],maxZoom:16});else{const o=office();map.setView(o?[o.lat,o.lng]:[40.18,44.51],12)}}
+ if(fit||ll.length)map.fitBounds(fit||ll,{padding:[30,30],maxZoom:16});else{const o=office();map.setView(o?[o.lat,o.lng]:[40.18,44.51],12)}
+ // карта обновилась сама (пришли новые точки) — оставляем тот же масштаб и место, куда смотрел руководитель
+ if(S.keepView){try{map.setView(S.keepView.c,S.keepView.z,{animate:false})}catch(e){}S.keepView=null}}
 
 /* ---------- фото работ ---------- */
 function vPhotos(){const from=perFrom(S.per);const list=S.wph.filter(w=>w.at>=from&&(!S.empF||w.masterId===S.empF)).sort((a,b)=>b.at-a.at);
@@ -1068,6 +1076,7 @@ async function saveMyName(nm){nm=String(nm||'').trim();if(nm.length<2)return toa
  const r=await sb.rpc('set_my_admin_name',{p_name:nm});if(r.error)return toast('Имя сохранено в профиле, но не в базе: выполните migration_admin_name.sql в Supabase');toast('Имя сохранено: '+nm);render(true)}
 sb.auth.getSession().then(({data})=>onSession(data.session||null));
 sb.auth.onAuthStateChange((ev,s)=>{if(ev==='SIGNED_IN'||ev==='SIGNED_OUT')onSession(s||null)});
-setInterval(()=>{if(S.isAdmin&&!document.hidden&&!S.busy&&S.view.name!=='a-day'&&S.view.name!=='a-places'&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
+setInterval(()=>{if(S.isAdmin&&!document.hidden&&S.view.name==='a-day'&&S.dayEmp&&S.dayDate===ymd(Date.now()))loadDayPts(S.dayEmp,S.dayDate,true);   // сегодняшний маршрут догружается раз в минуту
+ if(S.isAdmin&&!document.hidden&&!S.busy&&S.view.name!=='a-day'&&S.view.name!=='a-places'&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
 render();
 })();
