@@ -223,7 +223,7 @@ function shiftFlags(sh){const c=S.cfg;const f=[];const s=sh.start,e=sh.end;const
    if(tot)f.push({lv:tot>=60*60000?'bad':'warn',t:'Маршрут не записывался '+fDur(tot)+' ('+fHM(b0)+'–'+fHM(b1)+'): телефон выключил запись или не было GPS'})}
   if(tr.length>=3&&sh.startAt>Date.now()-7*864e5){const q=tr.slice().sort((a,b)=>a.at-b.at);let sp=0;
    for(let i=1;i<q.length;i++){const g=q[i].at-q[i-1].at;if(g>=5*60000&&g<25*60000&&distM(q[i-1],q[i])>=500)sp+=g}
-   if(sp>=30*60000)f.push({lv:'warn',t:'Маршрут писался редко (раз в 5–10 минут) в течение '+fDur(sp)+': телефон экономит батарею. В приложении: Профиль → Разрешения → отключить экономию батареи'})}
+   if(sp>=30*60000)f.push({lv:'warn',t:'Маршрут писался редко (раз в 5–10 минут) в течение '+fDur(sp)+': приложение на телефоне было закрыто или телефон экономит батарею. Работнику нужно открыть приложение'})}
   if(sh.endAt&&sh.endAt-sh.startAt>2*36e5&&tr.length<3&&S.shifts.length)f.push({lv:'warn',t:'Маршрут смены почти не записан (нет разрешения «всегда» или выключен GPS)'});
  return f}
 const cardOf=m=>String((m&&m.card_last4)||'').replace(/\D/g,'');

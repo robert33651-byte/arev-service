@@ -6,7 +6,7 @@ import * as Application from 'expo-application';
 import { StatusBar } from 'expo-status-bar';
 import { supabase, rpc, errText, phoneEmail, normPhone } from './src/supabase';
 import { deviceId, getFix, officeWifiOk, distM, permStatus, askPermissions } from './src/device';
-import { startTrack, stopTrack, flushTrack, flushAllTrack } from './src/track';
+import { startTrack, stopTrack, flushTrack, flushAllTrack, reviveTrack } from './src/track';
 import { CameraSheet, uploadPhoto, preparePhoto, uploadPrepared } from './src/photo';
 import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, Action, Row, Check, TabBar } from './src/ui';
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
@@ -219,7 +219,7 @@ function Main({ session }) {
     syncBox();
     boxCount().then(setBoxN);
     timer.current = setInterval(load, 30000);
-    const sub = AppState.addEventListener('change', (a) => { if (a === 'active') { load(); flushTrack().catch(() => {}); syncBox(); } });
+    const sub = AppState.addEventListener('change', (a) => { if (a === 'active') { load(); reviveTrack().catch(() => {}); flushTrack().catch(() => {}); syncBox(); } });
     const net = NetInfo.addEventListener((n) => { if (n.isConnected) syncBox(); });
     return () => { clearInterval(timer.current); sub.remove(); net(); };
   }, [load, syncBox]);

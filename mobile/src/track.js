@@ -52,9 +52,27 @@ export function defineTrackTask() {
     }));
     const q = await readQ();
     await writeQ(q.concat(pts));
+    try { await checkSparse(pts); } catch (e) {}
     try { await checkStay(pts); } catch (e) {}
     try { await flushTrack(); } catch (e) {}
   });
+}
+
+// Точки приходят редко, а машина едет — служба записи умерла. Просим работника открыть приложение:
+// само приложение из фона перезапустить запись не может (Android это запрещает).
+async function checkSparse(pts) {
+  const first = pts[0], lastP = pts[pts.length - 1];
+  const raw = await AsyncStorage.multiGet(['arev.lastPt', 'arev.lastPtPos', 'arev.sparseAt']);
+  const prevT = +raw[0][1] || 0; let prev = null; try { prev = JSON.parse(raw[1][1] || 'null'); } catch (e) {}
+  await AsyncStorage.multiSet([['arev.lastPt', String(lastP.t)], ['arev.lastPtPos', JSON.stringify({ lat: lastP.lat, lng: lastP.lng })]]);
+  if (!prevT || !prev) return;
+  const gap = first.t - prevT;
+  if (gap < 6 * 60000 || gap > 60 * 60000) return;
+  if ((distM(prev, first) || 0) < 300) return;
+  if (Date.now() - (+raw[2][1] || 0) < 20 * 60000) return;
+  await AsyncStorage.setItem('arev.sparseAt', String(Date.now()));
+  await loadLang();
+  await notifyNow(tr('Откройте Arev Service'), tr('Запись маршрута идёт с перебоями. Откройте приложение, чтобы она восстановилась.'));
 }
 
 // Стоит на одном месте больше часа, не в офисе и без фото работ — напомнить про фото.
@@ -75,12 +93,20 @@ async function checkStay(pts) {
   await AsyncStorage.setItem('arev.stay', JSON.stringify(stay));
 }
 
-export async function startTrack() {
+// Android держит запись в двух частях: «задача» (переживает закрытие приложения и обновление)
+// и постоянное уведомление-служба «Идёт смена» (живёт только пока жив процесс приложения).
+// Если процесс был убит или приложение обновили, задача остаётся, а службы уже нет — и тогда
+// телефон отдаёт точки раз в ~10 минут. Поэтому при каждом запуске приложения запись
+// перезапускается целиком, даже если числится включённой.
+let fresh = false;
+export async function startTrack(force) {
   try {
     const bg = await Location.requestBackgroundPermissionsAsync();
     if (bg.status !== 'granted') return false;
     const on = await Location.hasStartedLocationUpdatesAsync(TRACK_TASK).catch(() => false);
-    if (on) return true;
+    if (on && fresh && !force) return true;
+    if (on) { try { await Location.stopLocationUpdatesAsync(TRACK_TASK); } catch (e) {} }
+    fresh = true;
     await Location.startLocationUpdatesAsync(TRACK_TASK, {
       accuracy: Location.Accuracy.High,   // Balanced даёт точки по вышкам и Wi-Fi с ошибкой в сотни метров — км занижаются
       timeInterval: 60000,
@@ -97,6 +123,17 @@ export async function startTrack() {
   } catch (e) {
     return false;
   }
+}
+
+// Приложение вернулось на экран: если запись идёт, но точек не было больше 3 минут — служба умерла, перезапускаем.
+export async function reviveTrack() {
+  try {
+    const on = await Location.hasStartedLocationUpdatesAsync(TRACK_TASK).catch(() => false);
+    if (!on) return false;
+    const last = +(await AsyncStorage.getItem('arev.lastPt')) || 0;
+    if (!fresh || Date.now() - last > 3 * 60000) return await startTrack(true);
+  } catch (e) {}
+  return false;
 }
 
 export async function stopTrack() {
