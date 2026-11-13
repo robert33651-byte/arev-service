@@ -185,6 +185,8 @@ function Main({ session }) {
       if (next.staff) AsyncStorage.setItem('arev.snap.' + uid, JSON.stringify({ staff: next.staff, cfg: next.cfg, shifts: next.shifts.slice(0, 5), open: next.open, places: next.places, equip: next.equip, buys: next.buys })).catch(() => {});
       // смена закрыта (в том числе если ответ сервера о закрытии потерялся) — запись маршрута выключаем
       if (!next.open) stopTrack().catch(() => {});
+      // при открытой смене сообщаем руководителю, если телефон экономит батарею (маршрут будет редким)
+      if (next.open) permStatus().then((ps) => { if (!ps.bat || ps.saver) supabase.rpc('report_power', { p_opt: !ps.bat, p_saver: !!ps.saver }).then(() => {}, () => {}); }).catch(() => {});
       if (next.staff && next.staff.status === 'approved') {
         // офис, склад и поставщики — там напоминание «долго стоите без фото» не нужно
         const c = next.cfg;
@@ -323,7 +325,8 @@ function PermCard({ always }) {
     return () => sub.remove();
   }, [check]);
   if (!p) return null;
-  const allOk = p.loc && p.bg && p.cam && p.gps;
+  const allOk = p.loc && p.bg && p.cam && p.gps && p.bat && !p.saver;
+  const permOk = p.loc && p.bg && p.cam && p.gps;
   if (allOk && !always) return null;
   const row = (ok, text) => (
     <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
@@ -345,14 +348,17 @@ function PermCard({ always }) {
   };
   return (
     <Card style={{ borderLeftWidth: 4, borderLeftColor: allOk ? C.ok : C.warn }}>
-      <H2>{allOk ? tr('Разрешения выданы') : tr('Нужны разрешения')}</H2>
+      <H2>{allOk ? tr('Разрешения выданы') : permOk ? tr('Отключите экономию батареи') : tr('Нужны разрешения')}</H2>
       {row(p.loc, tr('Местоположение'))}
       {row(p.bg, tr('Местоположение «всегда» (для маршрута смены)'))}
       {row(p.cam, tr('Камера'))}
       {row(p.gps, tr('GPS включён на телефоне'))}
-      {!allOk ? <Muted>{tr('Без них приложение не сможет отмечать приход, уход и выезды.')}</Muted> : null}
-      {!allOk ? <Btn title={tr('Выдать разрешения')} onPress={ask} busy={busy} /> : null}
-      {!allOk && p.loc ? <Btn kind="ghost" title={tr('Открыть настройки приложения')} onPress={() => Linking.openSettings()} /> : null}
+      {row(p.bat, tr('Экономия батареи для приложения отключена'))}
+      {row(!p.saver, tr('Режим энергосбережения на телефоне выключен'))}
+      {!permOk ? <Muted>{tr('Без них приложение не сможет отмечать приход, уход и выезды.')}</Muted> : null}
+      {permOk && !allOk ? <Muted>{tr('Из-за экономии батареи телефон записывает маршрут редко или обрывает запись. Руководитель это видит. Отключите экономию кнопкой ниже.')}</Muted> : null}
+      {!permOk ? <Btn title={tr('Выдать разрешения')} onPress={ask} busy={busy} /> : null}
+      {!permOk && p.loc ? <Btn kind="ghost" title={tr('Открыть настройки приложения')} onPress={() => Linking.openSettings()} /> : null}
       <View style={{ height: 1, backgroundColor: C.line, marginVertical: 4 }} />
       <T style={{ fontWeight: '700' }}>{tr('Экономия батареи')}</T>
       <Muted>{tr('Телефон может сам выключать запись маршрута, чтобы беречь батарею. Тогда руководитель видит, что маршрут пропал. Нажмите кнопку, найдите Arev Service и выберите «Не экономить» (без ограничений). На Xiaomi, Huawei, Samsung также включите «Автозапуск».')}</Muted>

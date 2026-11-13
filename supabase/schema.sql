@@ -597,6 +597,23 @@ end $$;
 revoke all on function public.purge_old from public, anon;
 grant execute on function public.purge_old to authenticated;
 
+-- приложение сообщает, что телефон экономит батарею: маршрут будет записываться редко
+create or replace function public.report_power(p_opt boolean, p_saver boolean) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff;
+begin
+  s := public._staff();
+  if not (coalesce(p_opt, false) or coalesce(p_saver, false)) then return jsonb_build_object('ok', true); end if;
+  if not exists(select 1 from public.alerts where staff_id = s.id and kind = 'power' and at > now() - interval '12 hours') then
+    insert into public.alerts(staff_id, kind, message) values (s.id, 'power',
+      case when coalesce(p_saver, false) then 'На телефоне включён режим энергосбережения: маршрут записывается редко'
+           else 'Для приложения не отключена экономия батареи: маршрут может записываться редко' end);
+  end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.report_power from public, anon;
+grant execute on function public.report_power to authenticated;
+
 -- приложение увидело подмену местоположения и не дало сделать отметку — руководитель должен об этом узнать
 create or replace function public.report_mock() returns jsonb
 language plpgsql security definer set search_path = public as $$

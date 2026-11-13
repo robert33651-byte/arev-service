@@ -1,5 +1,6 @@
 import * as Application from 'expo-application';
 import * as Location from 'expo-location';
+import * as Battery from 'expo-battery';
 import NetInfo from '@react-native-community/netinfo';
 import { Camera } from 'expo-camera';
 
@@ -17,11 +18,14 @@ export function deviceId() {
 
 // Состояние всех нужных разрешений
 export async function permStatus() {
-  const r = { loc: false, bg: false, cam: false, gps: true };
+  // bat: приложению разрешено работать без ограничений батареи; saver: на телефоне включён режим энергосбережения
+  const r = { loc: false, bg: false, cam: false, gps: true, bat: true, saver: false };
   try { r.loc = (await Location.getForegroundPermissionsAsync()).status === 'granted'; } catch (e) {}
   try { r.bg = (await Location.getBackgroundPermissionsAsync()).status === 'granted'; } catch (e) {}
   try { r.cam = (await Camera.getCameraPermissionsAsync()).status === 'granted'; } catch (e) {}
   try { r.gps = await Location.hasServicesEnabledAsync(); } catch (e) {}
+  try { r.bat = !(await Battery.isBatteryOptimizationEnabledAsync()); } catch (e) {}
+  try { r.saver = !!(await Battery.isLowPowerModeEnabledAsync()); } catch (e) {}
   return r;
 }
 
