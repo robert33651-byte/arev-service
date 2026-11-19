@@ -131,3 +131,8 @@ do $$ begin
     perform cron.schedule('task-overdue', '0 5 * * *', 'select public.queue_overdue_reminders()');
   end if;
 end $$;
+
+-- Проекты (направления работы), по которым делятся задачи: список в настройках, у задачи — один проект
+alter table public.config add column if not exists projects jsonb not null default '["Arev Energy","Energobuild"]'::jsonb;
+alter table public.tasks add column if not exists project text;
+create index if not exists tasks_project on public.tasks(project);

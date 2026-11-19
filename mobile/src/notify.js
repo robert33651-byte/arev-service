@@ -62,14 +62,14 @@ export async function planReminders({ cfg, open, startedToday, buys, wphCount, t
       if (wd === 0 || wd === 6) continue;
       if (i === 0 && (open || startedToday)) continue;
       d.setHours(sh || 9, (sm || 0) + 10, 0, 0);
-      await add(d, tr('Смена не начата'), tr('Начните смену в офисе: фото одометра и показания.'), 'start' + i);
+      await add(d, tr('Рабочий день не начат'), tr('Начните рабочий день в офисе: фото одометра и показания.'), 'start' + i);
     }
     if (open) {
       const e = new Date(); e.setHours(eh || 18, (em || 0) + 20, 0, 0);
-      await add(e, tr('Не забудьте закончить смену'), tr('Отметьте конец смены с фото одометра: в офисе или там, где закончили работу.'), 'end');
+      await add(e, tr('Не забудьте отметить конец рабочего дня'), tr('Отметьте конец рабочего дня с фото одометра: в офисе или там, где закончили работу.'), 'end');
       if (!wphCount) {
         const t = new Date(new Date(open.start_at).getTime() + 3 * 3600000);
-        await add(t, tr('Нет фото работ'), tr('За смену ещё нет ни одного фото работ. Снимите работу до и после.'), 'photo');
+        await add(t, tr('Нет фото работ'), tr('За рабочий день ещё нет ни одного фото работ. Снимите работу до и после.'), 'photo');
       }
       if (tasksLeft) {
         const t = new Date(); t.setHours((eh || 18) - 1, em || 0, 0, 0);

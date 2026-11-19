@@ -1,4 +1,4 @@
--- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-13).
+-- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-19).
 -- Supabase → SQL Editor → New query → вставить целиком → Run. Можно запускать повторно, данные не удаляются.
 -- Порядок внутри: schema → tasks v2 → tasks geo → tasks v3 → admin name → talks → registry.
 
@@ -572,7 +572,7 @@ begin
     n := n + 1;
   end loop;
   if mocked > 0 then
-    insert into public.alerts(staff_id, kind, message) values (s.id, 'mock', 'В треке смены ' || mocked || ' точек с подменой местоположения');
+    insert into public.alerts(staff_id, kind, message) values (s.id, 'mock', 'В треке рабочего дня ' || mocked || ' точек с подменой местоположения');
   end if;
   -- точки пришли с большим опозданием: телефон был без связи или маршрут дописан задним числом — руководитель должен видеть
   if late > 0 and not exists(select 1 from public.alerts where staff_id = s.id and kind = 'late_track' and at > now() - interval '6 hours') then
@@ -604,20 +604,9 @@ end $$;
 revoke all on function public.purge_old from public, anon;
 grant execute on function public.purge_old to authenticated;
 
--- приложение сообщает, что телефон экономит батарею: маршрут будет записываться редко
+-- отключено: тревоги об экономии батареи убраны. Функция оставлена пустой, её ещё вызывают версии приложения 1.8.2–1.8.3
 create or replace function public.report_power(p_opt boolean, p_saver boolean) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare s public.staff;
-begin
-  s := public._staff();
-  if not (coalesce(p_opt, false) or coalesce(p_saver, false)) then return jsonb_build_object('ok', true); end if;
-  if not exists(select 1 from public.alerts where staff_id = s.id and kind = 'power' and at > now() - interval '12 hours') then
-    insert into public.alerts(staff_id, kind, message) values (s.id, 'power',
-      case when coalesce(p_saver, false) then 'На телефоне включён режим энергосбережения: маршрут записывается редко'
-           else 'Для приложения не отключена экономия батареи: маршрут может записываться редко' end);
-  end if;
-  return jsonb_build_object('ok', true);
-end $$;
+language sql security definer set search_path = public as $$ select jsonb_build_object('ok', true) $$;
 revoke all on function public.report_power from public, anon;
 grant execute on function public.report_power to authenticated;
 
@@ -900,6 +889,9 @@ begin
 end $$;
 revoke all on function public.claim_first_admin from public, anon;
 grant execute on function public.claim_first_admin to authenticated;
+
+-- тревоги об экономии батареи больше не используются
+delete from public.alerts where kind = 'power';
 
 -- ===================================================================
 -- >>> migration_tasks_v2.sql
@@ -1529,6 +1521,11 @@ do $$ begin
     perform cron.schedule('task-overdue', '0 5 * * *', 'select public.queue_overdue_reminders()');
   end if;
 end $$;
+
+-- Проекты (направления работы), по которым делятся задачи: список в настройках, у задачи — один проект
+alter table public.config add column if not exists projects jsonb not null default '["Arev Energy","Energobuild"]'::jsonb;
+alter table public.tasks add column if not exists project text;
+create index if not exists tasks_project on public.tasks(project);
 
 -- ===================================================================
 -- >>> migration_admin_name.sql

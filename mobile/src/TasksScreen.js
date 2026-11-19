@@ -253,6 +253,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
                 {!!t.note && <Text style={st.muted} numberOfLines={2}>{t.note}</Text>}
                 {!!placeOf(t) && <Text style={st.muted}>📍 {placeOf(t).name}</Text>}
                 <View style={st.row}>
+                  {!!t.project && <Chip text={t.project} fg={P.ink} bg={P.line} />}
                   {pr && <Chip text={pr[0]} fg={pr[1]} bg={pr[2]} />}
                   {t.status === 'report' && <Chip text={L.waitReview} fg={P.warn} bg={P.warnSoft} />}
                   {t.disc_status === 'open' && <Chip text="💬" fg={P.bad} bg={P.badSoft} />}
@@ -277,6 +278,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
             <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
               <Text style={st.h1}>{task.title}</Text>
               <View style={st.row}>
+                {!!task.project && <Chip text={task.project} fg={P.ink} bg={P.line} />}
                 {PRI[task.priority] && <Chip text={PRI[task.priority][0]} fg={PRI[task.priority][1]} bg={PRI[task.priority][2]} />}
                 {!!seen && <Chip text={L.opened + ' ' + fdt(seen)} fg={P.ok} bg={P.okSoft} />}
               </View>

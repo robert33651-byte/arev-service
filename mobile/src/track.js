@@ -113,8 +113,8 @@ export async function startTrack(force) {
       distanceInterval: 0,
       pausesUpdatesAutomatically: false,
       foregroundService: {
-        notificationTitle: tr('Идёт смена'),
-        notificationBody: tr('Arev Service записывает маршрут до конца смены'),
+        notificationTitle: tr('Идёт рабочий день'),
+        notificationBody: tr('Arev Service записывает маршрут до конца рабочего дня'),
         notificationColor: '#123a33',
         killServiceOnDestroy: false,
       },
