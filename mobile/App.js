@@ -8,7 +8,7 @@ import { supabase, rpc, errText, phoneEmail, normPhone } from './src/supabase';
 import { deviceId, getFix, officeWifiOk, distM, permStatus, askPermissions } from './src/device';
 import { startTrack, stopTrack, flushTrack, flushAllTrack, reviveTrack } from './src/track';
 import { CameraSheet, uploadPhoto, preparePhoto, uploadPrepared } from './src/photo';
-import { C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, Action, Row, Check, TabBar } from './src/ui';
+import { cap, C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Tile, Action, Row, Check, TabBar } from './src/ui';
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
 import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
 import TasksScreen from './src/TasksScreen';
@@ -1515,7 +1515,7 @@ function History({ ctx }) {
           {!S.sh.length ? <Muted>{tr('Рабочего дня не было.')}</Muted> : (
             <>
               {S.sh.map((x) => <Row key={x.id} icon="time" title={hm(x.start_at) + ' – ' + (x.end_at ? hm(x.end_at) : tr('идёт'))} sub={tr('Одометр ') + x.start_odo + (x.end_odo ? ' → ' + x.end_odo : '')} />)}
-              <Row icon="hourglass" title={hh(S.min)} sub={tr('на работе')} />
+              <Row icon="hourglass" title={hh(S.min)} sub={cap(tr('на работе'))} />
               <Row icon="navigate" title={(Math.round(S.km * 10) / 10).toString().replace('.', ',') + tr(' км по GPS')} sub={S.odo ? tr('по одометру ') + S.odo + tr(' км') : undefined} />
               <Row icon="camera" title={tr('Фото работ: ') + S.ph} />
               {S.tk ? <Row icon="checkbox" title={tr('Задачи: ') + S.td + tr(' из ') + S.tk} /> : null}

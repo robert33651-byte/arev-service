@@ -75,6 +75,8 @@ export const s = StyleSheet.create({
 export const Icon = ({ name, size = 22, color = C.ink, style }) => <Ionicons name={name} size={size} color={color} style={style} />;
 
 // Плитка с цифрой: «Фото работ 3»
+// подписи показателей всегда с заглавной буквы
+export const cap = (s) => (typeof s === 'string' && s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 export function Tile({ icon, value, label, tone = 'note', onPress }) {
   const fg = { ok: C.ok, warn: C.warn, bad: C.bad, info: C.info, note: C.ink }[tone];
   const bg = { ok: C.okSoft, warn: C.warnSoft, bad: C.badSoft, info: C.infoSoft, note: C.surface }[tone];
@@ -82,7 +84,7 @@ export function Tile({ icon, value, label, tone = 'note', onPress }) {
     <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [u.tile, { backgroundColor: bg, opacity: pressed ? 0.85 : 1 }]}>
       <Icon name={icon} size={20} color={fg} />
       <Text style={{ fontSize: 22, fontWeight: '800', color: fg, marginTop: 6 }} numberOfLines={1}>{value}</Text>
-      <Text style={{ fontSize: 12.5, color: C.muted }} numberOfLines={2}>{label}</Text>
+      <Text style={{ fontSize: 12.5, color: C.muted }} numberOfLines={2}>{cap(label)}</Text>
     </Pressable>
   );
 }

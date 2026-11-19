@@ -327,6 +327,10 @@ a.chip{text-decoration:none}
 @media (prefers-reduced-motion:reduce){.nowdot{animation:none}}
 .chip.pj{background:transparent;border:1px solid;font-weight:700}
 .filters.pjf{margin-top:-4px}
+/* подписи статусов и показателей всегда с заглавной буквы */
+.chip{display:inline-block}
+.kpi span,.mc small{display:block}
+.chip::first-letter,.kpi span::first-letter,.mc small::first-letter{text-transform:uppercase}
 /* длинные армянские слова не вылезают за карточки */
 .mc small,.kpi b,.kpi span,.kpi small,.chip,.nav button,.mnav button,.btn{overflow-wrap:anywhere}
 .avatar{overflow:hidden}
