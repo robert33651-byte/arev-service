@@ -1,4 +1,4 @@
--- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-19).
+-- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-23).
 -- Supabase → SQL Editor → New query → вставить целиком → Run. Можно запускать повторно, данные не удаляются.
 -- Порядок внутри: schema → tasks v2 → tasks geo → tasks v3 → admin name → talks → registry.
 
@@ -49,8 +49,8 @@ create table if not exists public.config(
   office_wifi text,                       -- имя или BSSID офисной сети, по желанию
   office_radius int not null default 150,
   client_radius int not null default 200,
-  work_start time not null default '09:00',
-  work_end time not null default '18:00',
+  work_start time not null default '09:30',
+  work_end time not null default '18:30',
   grace_min int not null default 10,
   photo_max_age_min int not null default 10,
   max_idle_min int not null default 120,
@@ -59,6 +59,15 @@ create table if not exists public.config(
   updated_at timestamptz not null default now()
 );
 insert into public.config(id) values (1) on conflict (id) do nothing;
+-- график: будни work_start–work_end, суббота sat_start–sat_end, воскресенье выходной.
+-- При первом запуске ставим график компании (будни 9:30–18:30, суббота 10:00–17:00); дальше меняется в «Настройках».
+do $$ begin
+  if not exists(select 1 from information_schema.columns where table_schema='public' and table_name='config' and column_name='sat_start') then
+    alter table public.config add column sat_start time not null default '10:00';
+    alter table public.config add column sat_end time not null default '17:00';
+    update public.config set work_start = '09:30', work_end = '18:30', sat_start = '10:00', sat_end = '17:00' where id = 1;
+  end if;
+end $$;
 alter table public.config enable row level security;
 
 -- ---------- сотрудники ----------
@@ -79,6 +88,13 @@ create table if not exists public.staff(
   created_at timestamptz not null default now(),
   approved_at timestamptz
 );
+-- тип работы: field — выездной (одометр, трекинг), office — офисный (только отметка прихода и ухода)
+alter table public.staff add column if not exists kind text not null default 'field';
+do $$ begin
+  if not exists(select 1 from pg_constraint where conname = 'staff_kind_chk') then
+    alter table public.staff add constraint staff_kind_chk check (kind in ('field','office'));
+  end if;
+end $$;
 alter table public.staff enable row level security;
 
 -- ---------- смены ----------
@@ -99,6 +115,9 @@ create table if not exists public.shifts(
 );
 create unique index if not exists shifts_one_open on public.shifts(staff_id) where end_at is null;
 create index if not exists shifts_staff_time on public.shifts(staff_id, start_at desc);
+-- у офисных сотрудников одометра и фото нет
+alter table public.shifts alter column start_odo drop not null;
+alter table public.shifts alter column start_photo drop not null;
 alter table public.shifts enable row level security;
 
 -- ---------- заправки ----------
@@ -480,20 +499,26 @@ end $$;
 create function public.start_shift(p_odo int, p_photo text, p_lat double precision, p_lng double precision,
   p_acc real, p_mocked boolean, p_wifi_ok boolean, p_device text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; c public.config; prev int; r public.shifts; e text;
+declare s public.staff; c public.config; prev int; r public.shifts; e text; off boolean;
 begin
   s := public._staff();
+  off := s.kind = 'office';
   e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
-  e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
-  if coalesce(p_odo,0) <= 0 then return jsonb_build_object('error','NEED_ODO'); end if;
+  if not off then
+    e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
+    if coalesce(p_odo,0) <= 0 then return jsonb_build_object('error','NEED_ODO'); end if;
+  end if;
   if exists(select 1 from public.shifts where staff_id = s.id and end_at is null) then return jsonb_build_object('error','SHIFT_ALREADY_OPEN'); end if;
   select * into c from public.config where id = 1;
-  select end_odo into prev from public.shifts where staff_id = s.id and end_at is not null order by end_at desc limit 1;
-  if prev is not null and p_odo < prev then
-    insert into public.alerts(staff_id, kind, message) values (s.id, 'odo', 'Утром одометр ' || p_odo || ' км, а прошлым вечером был ' || prev || ' км');
+  if not off then
+    select end_odo into prev from public.shifts where staff_id = s.id and end_at is not null and end_odo is not null order by end_at desc limit 1;
+    if prev is not null and p_odo < prev then
+      insert into public.alerts(staff_id, kind, message) values (s.id, 'odo', 'Утром одометр ' || p_odo || ' км, а прошлым вечером был ' || prev || ' км');
+    end if;
   end if;
   insert into public.shifts(staff_id, start_odo, start_photo, start_lat, start_lng, start_acc, start_dist, start_wifi_ok, start_device)
-  values (s.id, p_odo, p_photo, p_lat, p_lng, p_acc, public.dist_m(p_lat, p_lng, c.office_lat, c.office_lng), p_wifi_ok, p_device)
+  values (s.id, case when off then null else p_odo end, case when off then null else p_photo end, p_lat, p_lng, p_acc,
+          public.dist_m(p_lat, p_lng, c.office_lat, c.office_lng), p_wifi_ok, p_device)
   returning * into r;
   return to_jsonb(r);
 end $$;
@@ -519,19 +544,24 @@ $$;
 create function public.end_shift(p_odo int, p_photo text, p_lat double precision, p_lng double precision,
   p_acc real, p_mocked boolean, p_wifi_ok boolean, p_device text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; c public.config; r public.shifts; e text;
+declare s public.staff; c public.config; r public.shifts; e text; off boolean;
 begin
   s := public._staff();
+  off := s.kind = 'office';
   e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
-  e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
   select * into r from public.shifts where staff_id = s.id and end_at is null;
   if r.id is null then return jsonb_build_object('error','NO_OPEN_SHIFT'); end if;
-  if coalesce(p_odo,0) < r.start_odo then return jsonb_build_object('error','ODO_LESS_THAN_START'); end if;
+  if not off then
+    e := public._check_photo(p_photo);        if e is not null then return jsonb_build_object('error', e); end if;
+    if coalesce(p_odo,0) <= 0 or (r.start_odo is not null and p_odo < r.start_odo) then return jsonb_build_object('error','ODO_LESS_THAN_START'); end if;
+  end if;
   if exists(select 1 from public.tickets where staff_id = s.id and status in ('enroute','onsite')) then return jsonb_build_object('error','ACTIVE_ORDER'); end if;
   select * into c from public.config where id = 1;
-  update public.shifts set end_at = now(), end_odo = p_odo, end_photo = p_photo, end_lat = p_lat, end_lng = p_lng, end_acc = p_acc,
+  update public.shifts set end_at = now(), end_odo = case when off then null else p_odo end, end_photo = case when off then null else p_photo end,
+         end_lat = p_lat, end_lng = p_lng, end_acc = p_acc,
          end_dist = public.dist_m(p_lat, p_lng, c.office_lat, c.office_lng), end_wifi_ok = p_wifi_ok, end_device = p_device,
-         route_km = public._route_km(s.id, r.start_at, now()), gps_km = public._gps_km(s.id, r.start_at, now())
+         route_km = case when off then null else public._route_km(s.id, r.start_at, now()) end,
+         gps_km = case when off then null else public._gps_km(s.id, r.start_at, now()) end
    where id = r.id returning * into r;
   return to_jsonb(r);
 end $$;

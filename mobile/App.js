@@ -194,7 +194,7 @@ function Main({ session }) {
         next.places.filter((p) => p.kind === 'warehouse' || p.kind === 'supplier').forEach((p) => known.push({ lat: p.lat, lng: p.lng, r: p.radius || 200 }));
         AsyncStorage.setItem('arev.known', JSON.stringify(known)).catch(() => {});
         planReminders({
-          cfg: c, open: next.open, buys: next.buys, wphCount: next.wph.length,
+          cfg: c, kind: next.staff.kind, open: next.open, buys: next.buys, wphCount: next.wph.length,
           startedToday: shifts.some((x) => new Date(x.start_at) >= d0),
           tasksLeft: next.nToday,
         });
@@ -235,7 +235,7 @@ function Main({ session }) {
   }, [approved]);
 
   // если смена открыта, но запись маршрута остановилась (перезагрузка телефона) — включаем снова
-  useEffect(() => { if (st.open) startTrack(); }, [st.open && st.open.id]);
+  useEffect(() => { if (st.open && !(st.staff && st.staff.kind === 'office')) startTrack(); }, [st.open && st.open.id, st.staff && st.staff.kind]);
 
   // кнопка «назад» на телефоне возвращает на вкладку
   useEffect(() => {
@@ -269,7 +269,7 @@ function Main({ session }) {
     else if (view.name === 'task') body = <TaskScreen ctx={ctx} id={view.id} />;
     else if (view.name === 'help') body = <Help ctx={ctx} />;
     else if (view.name === 'talk') body = <TalkScreen ctx={ctx} />;
-    else if (view.name === 'perms') body = <Page><PermCard always /><NotifyCard /></Page>;
+    else if (view.name === 'perms') body = <Page><PermCard always office={st.staff.kind === 'office'} /><NotifyCard /></Page>;
     return (
       <>
         <Header title={tr(SUB_TITLE[view.name] || 'Arev Service')} sub={st.staff.name} onBack={() => nav('home')} />
@@ -313,7 +313,7 @@ function NotifyCard() {
 }
 
 /* ---------------- разрешения ---------------- */
-function PermCard({ always }) {
+function PermCard({ always, office }) {
   const [p, setP] = useState(null);
   const [busy, setBusy] = useState(false);
   const check = useCallback(() => { permStatus().then(setP); }, []);
@@ -323,7 +323,7 @@ function PermCard({ always }) {
     return () => sub.remove();
   }, [check]);
   if (!p) return null;
-  const allOk = p.loc && p.bg && p.cam && p.gps;
+  const allOk = p.loc && (office || p.bg) && p.cam && p.gps;
   const permOk = allOk;
   if (allOk && !always) return null;
   const row = (ok, text) => (
@@ -337,7 +337,7 @@ function PermCard({ always }) {
     try {
       const r = await askPermissions();
       setP(r);
-      if (r.loc && !r.bg) {
+      if (r.loc && !r.bg && !office) {
         Alert.alert(tr('Нужно «Разрешить всегда»'), tr('Откроются настройки приложения. Выберите «Разрешения» → «Местоположение» → «Разрешить в любом режиме» (или «Всегда»).'), [{ text: tr('Открыть настройки'), onPress: () => Linking.openSettings() }]);
       } else if (!r.loc || !r.cam) {
         Alert.alert(tr('Разрешения не выданы'), tr('Откройте настройки приложения и включите «Камеру» и «Местоположение».'), [{ text: tr('Открыть настройки'), onPress: () => Linking.openSettings() }, { text: tr('Позже') }]);
@@ -348,7 +348,7 @@ function PermCard({ always }) {
     <Card style={{ borderLeftWidth: 4, borderLeftColor: allOk ? C.ok : C.warn }}>
       <H2>{allOk ? tr('Разрешения выданы') : tr('Нужны разрешения')}</H2>
       {row(p.loc, tr('Местоположение'))}
-      {row(p.bg, tr('Местоположение «всегда» (для маршрута рабочего дня)'))}
+      {office ? null : row(p.bg, tr('Местоположение «всегда» (для маршрута рабочего дня)'))}
       {row(p.cam, tr('Камера'))}
       {row(p.gps, tr('GPS включён на телефоне'))}
       {!permOk ? <Muted>{tr('Без них приложение не сможет отмечать приход, уход и выезды.')}</Muted> : null}
@@ -443,7 +443,7 @@ function Waiting({ ctx }) {
       <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
         <H1>{s.status === 'pending' ? tr('Анкета на проверке') : tr('Нет доступа')}</H1>
         <Flag kind={s.status === 'pending' ? 'note' : 'warn'}>{txt}</Flag>
-        {s.status === 'pending' ? <PermCard always /> : null}
+        {s.status === 'pending' ? <PermCard always office={s.kind === 'office'} /> : null}
         <Btn kind="ghost" title={tr('Проверить ещё раз')} onPress={ctx.refresh} />
         <Btn kind="ghost" title={tr('Выйти')} onPress={() => { stopTrack().catch(() => {}); supabase.auth.signOut(); }} />
       </Page>
@@ -464,13 +464,14 @@ function Home({ ctx }) {
   const tLeft = tasks.filter((t) => t.status === 'new').length;
   const fuelL = st.fuelToday.reduce((a, r) => a + (+r.liters || 0), 0);
   const unit = st.staff.fuel_type === 'gas' ? tr('м³') : tr('л');
+  const isOff = st.staff.kind === 'office';
 
   if (!sh) {
     const last = st.shifts.find((x) => x.end_at);
     const doneToday = last && new Date(last.start_at).toDateString() === new Date().toDateString();
     return (
       <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
-        <PermCard />
+        <PermCard office={isOff} />
         <NotifyCard />
         <View style={{ backgroundColor: C.pine, borderRadius: 20, padding: 20, gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -485,7 +486,7 @@ function Home({ ctx }) {
           {doneToday ? (
             <Text style={{ color: C.pineInk, opacity: 0.85 }}>{tr('Рабочий день на сегодня закончен в')}{' '}{hm(last.end_at)}{tr('. Хорошего вечера!')}</Text>
           ) : (
-            <Text style={{ color: C.pineInk, opacity: 0.85 }}>{tr('Начните рабочий день в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.')}</Text>
+            <Text style={{ color: C.pineInk, opacity: 0.85 }}>{isOff ? tr('Придя на работу, нажмите «Начало рабочего дня». Время и место запишутся автоматически.') : tr('Начните рабочий день в офисе: сфотографируйте одометр и введите показания. Место и время запишутся автоматически.')}</Text>
           )}
           <Btn title={doneToday ? tr('Начать ещё один рабочий день') : tr('Начало рабочего дня')} onPress={() => nav('shift')} big />
         </View>
@@ -495,7 +496,7 @@ function Home({ ctx }) {
           <Card>
             <Label>{tr('Прошлый рабочий день')}</Label>
             <Row icon="time" title={new Date(last.start_at).toLocaleDateString(loc(), { weekday: 'short', day: 'numeric', month: 'long' }) + ', ' + hm(last.start_at) + '–' + hm(last.end_at)}
-              sub={tr('Одометр ') + last.end_odo + tr(' км') + (last.gps_km != null ? tr(' · по GPS ') + String(last.gps_km).replace('.', ',') + tr(' км') : '')} last />
+              sub={last.end_odo != null ? tr('Одометр ') + last.end_odo + tr(' км') + (last.gps_km != null ? tr(' · по GPS ') + String(last.gps_km).replace('.', ',') + tr(' км') : '') : undefined} last />
           </Card>
         ) : null}
         <CallOffice cfg={st.cfg} />
@@ -506,13 +507,13 @@ function Home({ ctx }) {
   const checks = [
     { done: true, text: tr('Рабочий день начат'), sub: tr('в ') + hm(sh.start_at) },
     tasks.length ? { done: !tLeft, text: tr('Задачи на сегодня'), sub: (tasks.length - tLeft) + tr(' из ') + tasks.length + tr(' выполнено') } : null,
-    { done: st.wph.length > 0, text: tr('Фото работ'), sub: st.wph.length ? tr('снято ') + st.wph.length : tr('снимайте до и после каждой работы') },
+    isOff ? null : { done: st.wph.length > 0, text: tr('Фото работ'), sub: st.wph.length ? tr('снято ') + st.wph.length : tr('снимайте до и после каждой работы') },
     { done: !st.buys.length, text: tr('Закупки и материал сданы'), sub: st.buys.length ? tr('не сдано: ') + st.buys.length : tr('всё сдано') },
-    { done: false, text: tr('Конец рабочего дня в офисе'), sub: tr('фото одометра') },
+    { done: false, text: isOff ? tr('Конец рабочего дня') : tr('Конец рабочего дня в офисе'), sub: isOff ? tr('отметьте, когда уходите') : tr('фото одометра') },
   ].filter(Boolean);
   return (
     <Page onRefresh={ctx.refresh} refreshing={ctx.refreshing}>
-      <PermCard />
+      <PermCard office={isOff} />
       <NotifyCard />
       <View style={{ backgroundColor: C.pine, borderRadius: 20, padding: 20, flexDirection: 'row', alignItems: 'center' }}>
         <View style={{ flex: 1, gap: 2 }}>
@@ -529,16 +530,16 @@ function Home({ ctx }) {
       </View>
       {ctx.boxN ? <Flag kind="warn">{tr('Без интернета сохранено фото:')}{' '}{ctx.boxN}{tr('. Они отправятся сами, когда появится связь.')}</Flag> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Tile icon="camera" value={st.wph.length} label={tr('фото работ')} tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />
+        {isOff ? null : <Tile icon="camera" value={st.wph.length} label={tr('фото работ')} tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />}
         <Tile icon="checkbox" value={st.nTasks || 0} label={tr('задачи')} tone={st.nTasks ? 'warn' : 'ok'} onPress={() => ctx.goTab('tasks')} />
         <Tile icon="cube" value={st.buys.length} label={tr('не сдано')} tone={st.buys.length ? 'bad' : 'ok'} onPress={st.buys.length ? () => nav('deliver', { id: st.buys[0].id }) : undefined} />
-        <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label={tr('заправка сегодня')} onPress={() => nav('fuel')} />
+        {isOff ? null : <Tile icon="water" value={fuelL ? String(Math.round(fuelL * 10) / 10).replace('.', ',') + ' ' + unit : '—'} label={tr('заправка сегодня')} onPress={() => nav('fuel')} />}
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Action icon="camera" title={tr('Фото работ')} sub={tr('до и после')} kind="primary" onPress={() => nav('work')} />
+        {isOff ? null : <Action icon="camera" title={tr('Фото работ')} sub={tr('до и после')} kind="primary" onPress={() => nav('work')} />}
         <Action icon="cart" title={tr('Закупка')} sub={tr('купил в магазине')} onPress={() => nav('purchase')} />
         <Action icon="archive" title={tr('Со склада')} sub={tr('взял материал')} onPress={() => nav('take')} />
-        <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />
+        {isOff ? null : <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />}
         <Action icon="mic" title={tr('Разговор')} sub={tr('запись с клиентом')} onPress={() => nav('talk')} />
         <Action icon="help-circle" title={tr('Помощь')} sub={tr('как пользоваться')} onPress={() => nav('help')} />
       </View>
@@ -677,13 +678,27 @@ function ShiftScreen({ ctx }) {
   const { st, uid, load, nav } = ctx;
   const sh = st.open;
   const ending = !!sh;
+  const isOff = st.staff.kind === 'office';
   const [cam, setCam] = useState(false);
   const [shot, setShot] = useState(null); // {path, uri, fix, dist}
   const [odo, setOdo] = useState('');
   const [busy, setBusy] = useState(false);
+  const [ofix, setOfix] = useState(null); // офисный сотрудник: {fix, dist}
+  const [locBusy, setLocBusy] = useState(false);
   const office = st.cfg.office_lat != null ? { lat: st.cfg.office_lat, lng: st.cfg.office_lng } : null;
   const radius = st.cfg.office_radius || 150;
-  const prev = (st.shifts.find((x) => x.end_at) || {}).end_odo;
+  const prev = (st.shifts.find((x) => x.end_at && x.end_odo != null) || {}).end_odo;
+
+  // офисному сотруднику фото не нужно: определяем место и отмечаем время
+  const locate = async () => {
+    setLocBusy(true);
+    try {
+      const fix = await getFix();
+      if (fix.mocked) { setOfix(null); return Alert.alert(tr('Подмена местоположения'), tr('На телефоне включена подмена местоположения. Отключите её в настройках и попробуйте снова.')); }
+      setOfix({ fix, dist: distM(fix, office) });
+    } catch (e) { setOfix(null); Alert.alert(tr('Не получилось'), errText(e)); } finally { setLocBusy(false); }
+  };
+  useEffect(() => { if (isOff) locate(); }, []);
 
   const onShot = async (uri) => {
     try {
@@ -699,9 +714,12 @@ function ShiftScreen({ ctx }) {
   };
   const submit = async (force) => {
     const v = parseInt(String(odo).replace(/\D/g, ''), 10);
-    if (!shot) return Alert.alert(tr('Фото'), tr('Сфотографируйте одометр'));
-    if (!v) return Alert.alert(tr('Одометр'), tr('Введите показания одометра'));
-    if (ending && force !== true && force !== 'photos' && !st.wph.length) {
+    if (isOff) { if (!ofix) return Alert.alert(tr('Место'), tr('Сначала определите местоположение')); }
+    else {
+      if (!shot) return Alert.alert(tr('Фото'), tr('Сфотографируйте одометр'));
+      if (!v) return Alert.alert(tr('Одометр'), tr('Введите показания одометра'));
+    }
+    if (ending && !isOff && force !== true && force !== 'photos' && !st.wph.length) {
       return Alert.alert(tr('Нет фото работ'), tr('За сегодня не загружено ни одного фото проделанной работы. Руководитель увидит это. Закончить рабочий день всё равно?'),
         [{ text: tr('Сначала сниму') }, { text: tr('Закончить'), onPress: () => submit(st.buys.length ? 'photos' : true) }]);
     }
@@ -712,8 +730,10 @@ function ShiftScreen({ ctx }) {
     setBusy(true);
     try {
       const wifi = await officeWifiOk(st.cfg.office_wifi);
-      const args = { p_odo: v, p_photo: shot.path, p_lat: shot.fix.lat, p_lng: shot.fix.lng, p_acc: shot.fix.acc, p_mocked: shot.fix.mocked, p_wifi_ok: wifi, p_device: deviceId() };
-      if (ending) { await flushAllTrack(); await rpc('end_shift', args); await stopTrack(); }
+      const src = isOff ? ofix : shot;
+      const args = { p_odo: isOff ? null : v, p_photo: isOff ? null : shot.path, p_lat: src.fix.lat, p_lng: src.fix.lng, p_acc: src.fix.acc, p_mocked: src.fix.mocked, p_wifi_ok: wifi, p_device: deviceId() };
+      if (isOff) { await rpc(ending ? 'end_shift' : 'start_shift', args); }
+      else if (ending) { await flushAllTrack(); await rpc('end_shift', args); await stopTrack(); }
       else {
         await rpc('start_shift', args);
         const ok = await startTrack();
@@ -723,6 +743,22 @@ function ShiftScreen({ ctx }) {
       nav('home');
     } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
   };
+  if (isOff) {
+    const d = ofix && ofix.dist;
+    const farO = d != null && d > radius;
+    return (
+      <Page>
+        <H1>{ending ? tr('Конец рабочего дня') : tr('Начало рабочего дня')}</H1>
+        <Card>
+          <T style={{ fontWeight: '700' }}>{tr('Ваше местоположение')}</T>
+          <Muted>{tr('Время и место запишутся в момент нажатия кнопки.')}</Muted>
+          {locBusy ? <Flag kind="note">{tr('Определяю местоположение…')}</Flag> : !ofix ? <Flag kind="warn">{tr('Местоположение не определено')}</Flag> : d == null ? <Flag kind="note">{tr('Координаты сохранены')}</Flag> : farO ? <Flag kind="bad">{fDist(d)}{' '}{tr('от офиса. Отметка будет записана с отклонением.')}</Flag> : <Flag kind="ok">{tr('В офисе ·')}{' '}{fDist(d)}</Flag>}
+          <Btn kind="ghost" title={tr('Обновить местоположение')} onPress={locate} busy={locBusy} />
+        </Card>
+        <Btn title={ending ? tr('Конец рабочего дня') : tr('Начало рабочего дня')} kind={ending ? 'dark' : 'primary'} onPress={submit} busy={busy} big />
+      </Page>
+    );
+  }
   const far = shot && shot.dist != null && shot.dist > radius;
   return (
     <Page>
@@ -1362,8 +1398,8 @@ function MyDay({ ctx }) {
       const out = [];
       const add = (at, icon, color, title, sub, photo) => { if (at && new Date(at) >= d0) out.push({ at: new Date(at).getTime(), icon, color, title, sub, photo }); };
       st.shifts.forEach((x) => {
-        add(x.start_at, 'play-circle', C.pine, tr('Начало рабочего дня'), tr('Одометр ') + x.start_odo + tr(' км'));
-        if (x.end_at) add(x.end_at, 'stop-circle', C.pine, tr('Конец рабочего дня'), tr('Одометр ') + x.end_odo + tr(' км'));
+        add(x.start_at, 'play-circle', C.pine, tr('Начало рабочего дня'), x.start_odo != null ? tr('Одометр ') + x.start_odo + tr(' км') : undefined);
+        if (x.end_at) add(x.end_at, 'stop-circle', C.pine, tr('Конец рабочего дня'), x.end_odo != null ? tr('Одометр ') + x.end_odo + tr(' км') : undefined);
       });
       (wp.data || []).forEach((w) => add(w.at, 'camera', C.ok, tr('Фото работ · ') + tr(KIND_RU[w.kind]), [w.object, w.note].filter(Boolean).join(' · '), w.path));
       (bu.data || []).forEach((b) => {
@@ -1514,13 +1550,13 @@ function History({ ctx }) {
           <H2>{sel} {tr(MONTHS_G[m.getMonth()])}</H2>
           {!S.sh.length ? <Muted>{tr('Рабочего дня не было.')}</Muted> : (
             <>
-              {S.sh.map((x) => <Row key={x.id} icon="time" title={hm(x.start_at) + ' – ' + (x.end_at ? hm(x.end_at) : tr('идёт'))} sub={tr('Одометр ') + x.start_odo + (x.end_odo ? ' → ' + x.end_odo : '')} />)}
+              {S.sh.map((x) => <Row key={x.id} icon="time" title={hm(x.start_at) + ' – ' + (x.end_at ? hm(x.end_at) : tr('идёт'))} sub={x.start_odo != null ? tr('Одометр ') + x.start_odo + (x.end_odo ? ' → ' + x.end_odo : '') : undefined} />)}
               <Row icon="hourglass" title={hh(S.min)} sub={cap(tr('на работе'))} />
-              <Row icon="navigate" title={(Math.round(S.km * 10) / 10).toString().replace('.', ',') + tr(' км по GPS')} sub={S.odo ? tr('по одометру ') + S.odo + tr(' км') : undefined} />
-              <Row icon="camera" title={tr('Фото работ: ') + S.ph} />
+              {ctx.st.staff.kind === 'office' ? null : <Row icon="navigate" title={(Math.round(S.km * 10) / 10).toString().replace('.', ',') + tr(' км по GPS')} sub={S.odo ? tr('по одометру ') + S.odo + tr(' км') : undefined} />}
+              {ctx.st.staff.kind === 'office' ? null : <Row icon="camera" title={tr('Фото работ: ') + S.ph} />}
               {S.tk ? <Row icon="checkbox" title={tr('Задачи: ') + S.td + tr(' из ') + S.tk} /> : null}
               {S.bu ? <Row icon="cart" title={tr('Закупки и склад: ') + S.bu} /> : null}
-              <Row icon="water" title={S.fl ? tr('Заправка: ') + (Math.round(S.fl * 10) / 10).toString().replace('.', ',') + ' · ' + money(S.fs) : tr('Заправок не было')} last />
+              {ctx.st.staff.kind === 'office' ? <Row icon="hourglass" title={tr('Рабочих дней: ') + S.sh.length} last /> : <Row icon="water" title={S.fl ? tr('Заправка: ') + (Math.round(S.fl * 10) / 10).toString().replace('.', ',') + ' · ' + money(S.fs) : tr('Заправок не было')} last />}
             </>
           )}
         </Card>
@@ -1531,7 +1567,15 @@ function History({ ctx }) {
 
 /* ---------------- помощь ---------------- */
 function Help({ ctx }) {
-  const items = [
+  const isOff = ctx.st.staff.kind === 'office';
+  const items = (isOff ? [
+    ['play-circle', tr('Начало рабочего дня'), tr('Придя на работу, нажмите «Начало рабочего дня». Время и место запишутся автоматически, фото не нужно.')],
+    ['checkbox', tr('Задачи'), tr('Задачи на день ставит руководитель. Нажмите «Выполнено», когда задача сделана.')],
+    ['mic', tr('Разговор'), tr('Предупредите собеседника, что разговор записывается, отметьте его согласие и нажмите запись. Отчёт по разговору получит руководитель.')],
+    ['stop-circle', tr('Конец рабочего дня'), tr('Уходя, нажмите «Конец рабочего дня».')],
+    ['notifications', tr('Напоминания'), tr('Приложение напомнит отметить начало и конец рабочего дня.')],
+    ['shield-checkmark', tr('Что записывается'), tr('Только время и место отметок прихода и ухода. Маршрут не записывается.')],
+  ] : [
     ['play-circle', tr('Начало рабочего дня'), tr('Утром в офисе нажмите «Начало рабочего дня», сфотографируйте одометр и введите показания. Включится запись маршрута — это уведомление «Идёт рабочий день».')],
     ['camera', tr('Фото работ'), tr('На каждом объекте снимайте «до» и «после». Выберите объект из списка или впишите имя клиента. Без интернета фото сохранится и отправится само.')],
     ['checkbox', tr('Задачи'), tr('Задачи на день ставит руководитель. Нажмите «Маршрут», чтобы доехать, и «Выполнено» на месте — с фото.')],
@@ -1542,7 +1586,7 @@ function Help({ ctx }) {
     ['stop-circle', tr('Конец рабочего дня'), tr('Вечером в офисе нажмите «Конец рабочего дня» и сфотографируйте одометр. Перед этим сдайте закупки.')],
     ['notifications', tr('Напоминания'), tr('Приложение напомнит начать и закончить рабочий день, сдать закупку и снять фото работ.')],
     ['shield-checkmark', tr('Что записывается'), tr('Только во время рабочего дня: маршрут, время и место отметок. Вне рабочего дня местоположение не записывается.')],
-  ];
+]);
   return (
     <Page>
       <Card>
@@ -1611,7 +1655,7 @@ function Profile({ ctx }) {
         <Row icon="shield-checkmark" title={tr('Разрешения и уведомления')} onPress={() => ctx.nav('perms')} />
         <LangRow last />
       </Card>
-      {!edit ? (
+      {s.kind === 'office' ? null : !edit ? (
         <Card>
           <Label>{tr('Машина')}</Label>
           <T style={{ fontWeight: '700' }}>{s.car_model || tr('не указана')}{s.car_plate ? ' · ' + s.car_plate : ''}</T>
@@ -1633,7 +1677,7 @@ function Profile({ ctx }) {
         {st.shifts.length ? st.shifts.map((x) => (
           <View key={x.id} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <T>{new Date(x.start_at).toLocaleDateString(loc())}</T>
-            <Muted>{hm(x.start_at)}–{x.end_at ? hm(x.end_at) : '…'}{x.end_odo ? ' · ' + (x.end_odo - x.start_odo) + tr(' км') : ''}</Muted>
+            <Muted>{hm(x.start_at)}–{x.end_at ? hm(x.end_at) : '…'}{x.end_odo && x.start_odo != null ? ' · ' + (x.end_odo - x.start_odo) + tr(' км') : ''}</Muted>
           </View>
         )) : <Muted>{tr('Рабочих дней пока нет.')}</Muted>}
       </Card>
