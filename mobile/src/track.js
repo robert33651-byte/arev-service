@@ -108,9 +108,9 @@ export async function startTrack(force) {
     if (on) { try { await Location.stopLocationUpdatesAsync(TRACK_TASK); } catch (e) {} }
     fresh = true;
     await Location.startLocationUpdatesAsync(TRACK_TASK, {
-      accuracy: Location.Accuracy.High,   // Balanced даёт точки по вышкам и Wi-Fi с ошибкой в сотни метров — км занижаются
+      accuracy: Location.Accuracy.Balanced,   // экономный режим: меньше расход батареи (до версии 1.8.x была High)
       timeInterval: 60000,
-      distanceInterval: 0,
+      distanceInterval: 100,                  // точка при смещении от 100 м, на стоянке телефон не опрашивается
       pausesUpdatesAutomatically: false,
       foregroundService: {
         notificationTitle: tr('Идёт рабочий день'),
