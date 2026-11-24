@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Arev Касса</title>
+<link rel="icon" type="image/png" href="../icons/icon-192.png">
+<style>
+:root{--bg:#eef2f0;--surface:#fff;--surface-2:#f6f8f7;--ink:#14211d;--muted:#5b6a65;--line:#d9e1dd;--pine:#123a33;--pine-ink:#e8f1ed;--ok:#2c8a57;--ok-soft:#e1f2e8;--warn:#b86d06;--warn-soft:#fbeedb;--bad:#c23d2c;--bad-soft:#fbe4e0}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1513;--surface:#162019;--surface-2:#1b2622;--ink:#e4ebe8;--muted:#94a39d;--line:#27342f;--pine:#0a2420;--pine-ink:#dcebe5;--ok:#53c085;--ok-soft:#173226;--warn:#eaa246;--warn-soft:#33260f;--bad:#ef7564;--bad-soft:#3a1d18}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--pine);color:var(--pine-ink);padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header b{font-size:17px}header .sp{flex:1}
+main{max-width:1000px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
+h2{margin:0 0 10px;font-size:17px}
+.muted{color:var(--muted)}.small{font-size:13px}.tiny{font-size:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.between{justify-content:space-between}
+.field{display:flex;flex-direction:column;gap:4px;min-width:170px;flex:1}
+label{font-size:13px;color:var(--muted)}
+input,select{font:inherit;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0;width:100%}
+input:focus,select:focus{outline:2px solid var(--pine);outline-offset:1px}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);padding:9px 14px}
+button.p{background:var(--pine);color:var(--pine-ink);border-color:var(--pine);font-weight:600}
+button.ok{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+button.bad{background:var(--bad);border-color:var(--bad);color:#fff}
+button.sm{padding:5px 10px;font-size:13px}button:disabled{opacity:.5;cursor:default}
+header button{background:transparent;color:var(--pine-ink);border-color:rgba(255,255,255,.35)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px}
+.kpi b{display:block;font-size:26px;font-variant-numeric:tabular-nums}.kpi.neg b{color:var(--bad)}
+.chip{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;background:var(--surface-2);border:1px solid var(--line)}
+.c-ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}.c-warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}.c-bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tw{overflow-x:auto}
+.recv{border:2px solid var(--warn);background:var(--warn-soft);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.recv .amt{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+.login{max-width:380px;margin:60px auto;padding:0 16px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:9;max-width:90vw}
+.flag{padding:10px 12px;border-radius:10px;background:var(--warn-soft);color:var(--warn)}
+@media(max-width:600px){main{padding:10px}.kpi b{font-size:22px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="../config.js"></script>
+<script src="../hy.js"></script>
+<script src="../i18n.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(function(){
+'use strict';
+var C=window.AREV_CONFIG||{};
+var sb=window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'arev-kassa-auth'}});
+var DOMAIN='staff.arevservice.app';
+var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:''},step:null,dispute:null,voidId:null,loaded:false,err:''};
+var $=function(s){return document.querySelector(s)};
+var h=function(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
+var hu=function(x){return '<span data-noi18n>'+h(x)+'</span>'};
+var puT=function(x){return window.ARLANG==='hy'&&window.HY_DICT&&window.HY_DICT[x]?window.HY_DICT[x]:x};
+
+var money=function(n){return n==null||isNaN(n)?'—':Math.round(n).toLocaleString('ru-RU')+' ֏'};
+var p2=function(n){return String(n).padStart(2,'0')};
+var MON=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+', '+p2(d.getHours())+':'+p2(d.getMinutes())};
+var ms=function(x){return x?new Date(x).getTime():null};
+var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
+function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
+var ERR={BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден'};
+function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
+function stat(x){
+  if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
+  if(x.voided_at)return '<span class="chip">отменено</span><div class="tiny muted">'+hu((x.void_by||'')+': '+(x.void_reason||''))+'</div>';
+  if(x.status==='disputed')return '<span class="chip c-bad">оспорено</span><div class="tiny" style="color:var(--bad)">'+hu(x.dispute_note||'')+'</div>';
+  if(x.status==='pending'){var late=Date.now()-ms(x.at)>S.hours*36e5;return '<span class="chip '+(late?'c-bad':'c-warn')+'">ждёт подтверждения</span>'}
+  return '<span class="chip c-ok">получено</span><div class="tiny muted">'+fT(ms(x.confirmed_at))+(x.confirmed_by_admin?' · подтвердил администратор':'')+'</div>'}
+function perFrom(p){var t=new Date();t.setHours(0,0,0,0);if(p==='week')return t.getTime()-6*864e5;if(p==='month'){t.setDate(1);return t.getTime()}return 0}
+
+async function load(){
+  var u=S.sess.user.id;
+  var q=await Promise.all([
+    sb.from('staff').select('id,name,status,is_cashier,web_access,kind').eq('id',u).maybeSingle(),
+    sb.from('cash_ledger').select('*').order('at',{ascending:false}).limit(2000),
+    sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle()
+  ]);
+  S.me=q[0].data||null;S.cash=q[1].data||[];S.err=q[1].error?q[1].error.message:'';
+  var c=q[2].data||{};S.purposes=Array.isArray(c.cash_purposes)&&c.cash_purposes.length?c.cash_purposes:['Закупка материалов','Командировка','Топливо','Зарплата / аванс','Прочее'];S.hours=+c.cash_confirm_hours||24;
+  S.bal=null;S.people=[];
+  if(S.me&&S.me.is_cashier&&S.me.status==='approved'){
+    var r=await Promise.all([sb.rpc('cash_balance'),sb.rpc('cash_people')]);
+    S.bal=r[0].error?null:Number(r[0].data);S.people=Array.isArray(r[1].data)?r[1].data:[];
+  }
+  S.loaded=true;render();
+}
+
+function header(){return '<header><b>Arev Касса</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
+
+function loginView(){return header()+'<div class="login"><div class="card"><h2>Вход</h2><p class="muted small">Тот же номер телефона и PIN-код, что в приложении Arev Service.</p>'+
+  '<div class="field"><label for="ph">Телефон</label><input id="ph" data-f="ph" type="tel" inputmode="tel" autocomplete="username" placeholder="+374 91 123456" value="'+h(S.form.ph||'')+'"></div>'+
+  '<div class="field" style="margin-top:10px"><label for="pin">PIN-код</label><input id="pin" data-f="pin" type="password" inputmode="numeric" autocomplete="current-password" value="'+h(S.form.pin||'')+'"></div>'+
+  '<button class="p" style="width:100%;margin-top:14px" data-a="login"'+(S.busy?' disabled':'')+'>Войти</button></div></div>'}
+
+function recvBlock(){
+  var mine=S.cash.filter(function(x){return x.kind==='issue'&&x.staff_id===S.me.id&&x.status==='pending'&&!x.voided_at});
+  if(!mine.length)return '';
+  return '<section class="card"><h2>Вам выдали деньги: подтвердите получение</h2><div style="display:flex;flex-direction:column;gap:10px">'+mine.map(function(x){
+    var dsp=S.dispute===x.id;
+    return '<div class="recv"><div class="amt">'+money(x.amount)+'</div><div>'+hu(puT(x.purpose||''))+(x.note?' · '+h(x.note):'')+'</div><div class="small muted">Выдал(а): '+hu(x.by_name||'—')+' · '+fT(ms(x.at))+'</div>'+
+    (dsp?'<div class="field"><label>Что не так? (например, получили другую сумму)</label><input data-f="dn" value="'+h(S.form.dn||'')+'" placeholder="Получил 8000"></div><div class="row"><button class="bad" data-a="disp" data-id="'+h(x.id)+'">Отправить</button><button data-a="dispno">Назад</button></div>'
+         :'<div class="row"><button class="ok" data-a="conf" data-id="'+h(x.id)+'">Получил</button><button data-a="dispopen" data-id="'+h(x.id)+'">Не получил / другая сумма</button></div>')+'</div>'}).join('')+'</div></section>'}
+
+function issueForm(){
+  var f=S.form;
+  if(S.step){var p=S.people.find(function(x){return x.id===S.step.staff})||{};
+    return '<section class="card"><h2>Проверьте выдачу</h2><p style="font-size:18px;margin:0 0 6px"><b>'+money(S.step.amount)+'</b> → '+hu(p.name||'')+'</p><p class="muted" style="margin:0 0 12px">'+hu(puT(S.step.purpose))+(S.step.note?' · '+S.step.note:'')+'</p><div class="row"><button class="p" data-a="issueok"'+(S.busy?' disabled':'')+'>Выдать деньги</button><button data-a="issueback">Изменить</button></div></section>'}
+  return '<section class="card"><h2>Выдать наличные</h2><div class="row" style="align-items:flex-end">'+
+   '<div class="field"><label for="i-s">Кому</label><select id="i-s" data-f="is"><option value="">— выберите сотрудника —</option>'+S.people.map(function(x){return '<option value="'+h(x.id)+'"'+(f.is===x.id?' selected':'')+'>'+h(x.name)+'</option>'}).join('')+'</select></div>'+
+   '<div class="field"><label for="i-a">Сумма, ֏</label><input id="i-a" data-f="ia" inputmode="numeric" placeholder="50000" value="'+h(f.ia||'')+'"></div>'+
+   '<div class="field"><label for="i-p">За что</label><select id="i-p" data-f="ip"><option value="">— выберите цель —</option>'+S.purposes.map(function(x){return '<option value="'+h(x)+'"'+(f.ip===x?' selected':'')+'>'+h(puT(x))+'</option>'}).join('')+'</select></div>'+
+   '<div class="field"><label for="i-n">Комментарий</label><input id="i-n" data-f="in" placeholder="необязательно" value="'+h(f.in||'')+'"></div>'+
+   '<button class="p" data-a="issue">Выдать…</button></div></section>'}
+
+function ledger(){
+  var from=perFrom(S.flt.per);
+  var rows=S.cash.filter(function(x){var t=ms(x.at);if(t<from)return false;if(S.flt.who&&x.staff_id!==S.flt.who)return false;
+    if(S.flt.st==='pending')return x.kind==='issue'&&x.status==='pending'&&!x.voided_at;if(S.flt.st==='disputed')return x.status==='disputed'&&!x.voided_at;if(S.flt.st==='void')return !!x.voided_at;return true});
+  var live=rows.filter(function(x){return !x.voided_at});
+  var out=live.filter(function(x){return x.kind==='issue'}).reduce(function(a,x){return a+x.amount},0),inn=live.filter(function(x){return x.kind==='topup'}).reduce(function(a,x){return a+x.amount},0);
+  var names={};S.cash.forEach(function(x){if(x.staff_id)names[x.staff_id]=x.staff_name||'—'});
+  return '<section class="card"><div class="row between"><h2 style="margin:0">Журнал кассы</h2><button class="sm" data-a="csv">Скачать для Excel</button></div>'+
+   '<div class="row" style="margin:10px 0">'+
+   '<select data-fl="who" style="width:auto"><option value="">Все сотрудники</option>'+Object.keys(names).map(function(id){return '<option value="'+h(id)+'"'+(S.flt.who===id?' selected':'')+'>'+h(names[id])+'</option>'}).join('')+'</select>'+
+   '<select data-fl="per" style="width:auto">'+[['week','7 дней'],['month','Месяц'],['all','Всё время']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.per===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select>'+
+   '<select data-fl="st" style="width:auto">'+[['','Все записи'],['pending','Ждут подтверждения'],['disputed','Оспоренные'],['void','Отменённые']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.st===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select>'+
+   '<span class="small muted">Выдано: '+money(out)+' · Пополнено: '+money(inn)+'</span></div>'+
+   '<div class="tw"><table><thead><tr><th>Когда</th><th>Кому</th><th class="n">Сумма</th><th>Цель</th><th>Статус</th><th></th></tr></thead><tbody>'+
+   (rows.length?rows.slice(0,500).map(function(x){
+     var mineP=x.kind==='issue'&&x.status==='pending'&&!x.voided_at&&x.cashier_id===S.me.id;
+     var vo=S.voidId===x.id;
+     return '<tr><td>'+fT(ms(x.at))+'</td><td>'+(x.kind==='topup'?'<span class="muted">Касса</span>':hu(x.staff_name||'—'))+'</td><td class="n" style="'+(x.voided_at?'text-decoration:line-through;opacity:.6':'')+'">'+(x.kind==='topup'?'+':'−')+money(x.amount)+'</td><td>'+hu(puT(x.purpose||''))+(x.note?'<div class="tiny muted">'+hu(x.note)+'</div>':'')+'</td><td>'+stat(x)+'</td><td>'+
+       (mineP?(vo?'<div class="row" style="flex-wrap:nowrap"><input data-f="vr" placeholder="Причина" value="'+h(S.form.vr||'')+'" style="min-width:130px"><button class="bad sm" data-a="voidok" data-id="'+h(x.id)+'">Отменить</button><button class="sm" data-a="voidno">Назад</button></div>':'<button class="sm" data-a="voidopen" data-id="'+h(x.id)+'">Отменить</button>'):'')+'</td></tr>'}).join(''):'<tr><td colspan="6" class="muted">Записей нет</td></tr>')+
+   '</tbody></table></div><p class="tiny muted">Записи нельзя удалить или изменить. Кассир может отменить свою выдачу, пока получатель не подтвердил; остальное отменяет администратор.</p></section>'}
+
+function myHistory(){
+  var mine=S.cash.filter(function(x){return x.kind==='issue'&&x.staff_id===S.me.id&&!(x.status==='pending'&&!x.voided_at)});
+  return '<section class="card"><h2>Мои получения</h2>'+(mine.length?'<div class="tw"><table><thead><tr><th>Когда</th><th class="n">Сумма</th><th>Цель</th><th>Статус</th></tr></thead><tbody>'+mine.slice(0,100).map(function(x){return '<tr><td>'+fT(ms(x.at))+'</td><td class="n">'+money(x.amount)+'</td><td>'+hu(puT(x.purpose||''))+'</td><td>'+stat(x)+'</td></tr>'}).join('')+'</tbody></table></div>':'<p class="muted">Пока нет выдач.</p>')+'</section>'}
+
+function mainView(){
+  if(!S.loaded)return header()+'<main><p class="muted">Загрузка…</p></main>';
+  if(!S.me)return header()+'<main><div class="flag">Этот телефон не зарегистрирован как сотрудник. Сначала зарегистрируйтесь в приложении Arev Service.</div></main>';
+  if(S.me.status!=='approved')return header()+'<main><div class="flag">Анкета ещё не принята администратором.</div></main>';
+  if(!S.me.web_access)return header()+'<main><div class="flag">Вход с компьютера не разрешён. Попросите администратора включить «Вход с компьютера» в вашей карточке сотрудника.</div></main>';
+  var s=header()+'<main>';
+  if(S.err)s+='<div class="flag">Касса не готова: администратору нужно выполнить обновление базы (файл ALL.sql).</div>';
+  s+=recvBlock();
+  if(S.me.is_cashier){
+    var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
+    s+='<div class="kpis"><div class="kpi'+(S.bal!=null&&S.bal<0?' neg':'')+'"><span class="muted small">Остаток кассы</span><b>'+money(S.bal)+'</b></div><div class="kpi"><span class="muted small">Ждут подтверждения</span><b>'+pend.length+(pend.length?' · '+money(pend.reduce(function(a,x){return a+x.amount},0)):'')+'</b></div></div>';
+    s+=issueForm()+ledger();
+  }else s+=myHistory();
+  return s+'</main>'}
+
+function render(){
+  var a=document.activeElement,id=a&&a.id,pos=a&&a.selectionStart;
+  $('#app').innerHTML=S.sess?mainView():loginView();
+  if(id){var e=document.getElementById(id);if(e){e.focus();try{if(pos!=null)e.setSelectionRange(pos,pos)}catch(_){}}}
+}
+
+async function run(fn){if(S.busy)return;S.busy=true;render();try{await fn()}catch(e){toast('Ошибка: '+(e&&e.message||e))}finally{S.busy=false;render()}}
+
+var A={
+  lang:function(d){window.setAdminLang(d.v)},
+  reload:function(){return load()},
+  logout:async function(){await sb.auth.signOut()},
+  login:function(){return run(async function(){
+    var ph=normPhone(S.form.ph);if(ph.length<11)return toast('Введите номер полностью, например +374 91 123456');
+    if(!/^\d{6,}$/.test(S.form.pin||''))return toast('PIN-код — минимум 6 цифр');
+    var r=await sb.auth.signInWithPassword({email:ph+'@'+DOMAIN,password:S.form.pin});
+    if(r.error)return toast(/Invalid login/i.test(r.error.message)?'Неверный номер или PIN-код':'Ошибка: '+r.error.message);
+  })},
+  conf:function(d){return run(async function(){var r=await sb.rpc('cash_confirm',{p_id:d.id,p_ok:true,p_note:null,p_device:'web'});var e=errOf(r);if(e)return toast(e);toast('Получение подтверждено');await load()})},
+  dispopen:function(d){S.dispute=d.id;S.form.dn='';render()},
+  dispno:function(){S.dispute=null;render()},
+  disp:function(d){return run(async function(){var r=await sb.rpc('cash_confirm',{p_id:d.id,p_ok:false,p_note:S.form.dn||'',p_device:'web'});var e=errOf(r);if(e)return toast(e);S.dispute=null;toast('Администратор увидит ваше замечание');await load()})},
+  issue:function(){var f=S.form,a=parseInt(String(f.ia||'').replace(/\D/g,''),10);
+    if(!f.is)return toast('Выберите получателя');if(!a)return toast('Введите сумму');if(!f.ip)return toast('Выберите цель выдачи');
+    S.step={staff:f.is,amount:a,purpose:f.ip,note:(f.in||'').trim()};render()},
+  issueback:function(){S.step=null;render()},
+  issueok:function(){return run(async function(){var st=S.step;var r=await sb.rpc('cash_issue',{p_staff:st.staff,p_amount:st.amount,p_purpose:st.purpose,p_note:st.note,p_task:null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
+    S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast('Выдача записана. Получатель увидит её и подтвердит.');await load()})},
+  voidopen:function(d){S.voidId=d.id;S.form.vr='';render()},
+  voidno:function(){S.voidId=null;render()},
+  voidok:function(d){return run(async function(){if(!String(S.form.vr||'').trim())return toast('Впишите причину');var r=await sb.rpc('cash_void',{p_id:d.id,p_reason:S.form.vr});var e=errOf(r);if(e)return toast(e);S.voidId=null;toast('Выдача отменена');await load()})},
+  csv:function(){
+    var from=perFrom(S.flt.per);var rows=S.cash.filter(function(x){return ms(x.at)>=from&&(!S.flt.who||x.staff_id===S.flt.who)});
+    var q=function(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'};
+    var out=['Дата;Тип;Кому;Сумма;Цель;Комментарий;Кто внёс;Статус;Подтверждено;Отменено'];
+    rows.forEach(function(x){var d=new Date(x.at);var st=x.voided_at?'отменено':x.kind==='topup'?'пополнение':x.status==='confirmed'?'получено':x.status==='disputed'?'оспорено':'ждёт подтверждения';
+      out.push([d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes()),x.kind==='topup'?'пополнение':'выдача',x.staff_name||'',(x.kind==='topup'?'':'-')+x.amount,x.purpose||'',x.note||'',x.by_name||'',st,x.confirmed_at?new Date(x.confirmed_at).toLocaleString('ru-RU'):'',x.voided_at?(x.void_by+': '+x.void_reason):''].map(q).join(';'))});
+    var blob=new Blob(['﻿'+out.join('\r\n')],{type:'text/csv;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kassa-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)}
+};
+
+document.addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(!b)return;var f=A[b.dataset.a];if(f)f({id:b.dataset.id,v:b.dataset.v})});
+document.addEventListener('input',function(e){var el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value});
+document.addEventListener('change',function(e){var el=e.target;if(el.dataset.fl){S.flt[el.dataset.fl]=el.value;render()}else if(el.dataset.f&&el.tagName==='SELECT'){S.form[el.dataset.f]=el.value}});
+document.addEventListener('keydown',function(e){if(e.key==='Enter'&&e.target.dataset&&(e.target.dataset.f==='pin'||e.target.dataset.f==='ph')&&!S.sess)A.login()});
+
+function onSession(s){S.sess=s;S.loaded=false;S.me=null;if(s)load();else render()}
+sb.auth.getSession().then(function(r){onSession(r.data.session||null)});
+sb.auth.onAuthStateChange(function(ev,s){if(ev==='SIGNED_IN'&&!S.sess)onSession(s);if(ev==='SIGNED_OUT')onSession(null)});
+setInterval(function(){if(S.sess&&S.loaded&&!S.step&&!S.dispute&&!S.voidId&&document.visibilityState==='visible'&&!document.activeElement.matches('input,select'))load()},60000);
+render();
+})();
+</script>
+</body>
+</html>

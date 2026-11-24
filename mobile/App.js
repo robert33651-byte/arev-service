@@ -123,7 +123,7 @@ function Auth() {
 
 /* ---------------- основное приложение ---------------- */
 const TAB_TITLE = { home: 'Arev Service', tasks: 'Задачи', day: 'Мой день', history: 'История', profile: 'Профиль' };
-const SUB_TITLE = { shift: 'Рабочий день', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', talk: 'Разговор с клиентом', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
+const SUB_TITLE = { shift: 'Рабочий день', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', talk: 'Разговор с клиентом', cash: 'Касса', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
 
 function Main({ session }) {
   const uid = session.user.id;
@@ -138,7 +138,7 @@ function Main({ session }) {
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, eqR, fuR, ntR, tlR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, eqR, fuR, ntR, tlR, cashR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -151,6 +151,7 @@ function Main({ session }) {
         supabase.from('fuel').select('liters,amount,at').eq('staff_id', uid).gte('at', d0.toISOString()),
         supabase.rpc('my_tasks'),
         supabase.from('talks').select('id,at,object,duration_s,status').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
+        supabase.from('cash_ledger').select('id,amount').eq('staff_id', uid).eq('status', 'pending').is('voided_at', null),
       ]);
       // нет связи: запрос не бросает ошибку, а возвращает её. Данные на экране не трогаем,
       // иначе работник без интернета попадал на анкету регистрации и терял открытый экран.
@@ -178,6 +179,7 @@ function Main({ session }) {
         nToday: (ntR.data || []).filter((t) => t.status === 'new' && (!t.due || String(t.due).slice(0, 10) <= ymd(new Date()))).length,
         fuelToday: fuR.data || [],
         talks: tlR.data || [],
+        cashPend: cashR.error ? 0 : (cashR.data || []).length,
         nTasks: (ntR.data || []).filter((t) => t.status === 'new').length,
         err: staffR.error ? errText(staffR.error) : null,
       };
@@ -267,6 +269,7 @@ function Main({ session }) {
     else if (view.name === 'deliver') body = <DeliverScreen ctx={ctx} id={view.id} />;
     else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
     else if (view.name === 'task') body = <TaskScreen ctx={ctx} id={view.id} />;
+    else if (view.name === 'cash') body = <CashScreen ctx={ctx} />;
     else if (view.name === 'help') body = <Help ctx={ctx} />;
     else if (view.name === 'talk') body = <TalkScreen ctx={ctx} />;
     else if (view.name === 'perms') body = <Page><PermCard always office={st.staff.kind === 'office'} /><NotifyCard /></Page>;
@@ -541,6 +544,7 @@ function Home({ ctx }) {
         <Action icon="archive" title={tr('Со склада')} sub={tr('взял материал')} onPress={() => nav('take')} />
         {isOff ? null : <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />}
         <Action icon="mic" title={tr('Разговор')} sub={tr('запись с клиентом')} onPress={() => nav('talk')} />
+        {st.staff.is_cashier || st.cashPend ? <Action icon="cash" title={tr('Деньги')} sub={st.cashPend ? tr('подтвердите получение') : tr('касса')} kind={st.cashPend ? 'primary' : undefined} onPress={() => nav('cash')} /> : null}
         <Action icon="help-circle" title={tr('Помощь')} sub={tr('как пользоваться')} onPress={() => nav('help')} />
       </View>
       {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
@@ -830,6 +834,138 @@ function FuelScreen({ ctx }) {
       </Card>
       <Btn title={tr('Сохранить заправку')} onPress={submit} busy={busy} big />
       <CameraSheet visible={cam} title={tr('Чек')} onClose={() => setCam(false)} onShot={onShot} />
+    </Page>
+  );
+}
+
+/* ---------------- касса ---------------- */
+function CashScreen({ ctx }) {
+  const { st, uid, load } = ctx;
+  const cashier = !!st.staff.is_cashier;
+  const purposes = (Array.isArray(st.cfg.cash_purposes) && st.cfg.cash_purposes.length ? st.cfg.cash_purposes : ['Прочее']);
+  const [rows, setRows] = useState([]);
+  const [bal, setBal] = useState(null);
+  const [people, setPeople] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [who, setWho] = useState(null);
+  const [amount, setAmount] = useState('');
+  const [purpose, setPurpose] = useState(null);
+  const [note, setNote] = useState('');
+  const [dispute, setDispute] = useState(null);
+  const [dnote, setDnote] = useState('');
+  const refresh = useCallback(async () => {
+    const d0 = new Date(Date.now() - 45 * 86400000).toISOString();
+    const { data } = await supabase.from('cash_ledger').select('*').eq('kind', 'issue').gte('at', d0).order('at', { ascending: false }).limit(60);
+    setRows(data || []);
+    if (cashier) {
+      try { setBal(await rpc('cash_balance')); setPeople((await rpc('cash_people')) || []); } catch (e) {}
+    }
+    load();
+  }, [cashier]);
+  useEffect(() => { refresh(); }, [refresh]);
+  const act = async (fn, okMsg) => {
+    setBusy(true);
+    try { await fn(); if (okMsg) Alert.alert(okMsg); await refresh(); } catch (e) { Alert.alert(tr('Не получилось'), errText(e)); } finally { setBusy(false); }
+  };
+  const mineIn = rows.filter((r) => r.staff_id === uid && !r.voided_at);
+  const pend = mineIn.filter((r) => r.status === 'pending');
+  const sum = parseInt(String(amount).replace(/\D/g, ''), 10) || 0;
+  const issue = () => {
+    if (!who) return Alert.alert(tr('Кому'), tr('Выберите сотрудника'));
+    if (!sum) return Alert.alert(tr('Сумма'), tr('Укажите сумму'));
+    if (!purpose) return Alert.alert(tr('За что'), tr('Выберите назначение'));
+    if (purpose === 'Прочее' && !note.trim()) return Alert.alert(tr('Комментарий'), tr('Для «Прочее» впишите, на что деньги'));
+    Alert.alert(tr('Выдать наличные?'), who.name + '\n' + money(sum) + '\n' + tr(purpose) + (note.trim() ? '\n' + note.trim() : ''), [
+      { text: tr('Отмена'), style: 'cancel' },
+      { text: tr('Выдать'), onPress: () => act(async () => {
+        await rpc('cash_issue', { p_staff: who.id, p_amount: sum, p_purpose: purpose, p_note: note.trim() || null, p_task: null, p_device: deviceId() });
+        setWho(null); setAmount(''); setPurpose(null); setNote('');
+      }, tr('Выдача записана. Получатель увидит запрос на подтверждение.')) },
+    ]);
+  };
+  const confirm = (r) => act(() => rpc('cash_confirm', { p_id: r.id, p_ok: true, p_note: null, p_device: deviceId() }), tr('Получение подтверждено'));
+  const sendDispute = (r) => {
+    if (!dnote.trim()) return Alert.alert(tr('Комментарий'), tr('Напишите, что не так'));
+    act(async () => { await rpc('cash_confirm', { p_id: r.id, p_ok: false, p_note: dnote.trim(), p_device: deviceId() }); setDispute(null); setDnote(''); }, tr('Руководитель увидит ваше замечание'));
+  };
+  const voidIt = (r) => Alert.alert(tr('Отменить выдачу?'), (r.staff_name || '') + ' · ' + money(r.amount), [
+    { text: tr('Нет'), style: 'cancel' },
+    { text: tr('Отменить выдачу'), style: 'destructive', onPress: () => act(() => rpc('cash_void', { p_id: r.id, p_reason: 'Отменена кассиром' })) },
+  ]);
+  const stChip = (r) => (r.voided_at ? <Chip kind="note">{tr('Отменена')}</Chip> : r.status === 'confirmed' ? <Chip kind="ok">{tr('Получено')}</Chip> : r.status === 'disputed' ? <Chip kind="bad">{tr('Не получил')}</Chip> : <Chip kind="warn">{tr('Ждёт подтверждения')}</Chip>);
+  const dt = (ts) => { const d = new Date(ts); return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + hm(ts); };
+  return (
+    <Page onRefresh={refresh} refreshing={false}>
+      {pend.length ? pend.map((r) => (
+        <Card key={r.id}>
+          <T style={{ fontWeight: '700', fontSize: 17 }}>{tr('Вам выдали ') + money(r.amount)}</T>
+          <Muted>{tr(r.purpose || '') + (r.note ? ' · ' + r.note : '') + ' · ' + dt(r.at)}</Muted>
+          {dispute === r.id ? (
+            <>
+              <Field label={tr('Что не так?')} value={dnote} onChangeText={setDnote} multiline />
+              <Btn title={tr('Отправить замечание')} kind="danger" busy={busy} onPress={() => sendDispute(r)} />
+              <Btn title={tr('Назад')} kind="ghost" onPress={() => setDispute(null)} />
+            </>
+          ) : (
+            <>
+              <Btn title={tr('Получил(а)')} busy={busy} onPress={() => confirm(r)} big />
+              <Btn title={tr('Не получил(а) / сумма другая')} kind="ghost" onPress={() => { setDispute(r.id); setDnote(''); }} />
+            </>
+          )}
+        </Card>
+      )) : null}
+
+      {cashier ? (
+        <>
+          <Card>
+            <Label>{tr('Остаток в кассе')}</Label>
+            <H1>{money(bal)}</H1>
+            {bal != null && bal < 0 ? <Flag kind="bad">{tr('Выдано больше, чем внесено. Попросите руководителя внести пополнение.')}</Flag> : null}
+          </Card>
+          <Card>
+            <T style={{ fontWeight: '700' }}>{tr('Выдать наличные')}</T>
+            <Label>{tr('Кому')}</Label>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {people.map((p) => (
+                <Pressable key={p.id} onPress={() => setWho(p)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: who && who.id === p.id ? C.pine : C.surface2 }}>
+                  <Text style={{ color: who && who.id === p.id ? C.pineInk : C.ink, fontWeight: '600' }}>{p.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Field label={tr('Сумма, ֏')} value={amount} onChangeText={setAmount} keyboardType="number-pad" />
+            <Label>{tr('За что')}</Label>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {purposes.map((x) => (
+                <Pressable key={x} onPress={() => setPurpose(x)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: purpose === x ? C.pine : C.surface2 }}>
+                  <Text style={{ color: purpose === x ? C.pineInk : C.ink, fontWeight: '600' }}>{tr(x)}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Field label={tr('Комментарий')} value={note} onChangeText={setNote} />
+            <Btn title={tr('Выдать')} busy={busy} onPress={issue} big />
+          </Card>
+          <H2>{tr('Последние выдачи')}</H2>
+          {rows.length ? rows.slice(0, 30).map((r) => (
+            <Card key={r.id}>
+              <T style={{ fontWeight: '700' }}>{(r.staff_name || '—') + ' · ' + money(r.amount)}</T>
+              <Muted>{tr(r.purpose || '') + (r.note ? ' · ' + r.note : '') + ' · ' + dt(r.at)}</Muted>
+              {stChip(r)}
+              {!r.voided_at && r.status === 'pending' && r.cashier_id === uid ? <Btn title={tr('Отменить выдачу')} kind="ghost" onPress={() => voidIt(r)} /> : null}
+            </Card>
+          )) : <Muted>{tr('Выдач пока нет')}</Muted>}
+        </>
+      ) : (
+        <>
+          <H2>{tr('Мои получения')}</H2>
+          {mineIn.length ? mineIn.map((r) => (
+            <Card key={r.id}>
+              <T style={{ fontWeight: '700' }}>{money(r.amount)}</T>
+              <Muted>{tr(r.purpose || '') + ' · ' + dt(r.at)}</Muted>
+              {stChip(r)}
+            </Card>
+          )) : <Muted>{tr('Вам пока ничего не выдавали')}</Muted>}
+        </>
+      )}
     </Page>
   );
 }
