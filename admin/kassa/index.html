@@ -58,7 +58,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 var C=window.AREV_CONFIG||{};
 var sb=window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'arev-kassa-auth'}});
 var DOMAIN='staff.arevservice.app';
-var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:''},step:null,dispute:null,voidId:null,loaded:false,err:''};
+var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null};
 var $=function(s){return document.querySelector(s)};
 var h=function(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
 var hu=function(x){return '<span data-noi18n>'+h(x)+'</span>'};
@@ -71,7 +71,7 @@ var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+
 var ms=function(x){return x?new Date(x).getTime():null};
 var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
 function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
-var ERR={BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден'};
+var ERR={SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден'};
 function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
 function stat(x){
   if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
@@ -86,8 +86,10 @@ async function load(){
   var q=await Promise.all([
     sb.from('staff').select('id,name,status,is_cashier,web_access,kind').eq('id',u).maybeSingle(),
     sb.from('cash_ledger').select('*').order('at',{ascending:false}).limit(2000),
-    sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle()
+    sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle(),
+    sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5)
   ]);
+  S.shifts=q[3].error?null:(q[3].data||[]);
   S.me=q[0].data||null;S.cash=q[1].data||[];S.err=q[1].error?q[1].error.message:'';
   var c=q[2].data||{};S.purposes=Array.isArray(c.cash_purposes)&&c.cash_purposes.length?c.cash_purposes:['Закупка материалов','Командировка','Топливо','Зарплата / аванс','Прочее'];S.hours=+c.cash_confirm_hours||24;
   S.bal=null;S.people=[];
@@ -150,6 +152,18 @@ function myHistory(){
   var mine=S.cash.filter(function(x){return x.kind==='issue'&&x.staff_id===S.me.id&&!(x.status==='pending'&&!x.voided_at)});
   return '<section class="card"><h2>Мои получения</h2>'+(mine.length?'<div class="tw"><table><thead><tr><th>Когда</th><th class="n">Сумма</th><th>Цель</th><th>Статус</th></tr></thead><tbody>'+mine.slice(0,100).map(function(x){return '<tr><td>'+fT(ms(x.at))+'</td><td class="n">'+money(x.amount)+'</td><td>'+hu(puT(x.purpose||''))+'</td><td>'+stat(x)+'</td></tr>'}).join('')+'</tbody></table></div>':'<p class="muted">Пока нет выдач.</p>')+'</section>'}
 
+
+function shiftBlock(){
+  if(!S.me||S.me.kind!=='office'||S.shifts===null)return '';
+  var open=S.shifts.filter(function(x){return !x.end_at})[0];
+  var today=new Date().toDateString();
+  var done=S.shifts.filter(function(x){return x.end_at&&new Date(x.start_at).toDateString()===today})[0];
+  var hm=function(t){var d=new Date(t);return p2(d.getHours())+':'+p2(d.getMinutes())};
+  var st=open?'На работе с '+hm(open.start_at):done?'Сегодня: '+hm(done.start_at)+' — '+hm(done.end_at):'Сегодня вы ещё не отметились';
+  return '<section class="card"><h2>Рабочий день</h2><p style="margin:6px 0 10px">'+st+'</p>'+
+    (open?'<button class="p" data-a="shout"'+(S.busy?' disabled':'')+'>Ушёл с работы</button>':'<button class="p" data-a="shin"'+(S.busy?' disabled':'')+'>Пришёл на работу</button>')+'</section>';
+}
+
 function mainView(){
   if(!S.loaded)return header()+'<main><p class="muted">Загрузка…</p></main>';
   if(!S.me)return header()+'<main><div class="flag">Этот телефон не зарегистрирован как сотрудник. Сначала зарегистрируйтесь в приложении Arev Service.</div></main>';
@@ -157,6 +171,7 @@ function mainView(){
   if(!S.me.web_access)return header()+'<main><div class="flag">Вход с компьютера не разрешён. Попросите администратора включить «Вход с компьютера» в вашей карточке сотрудника.</div></main>';
   var s=header()+'<main>';
   if(S.err)s+='<div class="flag">Касса не готова: администратору нужно выполнить обновление базы (файл ALL.sql).</div>';
+  s+=shiftBlock();
   s+=recvBlock();
   if(S.me.is_cashier){
     var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
@@ -176,6 +191,8 @@ async function run(fn){if(S.busy)return;S.busy=true;render();try{await fn()}catc
 var A={
   lang:function(d){window.setAdminLang(d.v)},
   reload:function(){return load()},
+  shin:function(){return run(async function(){var r=await sb.rpc('web_shift',{p_action:'in'});var e=errOf(r);if(e)return toast(e);toast('Приход отмечен');await load()})},
+  shout:function(){return run(async function(){var r=await sb.rpc('web_shift',{p_action:'out'});var e=errOf(r);if(e)return toast(e);toast('Уход отмечен');await load()})},
   logout:async function(){await sb.auth.signOut()},
   login:function(){return run(async function(){
     var ph=normPhone(S.form.ph);if(ph.length<11)return toast('Введите номер полностью, например +374 91 123456');

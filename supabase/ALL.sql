@@ -1,4 +1,4 @@
--- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-24).
+-- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-25).
 -- Supabase → SQL Editor → New query → вставить целиком → Run. Можно запускать повторно, данные не удаляются.
 -- Порядок внутри: schema → tasks v2 → tasks geo → tasks v3 → admin name → talks → registry → cash.
 
@@ -2042,3 +2042,30 @@ revoke all on function public.cash_balance, public.cash_people, public.cash_issu
   public.cash_admin_confirm, public.cash_topup, public._cash_bal, public._cash_guard from public, anon;
 grant execute on function public.cash_balance, public.cash_people, public.cash_issue, public.cash_confirm, public.cash_void,
   public.cash_admin_confirm, public.cash_topup to authenticated;
+
+-- отметка прихода/ухода офисного сотрудника с компьютера: без фото, без одометра, без геолокации
+do $$ declare f record; begin
+  for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public' and p.proname = 'web_shift'
+  loop execute 'drop function ' || f.sig || ' cascade'; end loop;
+end $$;
+create function public.web_shift(p_action text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; r public.shifts;
+begin
+  s := public._staff();
+  if s.kind <> 'office' then return jsonb_build_object('error', 'NOT_OFFICE'); end if;
+  if not s.web_access then return jsonb_build_object('error', 'WEB_NOT_ALLOWED'); end if;
+  if p_action = 'in' then
+    if exists(select 1 from public.shifts where staff_id = s.id and end_at is null) then return jsonb_build_object('error', 'SHIFT_ALREADY_OPEN'); end if;
+    insert into public.shifts(staff_id, start_device) values (s.id, 'web') returning * into r;
+  elsif p_action = 'out' then
+    update public.shifts set end_at = now(), end_device = 'web' where staff_id = s.id and end_at is null returning * into r;
+    if r.id is null then return jsonb_build_object('error', 'NO_OPEN_SHIFT'); end if;
+  else
+    return jsonb_build_object('error', 'BAD_ACTION');
+  end if;
+  return to_jsonb(r);
+end $$;
+revoke all on function public.web_shift from public, anon;
+grant execute on function public.web_shift to authenticated;
