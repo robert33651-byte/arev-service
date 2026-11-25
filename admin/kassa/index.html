@@ -118,13 +118,12 @@ function recvBlock(){
 
 function issueForm(){
   var f=S.form;
-  if(S.step){var p=S.people.find(function(x){return x.id===S.step.staff})||{};
+  if(S.step){var p=S.step.staff?(S.people.find(function(x){return x.id===S.step.staff})||{}):{name:'Офис'};
     return '<section class="card"><h2>Проверьте выдачу</h2><p style="font-size:18px;margin:0 0 6px"><b>'+money(S.step.amount)+'</b> → '+hu(p.name||'')+'</p><p class="muted" style="margin:0 0 12px">'+hu(puT(S.step.purpose))+(S.step.note?' · '+S.step.note:'')+'</p><div class="row"><button class="p" data-a="issueok"'+(S.busy?' disabled':'')+'>Выдать деньги</button><button data-a="issueback">Изменить</button></div></section>'}
   return '<section class="card"><h2>Выдать наличные</h2><div class="row" style="align-items:flex-end">'+
-   '<div class="field"><label for="i-s">Кому</label><select id="i-s" data-f="is"><option value="">— выберите сотрудника —</option>'+S.people.map(function(x){return '<option value="'+h(x.id)+'"'+(f.is===x.id?' selected':'')+'>'+h(x.name)+'</option>'}).join('')+'</select></div>'+
+   '<div class="field"><label for="i-s">Кому</label><select id="i-s" data-f="is"><option value="">— выберите —</option><option value="__office"'+(f.is==='__office'?' selected':'')+'>Офис</option>'+S.people.map(function(x){return '<option value="'+h(x.id)+'"'+(f.is===x.id?' selected':'')+'>'+h(x.name)+'</option>'}).join('')+'</select></div>'+
    '<div class="field"><label for="i-a">Сумма, ֏</label><input id="i-a" data-f="ia" inputmode="numeric" placeholder="50000" value="'+h(f.ia||'')+'"></div>'+
-   '<div class="field"><label for="i-p">За что</label><select id="i-p" data-f="ip"><option value="">— выберите цель —</option>'+S.purposes.map(function(x){return '<option value="'+h(x)+'"'+(f.ip===x?' selected':'')+'>'+h(puT(x))+'</option>'}).join('')+'</select></div>'+
-   '<div class="field"><label for="i-n">Комментарий</label><input id="i-n" data-f="in" placeholder="необязательно" value="'+h(f.in||'')+'"></div>'+
+   '<div class="field" style="flex:2;min-width:240px"><label for="i-p">За что выданы деньги</label><input id="i-p" data-f="ip" maxlength="200" placeholder="впишите вручную" value="'+h(f.ip||'')+'"></div>'+
    '<button class="p" data-a="issue">Выдать…</button></div></section>'}
 
 function ledger(){
@@ -205,11 +204,11 @@ var A={
   dispno:function(){S.dispute=null;render()},
   disp:function(d){return run(async function(){var r=await sb.rpc('cash_confirm',{p_id:d.id,p_ok:false,p_note:S.form.dn||'',p_device:'web'});var e=errOf(r);if(e)return toast(e);S.dispute=null;toast('Администратор увидит ваше замечание');await load()})},
   issue:function(){var f=S.form,a=parseInt(String(f.ia||'').replace(/\D/g,''),10);
-    if(!f.is)return toast('Выберите получателя');if(!a)return toast('Введите сумму');if(!f.ip)return toast('Выберите цель выдачи');
-    S.step={staff:f.is,amount:a,purpose:f.ip,note:(f.in||'').trim()};render()},
+    if(!f.is)return toast('Выберите получателя или «Офис»');if(!a)return toast('Введите сумму');if(!String(f.ip||'').trim())return toast('Впишите, за что выданы деньги');
+    S.step={staff:f.is==='__office'?null:f.is,amount:a,purpose:String(f.ip).trim(),note:''};render()},
   issueback:function(){S.step=null;render()},
   issueok:function(){return run(async function(){var st=S.step;var r=await sb.rpc('cash_issue',{p_staff:st.staff,p_amount:st.amount,p_purpose:st.purpose,p_note:st.note,p_task:null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
-    S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast('Выдача записана. Получатель увидит её и подтвердит.');await load()})},
+    S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast(st.staff?'Выдача записана. Получатель увидит её и подтвердит.':'Выдача записана');await load()})},
   voidopen:function(d){S.voidId=d.id;S.form.vr='';render()},
   voidno:function(){S.voidId=null;render()},
   voidok:function(d){return run(async function(){if(!String(S.form.vr||'').trim())return toast('Впишите причину');var r=await sb.rpc('cash_void',{p_id:d.id,p_reason:S.form.vr});var e=errOf(r);if(e)return toast(e);S.voidId=null;toast('Выдача отменена');await load()})},

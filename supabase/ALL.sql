@@ -1945,17 +1945,28 @@ begin
   e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
   if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
   if coalesce(trim(p_purpose), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;
+  bal := public._cash_bal();
+  if p_staff is null then
+    -- расход на нужды офиса: получателя нет, подтверждать некому, запись сразу считается выданной
+    insert into public.cash_ledger(kind, amount, staff_id, staff_name, cashier_id, by_name, purpose, note, task_id, status, confirmed_at)
+    values ('issue', p_amount, null, 'Офис', s.id, s.name, left(trim(p_purpose), 200), nullif(left(trim(coalesce(p_note, '')), 300), ''), p_task, 'confirmed', now())
+    returning * into row;
+    if p_amount > bal then
+      insert into public.alerts(staff_id, level, kind, message)
+      values (s.id, 'warn', 'cash', 'Выдача ' || p_amount || ' ֏ больше остатка кассы (' || bal || ' ֏). Пополнение кассы не внесено?');
+    end if;
+    return to_jsonb(row);
+  end if;
   select * into r from public.staff where id = p_staff and status = 'approved';
   if r.id is null or r.id = s.id then return jsonb_build_object('error', 'BAD_RECIPIENT'); end if;
-  bal := public._cash_bal();
   insert into public.cash_ledger(kind, amount, staff_id, staff_name, cashier_id, by_name, purpose, note, task_id, status)
-  values ('issue', p_amount, r.id, r.name, s.id, s.name, left(trim(p_purpose), 80), nullif(left(trim(coalesce(p_note, '')), 300), ''), p_task, 'pending')
+  values ('issue', p_amount, r.id, r.name, s.id, s.name, left(trim(p_purpose), 200), nullif(left(trim(coalesce(p_note, '')), 300), ''), p_task, 'pending')
   returning * into row;
   if p_amount > bal then
     insert into public.alerts(staff_id, level, kind, message)
     values (s.id, 'warn', 'cash', 'Выдача ' || p_amount || ' ֏ больше остатка кассы (' || bal || ' ֏). Пополнение кассы не внесено?');
   end if;
-  perform public._notify(r.id, false, 'Вам выдали ' || p_amount || ' ֏', 'Касса: ' || left(trim(p_purpose), 80) || '. Подтвердите получение в приложении.', null);
+  perform public._notify(r.id, false, 'Вам выдали ' || p_amount || ' ֏', 'Касса: ' || left(trim(p_purpose), 200) || '. Подтвердите получение в приложении.', null);
   return to_jsonb(row);
 end $$;
 
@@ -2000,7 +2011,7 @@ begin
   end if;
   select * into row from public.cash_ledger where id = p_id and voided_at is null for update;
   if row.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
-  if not adm and not (row.kind = 'issue' and row.cashier_id = s.id and row.status = 'pending') then
+  if not adm and not (row.kind = 'issue' and row.cashier_id = s.id and (row.status = 'pending' or row.staff_id is null)) then
     return jsonb_build_object('error', 'CANNOT_VOID');
   end if;
   update public.cash_ledger set voided_at = now(), void_reason = left(trim(p_reason), 300), void_by = who

@@ -842,15 +842,13 @@ function FuelScreen({ ctx }) {
 function CashScreen({ ctx }) {
   const { st, uid, load } = ctx;
   const cashier = !!st.staff.is_cashier;
-  const purposes = (Array.isArray(st.cfg.cash_purposes) && st.cfg.cash_purposes.length ? st.cfg.cash_purposes : ['Прочее']);
   const [rows, setRows] = useState([]);
   const [bal, setBal] = useState(null);
   const [people, setPeople] = useState([]);
   const [busy, setBusy] = useState(false);
   const [who, setWho] = useState(null);
   const [amount, setAmount] = useState('');
-  const [purpose, setPurpose] = useState(null);
-  const [note, setNote] = useState('');
+  const [purpose, setPurpose] = useState('');
   const [dispute, setDispute] = useState(null);
   const [dnote, setDnote] = useState('');
   const [mo, setMo] = useState(0);
@@ -873,15 +871,14 @@ function CashScreen({ ctx }) {
   const pend = mineIn.filter((r) => r.status === 'pending');
   const sum = parseInt(String(amount).replace(/\D/g, ''), 10) || 0;
   const issue = () => {
-    if (!who) return Alert.alert(tr('Кому'), tr('Выберите сотрудника'));
+    if (!who) return Alert.alert(tr('Кому'), tr('Выберите сотрудника или «Офис»'));
     if (!sum) return Alert.alert(tr('Сумма'), tr('Укажите сумму'));
-    if (!purpose) return Alert.alert(tr('За что'), tr('Выберите назначение'));
-    if (purpose === 'Прочее' && !note.trim()) return Alert.alert(tr('Комментарий'), tr('Для «Прочее» впишите, на что деньги'));
-    Alert.alert(tr('Выдать наличные?'), who.name + '\n' + money(sum) + '\n' + tr(purpose) + (note.trim() ? '\n' + note.trim() : ''), [
+    if (!purpose.trim()) return Alert.alert(tr('За что'), tr('Впишите, за что выданы деньги'));
+    Alert.alert(tr('Выдать наличные?'), (who.office ? tr('Офис') : who.name) + '\n' + money(sum) + '\n' + purpose.trim(), [
       { text: tr('Отмена'), style: 'cancel' },
       { text: tr('Выдать'), onPress: () => act(async () => {
-        await rpc('cash_issue', { p_staff: who.id, p_amount: sum, p_purpose: purpose, p_note: note.trim() || null, p_task: null, p_device: deviceId() });
-        setWho(null); setAmount(''); setPurpose(null); setNote('');
+        await rpc('cash_issue', { p_staff: who.office ? null : who.id, p_amount: sum, p_purpose: purpose.trim(), p_note: null, p_task: null, p_device: deviceId() });
+        setWho(null); setAmount(''); setPurpose('');
       }, tr('Выдача записана. Получатель увидит запрос на подтверждение.')) },
     ]);
   };
@@ -944,22 +941,14 @@ function CashScreen({ ctx }) {
             <T style={{ fontWeight: '700' }}>{tr('Выдать наличные')}</T>
             <Label>{tr('Кому')}</Label>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {people.map((p) => (
+              {[{ id: '__office', name: tr('Офис'), office: true }].concat(people).map((p) => (
                 <Pressable key={p.id} onPress={() => setWho(p)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: who && who.id === p.id ? C.pine : C.surface2 }}>
                   <Text style={{ color: who && who.id === p.id ? C.pineInk : C.ink, fontWeight: '600' }}>{p.name}</Text>
                 </Pressable>
               ))}
             </View>
             <Field label={tr('Сумма, ֏')} value={amount} onChangeText={setAmount} keyboardType="number-pad" />
-            <Label>{tr('За что')}</Label>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {purposes.map((x) => (
-                <Pressable key={x} onPress={() => setPurpose(x)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: purpose === x ? C.pine : C.surface2 }}>
-                  <Text style={{ color: purpose === x ? C.pineInk : C.ink, fontWeight: '600' }}>{tr(x)}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Field label={tr('Комментарий')} value={note} onChangeText={setNote} />
+            <Field label={tr('За что выданы деньги')} value={purpose} onChangeText={setPurpose} placeholder={tr('впишите вручную')} maxLength={200} />
             <Btn title={tr('Выдать')} busy={busy} onPress={issue} big />
           </Card>
           {monthBar}
@@ -969,7 +958,7 @@ function CashScreen({ ctx }) {
               <T style={{ fontWeight: '700' }}>{(r.staff_name || '—') + ' · ' + money(r.amount)}</T>
               <Muted>{tr(r.purpose || '') + (r.note ? ' · ' + r.note : '') + ' · ' + dt(r.at)}</Muted>
               {stChip(r)}
-              {!r.voided_at && r.status === 'pending' && r.cashier_id === uid ? <Btn title={tr('Отменить выдачу')} kind="ghost" onPress={() => voidIt(r)} /> : null}
+              {!r.voided_at && (r.status === 'pending' || !r.staff_id) && r.cashier_id === uid ? <Btn title={tr('Отменить выдачу')} kind="ghost" onPress={() => voidIt(r)} /> : null}
             </Card>
           )) : <Muted>{tr('Выдач пока нет')}</Muted>}
         </>
