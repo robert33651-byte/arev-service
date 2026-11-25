@@ -2036,15 +2036,24 @@ begin
   return to_jsonb(row);
 end $$;
 
--- пополнение кассы: только администратор
-create function public.cash_topup(p_amount int, p_note text)
+-- пополнение кассы: администратор или кассир (кассир обязан указать, откуда деньги; запись помечается «внёс кассир»)
+create function public.cash_topup(p_amount int, p_note text, p_device text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare row public.cash_ledger;
+declare row public.cash_ledger; s public.staff; e text; adm boolean;
 begin
-  if not public.is_admin() then raise exception 'NOT_ADMIN'; end if;
+  adm := public.is_admin();
+  if not adm then
+    s := public._staff();
+    if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+    e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
+    if coalesce(trim(p_note), '') = '' then return jsonb_build_object('error', 'NEED_NOTE'); end if;
+  end if;
   if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
-  insert into public.cash_ledger(kind, amount, by_name, purpose, note, status, confirmed_at)
-  values ('topup', p_amount, public._actor_name(auth.uid()), 'Пополнение кассы', nullif(left(trim(coalesce(p_note, '')), 300), ''), 'confirmed', now())
+  insert into public.cash_ledger(kind, amount, cashier_id, by_name, purpose, note, status, confirmed_at)
+  values ('topup', p_amount, case when adm then null else s.id end,
+          case when adm then public._actor_name(auth.uid()) else s.name end,
+          case when adm then 'Пополнение кассы' else 'Приход (внёс кассир)' end,
+          nullif(left(trim(coalesce(p_note, '')), 300), ''), 'confirmed', now())
   returning * into row;
   return to_jsonb(row);
 end $$;

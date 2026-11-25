@@ -58,7 +58,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 var C=window.AREV_CONFIG||{};
 var sb=window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'arev-kassa-auth'}});
 var DOMAIN='staff.arevservice.app';
-var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null};
+var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:'',from:'',to:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null};
 var $=function(s){return document.querySelector(s)};
 var h=function(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
 var hu=function(x){return '<span data-noi18n>'+h(x)+'</span>'};
@@ -79,7 +79,9 @@ function stat(x){
   if(x.status==='disputed')return '<span class="chip c-bad">оспорено</span><div class="tiny" style="color:var(--bad)">'+hu(x.dispute_note||'')+'</div>';
   if(x.status==='pending'){var late=Date.now()-ms(x.at)>S.hours*36e5;return '<span class="chip '+(late?'c-bad':'c-warn')+'">ждёт подтверждения</span>'}
   return '<span class="chip c-ok">получено</span><div class="tiny muted">'+fT(ms(x.confirmed_at))+(x.confirmed_by_admin?' · подтвердил администратор':'')+'</div>'}
-function perFrom(p){var t=new Date();t.setHours(0,0,0,0);if(p==='week')return t.getTime()-6*864e5;if(p==='month'){t.setDate(1);return t.getTime()}return 0}
+function dayMs(v,end){if(!/^\d{4}-\d\d-\d\d$/.test(v||''))return null;var d=new Date(v+'T00:00:00');return d.getTime()+(end?864e5:0)}
+function perTo(){return S.flt.per==='range'?(dayMs(S.flt.to,true)||Infinity):Infinity}
+function perFrom(p){var t=new Date();t.setHours(0,0,0,0);if(p==='range')return dayMs(S.flt.from)||0;if(p==='week')return t.getTime()-6*864e5;if(p==='month'){t.setDate(1);return t.getTime()}return 0}
 
 async function load(){
   var u=S.sess.user.id;
@@ -126,9 +128,16 @@ function issueForm(){
    '<div class="field" style="flex:2;min-width:240px"><label for="i-p">За что выданы деньги</label><input id="i-p" data-f="ip" maxlength="200" placeholder="впишите вручную" value="'+h(f.ip||'')+'"></div>'+
    '<button class="p" data-a="issue">Выдать…</button></div></section>'}
 
+function topupForm(){
+  var f=S.form;
+  return '<section class="card"><h2>Приход денег в кассу</h2><div class="row" style="align-items:flex-end">'+
+   '<div class="field"><label for="t-a">Сумма, ֏</label><input id="t-a" data-f="ta" inputmode="numeric" placeholder="100000" value="'+h(f.ta||'')+'"></div>'+
+   '<div class="field" style="flex:2;min-width:240px"><label for="t-n">Откуда деньги</label><input id="t-n" data-f="tn" maxlength="300" placeholder="впишите вручную" value="'+h(f.tn||'')+'"></div>'+
+   '<button class="p" data-a="topup"'+(S.busy?' disabled':'')+'>Внести в кассу</button></div></section>'}
+
 function ledger(){
   var from=perFrom(S.flt.per);
-  var rows=S.cash.filter(function(x){var t=ms(x.at);if(t<from)return false;if(S.flt.who&&x.staff_id!==S.flt.who)return false;
+  var rows=S.cash.filter(function(x){var t=ms(x.at);if(t<from||t>=perTo())return false;if(S.flt.who&&x.staff_id!==S.flt.who)return false;
     if(S.flt.st==='pending')return x.kind==='issue'&&x.status==='pending'&&!x.voided_at;if(S.flt.st==='disputed')return x.status==='disputed'&&!x.voided_at;if(S.flt.st==='void')return !!x.voided_at;return true});
   var live=rows.filter(function(x){return !x.voided_at});
   var out=live.filter(function(x){return x.kind==='issue'}).reduce(function(a,x){return a+x.amount},0),inn=live.filter(function(x){return x.kind==='topup'}).reduce(function(a,x){return a+x.amount},0);
@@ -136,7 +145,8 @@ function ledger(){
   return '<section class="card"><div class="row between"><h2 style="margin:0">Журнал кассы</h2><button class="sm" data-a="csv">Скачать для Excel</button></div>'+
    '<div class="row" style="margin:10px 0">'+
    '<select data-fl="who" style="width:auto"><option value="">Все сотрудники</option>'+Object.keys(names).map(function(id){return '<option value="'+h(id)+'"'+(S.flt.who===id?' selected':'')+'>'+h(names[id])+'</option>'}).join('')+'</select>'+
-   '<select data-fl="per" style="width:auto">'+[['week','7 дней'],['month','Месяц'],['all','Всё время']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.per===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select>'+
+   '<select data-fl="per" style="width:auto">'+[['week','7 дней'],['month','Месяц'],['all','Всё время'],['range','Свой период']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.per===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+ '</select>'+
+   (S.flt.per==='range'?'<label class="small muted">с <input type="date" data-fl="from" value="'+h(S.flt.from||'')+'" style="width:auto"></label><label class="small muted">по <input type="date" data-fl="to" value="'+h(S.flt.to||'')+'" style="width:auto"></label>':'')+
    '<select data-fl="st" style="width:auto">'+[['','Все записи'],['pending','Ждут подтверждения'],['disputed','Оспоренные'],['void','Отменённые']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.st===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select>'+
    '<span class="small muted">Выдано: '+money(out)+' · Пополнено: '+money(inn)+'</span></div>'+
    '<div class="tw"><table><thead><tr><th>Когда</th><th>Кому</th><th class="n">Сумма</th><th>Цель</th><th>Статус</th><th></th></tr></thead><tbody>'+
@@ -175,7 +185,7 @@ function mainView(){
   if(S.me.is_cashier){
     var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
     s+='<div class="kpis"><div class="kpi'+(S.bal!=null&&S.bal<0?' neg':'')+'"><span class="muted small">Остаток кассы</span><b>'+money(S.bal)+'</b></div><div class="kpi"><span class="muted small">Ждут подтверждения</span><b>'+pend.length+(pend.length?' · '+money(pend.reduce(function(a,x){return a+x.amount},0)):'')+'</b></div></div>';
-    s+=issueForm()+ledger();
+    s+=issueForm()+topupForm()+ledger();
   }else s+=myHistory();
   return s+'</main>'}
 
@@ -206,6 +216,11 @@ var A={
   issue:function(){var f=S.form,a=parseInt(String(f.ia||'').replace(/\D/g,''),10);
     if(!f.is)return toast('Выберите получателя или «Офис»');if(!a)return toast('Введите сумму');if(!String(f.ip||'').trim())return toast('Впишите, за что выданы деньги');
     S.step={staff:f.is==='__office'?null:f.is,amount:a,purpose:String(f.ip).trim(),note:''};render()},
+  topup:function(){return run(async function(){var f=S.form,a=parseInt(String(f.ta||'').replace(/\D/g,''),10);
+    if(!a)return toast('Введите сумму');if(!String(f.tn||'').trim())return toast('Впишите, откуда деньги');
+    if(!confirm(puT('Внести в кассу')+': '+money(a)+'?'))return;
+    var r=await sb.rpc('cash_topup',{p_amount:a,p_note:String(f.tn).trim(),p_device:'web'});var e=errOf(r);if(e)return toast(e);
+    S.form.ta='';S.form.tn='';toast('Приход записан');await load()})},
   issueback:function(){S.step=null;render()},
   issueok:function(){return run(async function(){var st=S.step;var r=await sb.rpc('cash_issue',{p_staff:st.staff,p_amount:st.amount,p_purpose:st.purpose,p_note:st.note,p_task:null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
     S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast(st.staff?'Выдача записана. Получатель увидит её и подтвердит.':'Выдача записана');await load()})},
@@ -213,11 +228,13 @@ var A={
   voidno:function(){S.voidId=null;render()},
   voidok:function(d){return run(async function(){if(!String(S.form.vr||'').trim())return toast('Впишите причину');var r=await sb.rpc('cash_void',{p_id:d.id,p_reason:S.form.vr});var e=errOf(r);if(e)return toast(e);S.voidId=null;toast('Выдача отменена');await load()})},
   csv:function(){
-    var from=perFrom(S.flt.per);var rows=S.cash.filter(function(x){return ms(x.at)>=from&&(!S.flt.who||x.staff_id===S.flt.who)});
+    var from=perFrom(S.flt.per);var to=perTo();var rows=S.cash.filter(function(x){return ms(x.at)>=from&&ms(x.at)<to&&(!S.flt.who||x.staff_id===S.flt.who)});
     var q=function(v){return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'};
     var out=['Дата;Тип;Кому;Сумма;Цель;Комментарий;Кто внёс;Статус;Подтверждено;Отменено'];
     rows.forEach(function(x){var d=new Date(x.at);var st=x.voided_at?'отменено':x.kind==='topup'?'пополнение':x.status==='confirmed'?'получено':x.status==='disputed'?'оспорено':'ждёт подтверждения';
       out.push([d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes()),x.kind==='topup'?'пополнение':'выдача',x.staff_name||'',(x.kind==='topup'?'':'-')+x.amount,x.purpose||'',x.note||'',x.by_name||'',st,x.confirmed_at?new Date(x.confirmed_at).toLocaleString('ru-RU'):'',x.voided_at?(x.void_by+': '+x.void_reason):''].map(q).join(';'))});
+    var lv=rows.filter(function(x){return !x.voided_at});var tOut=lv.filter(function(x){return x.kind==='issue'}).reduce(function(m,x){return m+x.amount},0),tIn=lv.filter(function(x){return x.kind==='topup'}).reduce(function(m,x){return m+x.amount},0);
+    out.push('');out.push(['','','Итого выдано',tOut].join(';'));out.push(['','','Итого пополнено',tIn].join(';'));out.push(['','','Разница за период',tIn-tOut].join(';'));
     var blob=new Blob(['﻿'+out.join('\r\n')],{type:'text/csv;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kassa-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)}
 };
 

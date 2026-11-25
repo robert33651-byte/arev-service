@@ -849,6 +849,8 @@ function CashScreen({ ctx }) {
   const [who, setWho] = useState(null);
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [tAmt, setTAmt] = useState('');
+  const [tSrc, setTSrc] = useState('');
   const [dispute, setDispute] = useState(null);
   const [dnote, setDnote] = useState('');
   const [mo, setMo] = useState(0);
@@ -880,6 +882,15 @@ function CashScreen({ ctx }) {
         await rpc('cash_issue', { p_staff: who.office ? null : who.id, p_amount: sum, p_purpose: purpose.trim(), p_note: null, p_task: null, p_device: deviceId() });
         setWho(null); setAmount(''); setPurpose('');
       }, tr('Выдача записана. Получатель увидит запрос на подтверждение.')) },
+    ]);
+  };
+  const topup = () => {
+    const a = parseInt(String(tAmt).replace(/\D/g, ''), 10) || 0;
+    if (!a) return Alert.alert(tr('Сумма'), tr('Укажите сумму'));
+    if (!tSrc.trim()) return Alert.alert(tr('Откуда деньги'), tr('Впишите, откуда деньги'));
+    Alert.alert(tr('Внести в кассу?'), money(a) + '\n' + tSrc.trim(), [
+      { text: tr('Отмена'), style: 'cancel' },
+      { text: tr('Внести'), onPress: () => act(async () => { await rpc('cash_topup', { p_amount: a, p_note: tSrc.trim(), p_device: deviceId() }); setTAmt(''); setTSrc(''); }, tr('Приход записан')) },
     ]);
   };
   const confirm = (r) => act(() => rpc('cash_confirm', { p_id: r.id, p_ok: true, p_note: null, p_device: deviceId() }), tr('Получение подтверждено'));
@@ -950,6 +961,12 @@ function CashScreen({ ctx }) {
             <Field label={tr('Сумма, ֏')} value={amount} onChangeText={setAmount} keyboardType="number-pad" />
             <Field label={tr('За что выданы деньги')} value={purpose} onChangeText={setPurpose} placeholder={tr('впишите вручную')} maxLength={200} />
             <Btn title={tr('Выдать')} busy={busy} onPress={issue} big />
+          </Card>
+          <Card>
+            <T style={{ fontWeight: '700' }}>{tr('Приход денег в кассу')}</T>
+            <Field label={tr('Сумма, ֏')} value={tAmt} onChangeText={setTAmt} keyboardType="number-pad" />
+            <Field label={tr('Откуда деньги')} value={tSrc} onChangeText={setTSrc} placeholder={tr('впишите вручную')} maxLength={300} />
+            <Btn title={tr('Внести в кассу')} kind="dark" busy={busy} onPress={topup} />
           </Card>
           {monthBar}
           <H2>{tr('Выдачи за месяц')}</H2>
