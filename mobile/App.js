@@ -544,7 +544,7 @@ function Home({ ctx }) {
         <Action icon="archive" title={tr('Со склада')} sub={tr('взял материал')} onPress={() => nav('take')} />
         {isOff ? null : <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />}
         <Action icon="mic" title={tr('Разговор')} sub={tr('запись с клиентом')} onPress={() => nav('talk')} />
-        {st.staff.is_cashier || st.cashPend ? <Action icon="cash" title={tr('Деньги')} sub={st.cashPend ? tr('подтвердите получение') : tr('касса')} kind={st.cashPend ? 'primary' : undefined} onPress={() => nav('cash')} /> : null}
+        <Action icon="cash" title={tr('Деньги')} sub={st.cashPend ? tr('подтвердите получение') : st.staff.is_cashier ? tr('касса') : tr('сколько получено')} kind={st.cashPend ? 'primary' : undefined} onPress={() => nav('cash')} />
         <Action icon="help-circle" title={tr('Помощь')} sub={tr('как пользоваться')} onPress={() => nav('help')} />
       </View>
       {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
@@ -853,15 +853,17 @@ function CashScreen({ ctx }) {
   const [note, setNote] = useState('');
   const [dispute, setDispute] = useState(null);
   const [dnote, setDnote] = useState('');
+  const [mo, setMo] = useState(0);
   const refresh = useCallback(async () => {
-    const d0 = new Date(Date.now() - 45 * 86400000).toISOString();
-    const { data } = await supabase.from('cash_ledger').select('*').eq('kind', 'issue').gte('at', d0).order('at', { ascending: false }).limit(60);
+    const now = new Date();
+    const m0 = new Date(now.getFullYear(), now.getMonth() + mo, 1), m1 = new Date(now.getFullYear(), now.getMonth() + mo + 1, 1);
+    const { data } = await supabase.from('cash_ledger').select('*').eq('kind', 'issue').gte('at', m0.toISOString()).lt('at', m1.toISOString()).order('at', { ascending: false }).limit(300);
     setRows(data || []);
     if (cashier) {
       try { setBal(await rpc('cash_balance')); setPeople((await rpc('cash_people')) || []); } catch (e) {}
     }
     load();
-  }, [cashier]);
+  }, [cashier, mo]);
   useEffect(() => { refresh(); }, [refresh]);
   const act = async (fn, okMsg) => {
     setBusy(true);
@@ -892,6 +894,22 @@ function CashScreen({ ctx }) {
     { text: tr('Нет'), style: 'cancel' },
     { text: tr('Отменить выдачу'), style: 'destructive', onPress: () => act(() => rpc('cash_void', { p_id: r.id, p_reason: 'Отменена кассиром' })) },
   ]);
+  const mDate = new Date(new Date().getFullYear(), new Date().getMonth() + mo, 1);
+  const mTitle = tr(MONTHS[mDate.getMonth()]) + ' ' + mDate.getFullYear();
+  const gotSum = mineIn.filter((r) => r.status === 'confirmed').reduce((a, r) => a + r.amount, 0);
+  const waitSum = mineIn.filter((r) => r.status === 'pending').reduce((a, r) => a + r.amount, 0);
+  const outSum = rows.filter((r) => !r.voided_at).reduce((a, r) => a + r.amount, 0);
+  const monthBar = (
+    <Card>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Pressable onPress={() => setMo(mo - 1)} hitSlop={12}><Icon name="chevron-back" /></Pressable>
+        <T style={{ fontWeight: '700' }}>{mTitle}</T>
+        <Pressable onPress={() => mo < 0 && setMo(mo + 1)} hitSlop={12}><Icon name="chevron-forward" color={mo < 0 ? C.ink : C.muted} /></Pressable>
+      </View>
+      <H1>{money(cashier ? outSum : gotSum)}</H1>
+      <Muted>{cashier ? tr('выдано за месяц') : tr('получено за месяц')}{!cashier && waitSum ? ' · ' + tr('ждёт подтверждения: ') + money(waitSum) : ''}</Muted>
+    </Card>
+  );
   const stChip = (r) => (r.voided_at ? <Chip kind="note">{tr('Отменена')}</Chip> : r.status === 'confirmed' ? <Chip kind="ok">{tr('Получено')}</Chip> : r.status === 'disputed' ? <Chip kind="bad">{tr('Не получил')}</Chip> : <Chip kind="warn">{tr('Ждёт подтверждения')}</Chip>);
   const dt = (ts) => { const d = new Date(ts); return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + hm(ts); };
   return (
@@ -944,8 +962,9 @@ function CashScreen({ ctx }) {
             <Field label={tr('Комментарий')} value={note} onChangeText={setNote} />
             <Btn title={tr('Выдать')} busy={busy} onPress={issue} big />
           </Card>
-          <H2>{tr('Последние выдачи')}</H2>
-          {rows.length ? rows.slice(0, 30).map((r) => (
+          {monthBar}
+          <H2>{tr('Выдачи за месяц')}</H2>
+          {rows.length ? rows.map((r) => (
             <Card key={r.id}>
               <T style={{ fontWeight: '700' }}>{(r.staff_name || '—') + ' · ' + money(r.amount)}</T>
               <Muted>{tr(r.purpose || '') + (r.note ? ' · ' + r.note : '') + ' · ' + dt(r.at)}</Muted>
@@ -956,6 +975,7 @@ function CashScreen({ ctx }) {
         </>
       ) : (
         <>
+          {monthBar}
           <H2>{tr('Мои получения')}</H2>
           {mineIn.length ? mineIn.map((r) => (
             <Card key={r.id}>
@@ -963,7 +983,7 @@ function CashScreen({ ctx }) {
               <Muted>{tr(r.purpose || '') + ' · ' + dt(r.at)}</Muted>
               {stChip(r)}
             </Card>
-          )) : <Muted>{tr('Вам пока ничего не выдавали')}</Muted>}
+          )) : <Muted>{tr('В этом месяце ничего не выдавали')}</Muted>}
         </>
       )}
     </Page>
