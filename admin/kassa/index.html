@@ -104,10 +104,15 @@ async function load(){
 
 function header(){return '<header><b>Arev Касса</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
 
-function loginView(){return header()+'<div class="login"><div class="card"><h2>Вход</h2><p class="muted small">Тот же номер телефона и PIN-код, что в приложении Arev Service.</p>'+
-  '<div class="field"><label for="ph">Телефон</label><input id="ph" data-f="ph" type="tel" inputmode="tel" autocomplete="username" placeholder="+374 91 123456" value="'+h(S.form.ph||'')+'"></div>'+
-  '<div class="field" style="margin-top:10px"><label for="pin">PIN-код</label><input id="pin" data-f="pin" type="password" inputmode="numeric" autocomplete="current-password" value="'+h(S.form.pin||'')+'"></div>'+
-  '<button class="p" style="width:100%;margin-top:14px" data-a="login"'+(S.busy?' disabled':'')+'>Войти</button></div></div>'}
+function loginView(){
+  var reg=!!S.reg;
+  return header()+'<div class="login"><div class="card"><h2>'+(reg?'Регистрация сотрудника':'Вход')+'</h2><p class="muted small">'+(reg?'Для офисных сотрудников. Придумайте PIN-код (минимум 6 цифр): им вы будете входить сюда и в приложение. После регистрации руководитель подтвердит анкету.':'Тот же номер телефона и PIN-код, что в приложении Arev Service.')+'</p>'+
+  (reg?'<div class="field"><label for="nm">Имя и фамилия</label><input id="nm" data-f="nm" autocomplete="name" value="'+h(S.form.nm||'')+'"></div>':'')+
+  '<div class="field" style="margin-top:10px"><label for="ph">Телефон</label><input id="ph" data-f="ph" type="tel" inputmode="tel" autocomplete="username" placeholder="+374 91 123456" value="'+h(S.form.ph||'')+'"></div>'+
+  '<div class="field" style="margin-top:10px"><label for="pin">PIN-код</label><input id="pin" data-f="pin" type="password" inputmode="numeric" autocomplete="'+(reg?'new-password':'current-password')+'" value="'+h(S.form.pin||'')+'"></div>'+
+  (reg?'<p class="muted small" style="margin-top:10px">Нажимая «Зарегистрироваться», вы соглашаетесь, что время прихода и ухода записывается и видно руководителю.</p>':'')+
+  '<button class="p" style="width:100%;margin-top:14px" data-a="'+(reg?'register':'login')+'"'+(S.busy?' disabled':'')+'>'+(reg?'Зарегистрироваться':'Войти')+'</button>'+
+  '<p style="text-align:center;margin:14px 0 0"><a href="#" data-a="regmode" data-v="'+(reg?'0':'1')+'" class="small">'+(reg?'У меня уже есть аккаунт — войти':'Нет аккаунта? Зарегистрироваться')+'</a></p></div></div>'}
 
 function recvBlock(){
   var mine=S.cash.filter(function(x){return x.kind==='issue'&&x.staff_id===S.me.id&&x.status==='pending'&&!x.voided_at});
@@ -175,7 +180,7 @@ function shiftBlock(){
 
 function mainView(){
   if(!S.loaded)return header()+'<main><p class="muted">Загрузка…</p></main>';
-  if(!S.me)return header()+'<main><div class="flag">Этот телефон не зарегистрирован как сотрудник. Сначала зарегистрируйтесь в приложении Arev Service.</div></main>';
+  if(!S.me)return header()+'<main><div class="flag">Этот номер ещё не зарегистрирован как сотрудник. Выйдите и зарегистрируйтесь на странице входа.</div></main>';
   if(S.me.status!=='approved')return header()+'<main><div class="flag">Анкета ещё не принята администратором.</div></main>';
   if(!S.me.web_access)return header()+'<main><div class="flag">Вход с компьютера не разрешён. Попросите администратора включить «Вход с компьютера» в вашей карточке сотрудника.</div></main>';
   var s=header()+'<main>';
@@ -203,6 +208,19 @@ var A={
   shin:function(){return run(async function(){var r=await sb.rpc('web_shift',{p_action:'in'});var e=errOf(r);if(e)return toast(e);toast('Приход отмечен');await load()})},
   shout:function(){return run(async function(){var r=await sb.rpc('web_shift',{p_action:'out'});var e=errOf(r);if(e)return toast(e);toast('Уход отмечен');await load()})},
   logout:async function(){await sb.auth.signOut()},
+  regmode:function(d){S.reg=d.v==='1';render()},
+  register:function(){return run(async function(){
+    var nm=String(S.form.nm||'').trim();if(nm.length<3)return toast('Укажите имя и фамилию');
+    var ph=normPhone(S.form.ph);if(ph.length<11)return toast('Введите номер полностью, например +374 91 123456');
+    if(!/^\d{6,}$/.test(S.form.pin||''))return toast('PIN-код — минимум 6 цифр');
+    S.registering=true;
+    var r=await sb.auth.signUp({email:ph+'@'+DOMAIN,password:S.form.pin});
+    if(r.error){S.registering=false;return toast(/already|registered/i.test(r.error.message)?'Этот номер уже зарегистрирован. Нажмите «У меня уже есть аккаунт» и войдите.':'Ошибка: '+r.error.message)}
+    if(!r.data.session){S.registering=false;S.reg=false;return toast('Аккаунт создан. Войдите с этим номером и PIN-кодом.')}
+    var q=await sb.rpc('register',{p_name:nm,p_phone:'+'+ph,p_car_model:'',p_car_plate:'',p_fuel_type:'petrol',p_norm:null,p_tank:null,p_device:null});
+    S.registering=false;
+    if(q.error)return toast('Ошибка: '+q.error.message);
+    toast('Анкета отправлена. Руководитель её подтвердит.');S.reg=false;await load()})},
   login:function(){return run(async function(){
     var ph=normPhone(S.form.ph);if(ph.length<11)return toast('Введите номер полностью, например +374 91 123456');
     if(!/^\d{6,}$/.test(S.form.pin||''))return toast('PIN-код — минимум 6 цифр');
@@ -238,12 +256,12 @@ var A={
     var blob=new Blob(['﻿'+out.join('\r\n')],{type:'text/csv;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kassa-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)}
 };
 
-document.addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(!b)return;var f=A[b.dataset.a];if(f)f({id:b.dataset.id,v:b.dataset.v})});
+document.addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(!b)return;if(b.tagName==='A')e.preventDefault();var f=A[b.dataset.a];if(f)f({id:b.dataset.id,v:b.dataset.v})});
 document.addEventListener('input',function(e){var el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value});
 document.addEventListener('change',function(e){var el=e.target;if(el.dataset.fl){S.flt[el.dataset.fl]=el.value;render()}else if(el.dataset.f&&el.tagName==='SELECT'){S.form[el.dataset.f]=el.value}});
 document.addEventListener('keydown',function(e){if(e.key==='Enter'&&e.target.dataset&&(e.target.dataset.f==='pin'||e.target.dataset.f==='ph')&&!S.sess)A.login()});
 
-function onSession(s){S.sess=s;S.loaded=false;S.me=null;if(s)load();else render()}
+function onSession(s){S.sess=s;S.loaded=false;S.me=null;if(s){if(!S.registering)load();else render()}else render()}
 sb.auth.getSession().then(function(r){onSession(r.data.session||null)});
 sb.auth.onAuthStateChange(function(ev,s){if(ev==='SIGNED_IN'&&!S.sess)onSession(s);if(ev==='SIGNED_OUT')onSession(null)});
 setInterval(function(){if(S.sess&&S.loaded&&!S.step&&!S.dispute&&!S.voidId&&document.visibilityState==='visible'&&!document.activeElement.matches('input,select'))load()},60000);
