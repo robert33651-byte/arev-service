@@ -73,9 +73,12 @@ const office=()=>S.cfg.office_lat!=null?{lat:S.cfg.office_lat,lng:S.cfg.office_l
 /* ---------- загрузка ---------- */
 // Supabase отдаёт не больше 1000 строк за запрос, поэтому читаем частями
 async function pages(mk,max){let out=[];for(let i=0;i<(max||100000);i+=1000){const r=await mk().range(i,i+999);if(r.error)return{error:r.error,data:out};const d=r.data||[];out=out.concat(d);if(d.length<1000)break}return{data:out}}
+// быстрая постраничная загрузка: по 6 страниц одновременно (последовательная занимала десятки секунд)
+async function pagesPar(mk,n){let out=[];for(let i=0;;i+=1000*(n||6)){const rs=await Promise.all(Array.from({length:n||6},(_,k)=>mk().range(i+k*1000,i+k*1000+999)));
+ for(const r of rs){if(r.error)return{error:r.error,data:out};const d=r.data||[];out=out.concat(d);if(d.length<1000)return{data:out}}}}
 async function load(){
  const from=new Date(Date.now()-62*864e5).toISOString();const from7=new Date(Date.now()-7*864e5).toISOString();
- const from8=new Date(Date.now()-8*864e5).toISOString();
+ const from8=new Date(Date.now()-4*864e5).toISOString();
  const q=await Promise.all([
   sb.from('config').select('*').eq('id',1).maybeSingle(),
   pages(()=>sb.from('staff').select('*').order('created_at')),
@@ -85,7 +88,7 @@ async function load(){
   pages(()=>sb.from('alerts').select('*').gte('at',from).order('at',{ascending:false})),
   pages(()=>sb.from('ai_checks').select('*').order('photo')),
   pages(()=>sb.from('card_tx').select('*').gte('at',from).order('at',{ascending:false})),
-  pages(()=>{let x=sb.from('track_points').select('id,staff_id,at,device_at,lat,lng,acc,mocked').gte('at',from8);if(S.trkMax)x=x.gt('id',S.trkMax);return x.order('id')}),  // после первой загрузки читаем только новые точки
+  pagesPar(()=>{let x=sb.from('track_points').select('id,staff_id,at,device_at,lat,lng,acc,mocked').gte('at',from8);if(S.trkMax)x=x.gt('id',S.trkMax);return x.order('id')}),  // после первой загрузки читаем только новые точки
   pages(()=>sb.from('purchases').select('*').or('created_at.gte.'+from+',status.in.(bought,partial,delivered)').order('created_at',{ascending:false})),
   pages(()=>sb.from('work_photos').select('*').gte('at',from).order('at',{ascending:false})),
   pages(()=>sb.from('places').select('*').order('name')),
@@ -109,7 +112,7 @@ async function load(){
  S.alerts=(q[5].data||[]).map(x=>({...x,at:ms(x.at)}));
  S.checks={};(q[6].data||[]).forEach(c=>S.checks[c.photo]=c);
  S.tx=(q[7].data||[]).map(x=>({...x,at:ms(x.at)}));
- if(!q[8].error){const t8=Date.now()-8*864e5;S.trkRaw=(S.trkRaw||[]).filter(p=>ms(p.at)>=t8).concat(q[8].data||[]);(q[8].data||[]).forEach(p=>{if(p.id>(S.trkMax||0))S.trkMax=p.id})}
+ if(!q[8].error){const t8=Date.now()-4*864e5;S.trkRaw=(S.trkRaw||[]).filter(p=>ms(p.at)>=t8).concat(q[8].data||[]);(q[8].data||[]).forEach(p=>{if(p.id>(S.trkMax||0))S.trkMax=p.id})}
  S.track={};(S.trkRaw||[]).forEach(p=>{(S.track[p.staff_id]=S.track[p.staff_id]||[]).push({lat:p.lat,lng:p.lng,acc:p.acc,at:ms(p.device_at||p.at),mocked:p.mocked,what:'трек'})});
  Object.values(S.track).forEach(a=>a.sort((x,y)=>x.at-y.at));
  S.wph=(q[10].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.taken_at||x.at),sentAt:ms(x.at),offline:!!x.taken_at&&ms(x.at)-ms(x.taken_at)>10*60000,loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
