@@ -160,7 +160,7 @@ function ledger(){
      var vo=S.voidId===x.id;
      return '<tr><td>'+fT(ms(x.at))+'</td><td>'+(x.kind==='topup'?'<span class="muted">Касса</span>':hu(x.staff_name||'—'))+'</td><td class="n" style="'+(x.voided_at?'text-decoration:line-through;opacity:.6':'')+'">'+(x.kind==='topup'?'+':'−')+money(x.amount)+'</td><td>'+hu(puT(x.purpose||''))+(x.note?'<div class="tiny muted">'+hu(x.note)+'</div>':'')+'</td><td>'+stat(x)+'</td><td>'+
        (mineP?(vo?'<div class="row" style="flex-wrap:nowrap"><input data-f="vr" placeholder="Причина" value="'+h(S.form.vr||'')+'" style="min-width:130px"><button class="bad sm" data-a="voidok" data-id="'+h(x.id)+'">Отменить</button><button class="sm" data-a="voidno">Назад</button></div>':'<button class="sm" data-a="voidopen" data-id="'+h(x.id)+'">Отменить</button>'):'')+'</td></tr>'}).join(''):'<tr><td colspan="6" class="muted">Записей нет</td></tr>')+
-   '</tbody></table></div><p class="tiny muted">Записи нельзя удалить или изменить. Кассир может отменить свою выдачу, пока получатель не подтвердил; остальное отменяет администратор.</p></section>'}
+   '</tbody></table></div><p class="tiny muted">Записи нельзя удалить или изменить. Кассир может отменить свою выдачу, пока получатель не подтвердил, и свои выдачи на «Офис»; остальное отменяет администратор.</p></section>'}
 
 function myHistory(){
   var mine=S.cash.filter(function(x){return x.kind==='issue'&&x.staff_id===S.me.id&&!(x.status==='pending'&&!x.voided_at)});
