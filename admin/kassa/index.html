@@ -217,11 +217,11 @@ function thread(x){
   var EV={created:'Задача создана',self_added:'Добавлена сотрудником',done:'Выполнено',reopened:'Возвращена в работу',disc_open:'Обсуждение открыто'};
   var items=L===null?'<div class="small muted">Загрузка…</div>':L.length?L.map(function(m){
     var who=m.actor_role==='admin'?'Руководитель':m.actor_role==='staff'?'Вы':'Система';
-    var txt=m.kind==='text'?hu(m.body||''):m.kind==='event'?'<span class="muted">'+(EV[m.code]||hu(m.code||''))+(m.body&&m.code!=='created'?': '+hu(m.body):'')+'</span>':m.kind==='file'?(S.turls&&S.turls[m.path]?'<a href="'+h(S.turls[m.path])+'" target="_blank" rel="noopener">📎 '+hu(m.code||'файл')+'</a>':'<span class="muted">📎 '+hu(m.code||'файл')+'</span>')+(m.body?'<div>'+hu(m.body)+'</div>':''):m.kind==='photo'?(S.turls&&S.turls[m.path]?'<a href="'+h(S.turls[m.path])+'" target="_blank" rel="noopener"><img src="'+h(S.turls[m.path])+'" alt="" style="max-width:220px;max-height:180px;border-radius:8px;display:block"></a>':'<span class="muted">Фото</span>')+(m.body?'<div>'+hu(m.body)+'</div>':''):'<span class="muted">Голосовое сообщение — см. в приложении</span>';
+    var txt=m.kind==='text'?hu(m.body||''):m.kind==='event'?'<span class="muted">'+(EV[m.code]||hu(m.code||''))+(m.body&&m.code!=='created'?': '+hu(m.body):'')+'</span>':m.kind==='file'?(S.turls&&S.turls[m.path]?'<a href="'+h(S.turls[m.path])+'" target="_blank" rel="noopener">Файл: '+hu(m.code||'файл')+'</a>':'<span class="muted">Файл: '+hu(m.code||'файл')+'</span>')+(m.body?'<div>'+hu(m.body)+'</div>':''):m.kind==='photo'?(S.turls&&S.turls[m.path]?'<a href="'+h(S.turls[m.path])+'" target="_blank" rel="noopener"><img src="'+h(S.turls[m.path])+'" alt="" style="max-width:220px;max-height:180px;border-radius:8px;display:block"></a>':'<span class="muted">Фото</span>')+(m.body?'<div>'+hu(m.body)+'</div>':''):'<span class="muted">Голосовое сообщение — см. в приложении</span>';
     return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+who+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>';
   return '<div style="margin-top:8px;border-top:1px solid var(--line,#ddd);padding-top:8px">'+(x.note?'<div class="small"><b>Описание:</b> '+hu(x.note)+'</div>':'')+items+
    '<div class="row" style="align-items:flex-end;margin-top:6px"><div class="field" style="flex:1;min-width:200px"><label>Ваш комментарий</label><input data-f="tsay" maxlength="1000" value="'+h(f.tsay||'')+'"></div><button class="p" data-a="tasksay" data-id="'+h(x.id)+'"'+(S.busy?' disabled':'')+'>Отправить</button></div>'+
-   '<div class="small" style="margin-top:6px"><label for="tfile" class="muted">📎 Прикрепить файл: </label><input id="tfile" type="file">'+(S.tfile?' <span class="muted">'+hu(S.tfile.name)+'</span>':'')+'</div></div>'}
+   '<div class="row" style="margin-top:6px;align-items:center"><input id="tfile" type="file" style="display:none"><button class="sm" data-a="tpick">'+(S.tfile?'Выбрать другой файл':'Прикрепить файл')+'</button>'+(S.tfile?'<span class="small">Файл: <b>'+hu(S.tfile.name)+'</b></span><button class="sm" data-a="tunpick">Убрать файл</button>':'<span class="small muted">PDF, Word, Excel, фото — до 25 МБ</span>')+'</div></div>'}
 
 function tasksBlock(){
   if(!S.me||S.me.kind!=='office'||S.tasks===null)return '';
@@ -289,6 +289,8 @@ var A={
   taskadd:function(){return run(async function(){var t=String(S.form.tt||'').trim();if(!t)return toast('Впишите название задачи');
     var r=await sb.rpc('web_task_add',{p_title:t,p_note:null,p_day:S.form.td||null});var e=errOf(r);if(e)return toast(e);
     S.form.tt='';toast('Задача добавлена');await load()})},
+  tpick:function(){var i=document.getElementById('tfile');if(i)i.click()},
+  tunpick:function(){S.tfile=null;render()},
   notifon:function(){try{Notification.requestPermission().then(function(){render()})}catch(e){}},
   taskopen:function(d){if(S.openT===d.id){S.openT=null;return render()}S.openT=d.id;S.tlog=null;S.tfile=null;S.form.tsay='';render();return loadLog(d.id)},
   tasksay:function(d){return run(async function(){var t=String(S.form.tsay||'').trim(),fl=S.tfile;if(!t&&!fl)return toast('Напишите текст или прикрепите файл');
