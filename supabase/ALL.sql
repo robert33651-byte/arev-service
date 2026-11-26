@@ -1,4 +1,4 @@
--- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-25).
+-- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-26).
 -- Supabase → SQL Editor → New query → вставить целиком → Run. Можно запускать повторно, данные не удаляются.
 -- Порядок внутри: schema → tasks v2 → tasks geo → tasks v3 → admin name → talks → registry → cash.
 
@@ -1849,6 +1849,11 @@ end $$;
 alter table public.staff add column if not exists is_cashier boolean not null default false;
 -- вход с компьютера (веб-страница кассы): разрешает администратор в карточке сотрудника
 alter table public.staff add column if not exists web_access boolean not null default false;
+alter table public.staff add column if not exists cash_pin_hash text;
+alter table public.staff add column if not exists cash_pin_fails int not null default 0;
+alter table public.staff add column if not exists cash_pin_locked_until timestamptz;
+alter table public.staff add column if not exists cash_unlock_until timestamptz;
+alter table public.tasks add column if not exists by_self boolean not null default false;
 alter table public.config add column if not exists cash_purposes jsonb not null default
   '["Закупка материалов","Командировка","Топливо","Зарплата / аванс","Прочее"]'::jsonb;
 alter table public.config add column if not exists cash_confirm_hours int not null default 24;
@@ -1889,7 +1894,7 @@ end $$;
 
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.proname in ('cash_issue','cash_confirm','cash_void','cash_admin_confirm','cash_topup','cash_balance','cash_people','_cash_bal','_cash_guard')
+           where n.nspname = 'public' and p.proname in ('cash_issue','cash_confirm','cash_void','cash_admin_confirm','cash_topup','cash_balance','cash_people','_cash_bal','_cash_guard','cash_pin_state','cash_set_pin','cash_unlock','cash_lock','cash_pin_reset','_cash_pin_hash','web_task_add','web_task_done','web_task_cancel')
   loop execute 'drop function ' || f.sig || ' cascade'; end loop;
 end $$;
 
@@ -1898,8 +1903,14 @@ create function public._cash_guard(s public.staff, p_device text) returns text
 language plpgsql security definer set search_path = public as $$
 begin
   if p_device = 'web' then
-    if s.web_access then return null; end if;
-    return 'WEB_NOT_ALLOWED';
+    if not s.web_access then return 'WEB_NOT_ALLOWED'; end if;
+    -- кассир на компьютере: нужен разблокированный сеанс (кассовый PIN); действие продлевает его на 10 минут
+    if s.is_cashier then
+      if s.cash_pin_hash is null then return 'NO_PIN'; end if;
+      if s.cash_unlock_until is null or s.cash_unlock_until < now() then return 'LOCKED'; end if;
+      update public.staff set cash_unlock_until = now() + interval '10 minutes' where id = s.id;
+    end if;
+    return null;
   end if;
   return public._guard(s, p_device, false);
 end $$;
@@ -2089,3 +2100,124 @@ begin
 end $$;
 revoke all on function public.web_shift from public, anon;
 grant execute on function public.web_shift to authenticated;
+
+-- ---------- кассовый PIN кассира (вход с компьютера) ----------
+create function public._cash_pin_hash(p_salt text, p_pin text) returns text
+language sql immutable as $$ select encode(sha256(convert_to(p_salt || ':' || p_pin, 'UTF8')), 'hex') $$;
+
+create function public.cash_pin_state() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff;
+begin
+  s := public._staff();
+  return jsonb_build_object('set', s.cash_pin_hash is not null,
+    'unlocked', s.cash_unlock_until is not null and s.cash_unlock_until > now(),
+    'locked_until', case when s.cash_pin_locked_until > now() then s.cash_pin_locked_until end);
+end $$;
+
+-- первый раз: задать PIN (4–6 цифр); потом смена требует старый PIN
+create function public.cash_set_pin(p_pin text, p_old text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff; salt text;
+begin
+  s := public._staff();
+  if not s.is_cashier or not s.web_access then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+  if p_pin is null or p_pin !~ '^[0-9]{4,6}$' then return jsonb_build_object('error', 'BAD_PIN_FORMAT'); end if;
+  if s.cash_pin_hash is not null then
+    if s.cash_pin_locked_until > now() then return jsonb_build_object('error', 'PIN_LOCKED', 'until', s.cash_pin_locked_until); end if;
+    if p_old is null or split_part(s.cash_pin_hash, '$', 2) <> public._cash_pin_hash(split_part(s.cash_pin_hash, '$', 1), p_old) then
+      return jsonb_build_object('error', 'PIN_WRONG');
+    end if;
+  end if;
+  salt := replace(gen_random_uuid()::text, '-', '');
+  update public.staff set cash_pin_hash = salt || '$' || public._cash_pin_hash(salt, p_pin), cash_pin_fails = 0,
+         cash_pin_locked_until = null, cash_unlock_until = now() + interval '10 minutes' where id = s.id;
+  return jsonb_build_object('ok', true);
+end $$;
+
+create function public.cash_unlock(p_pin text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff; fails int;
+begin
+  s := public._staff();
+  if not s.is_cashier or not s.web_access then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+  if s.cash_pin_hash is null then return jsonb_build_object('error', 'NO_PIN'); end if;
+  if s.cash_pin_locked_until > now() then return jsonb_build_object('error', 'PIN_LOCKED', 'until', s.cash_pin_locked_until); end if;
+  if split_part(s.cash_pin_hash, '$', 2) = public._cash_pin_hash(split_part(s.cash_pin_hash, '$', 1), coalesce(p_pin, '')) then
+    update public.staff set cash_pin_fails = 0, cash_unlock_until = now() + interval '10 minutes' where id = s.id;
+    return jsonb_build_object('ok', true);
+  end if;
+  fails := s.cash_pin_fails + 1;
+  if fails >= 5 then
+    update public.staff set cash_pin_fails = 0, cash_pin_locked_until = now() + interval '15 minutes', cash_unlock_until = null where id = s.id;
+    insert into public.alerts(staff_id, level, kind, message)
+    values (s.id, 'bad', 'cash', 'Кассовый PIN введён неверно 5 раз подряд (' || s.name || '). Касса на компьютере заблокирована на 15 минут.');
+    return jsonb_build_object('error', 'PIN_LOCKED', 'until', now() + interval '15 minutes');
+  end if;
+  update public.staff set cash_pin_fails = fails where id = s.id;
+  return jsonb_build_object('error', 'PIN_WRONG', 'left', 5 - fails);
+end $$;
+
+create function public.cash_lock() returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.staff set cash_unlock_until = null where id = auth.uid();
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- администратор сбрасывает кассовый PIN (кассир задаст новый при следующем входе)
+create function public.cash_pin_reset(p_staff uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then return jsonb_build_object('error', 'FORBIDDEN'); end if;
+  update public.staff set cash_pin_hash = null, cash_pin_fails = 0, cash_pin_locked_until = null, cash_unlock_until = null where id = p_staff;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- ---------- задачи офисного сотрудника на компьютере ----------
+create function public.web_task_add(p_title text, p_note text default null, p_day date default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff; r public.tasks;
+begin
+  s := public._staff();
+  if s.kind <> 'office' then return jsonb_build_object('error', 'NOT_OFFICE'); end if;
+  if not s.web_access then return jsonb_build_object('error', 'WEB_NOT_ALLOWED'); end if;
+  if s.status <> 'approved' then return jsonb_build_object('error', 'NOT_APPROVED'); end if;
+  if coalesce(trim(p_title), '') = '' then return jsonb_build_object('error', 'NEED_TITLE'); end if;
+  insert into public.tasks(staff_id, day, title, note, by_self)
+  values (s.id, coalesce(p_day, current_date), left(trim(p_title), 200), nullif(left(trim(coalesce(p_note, '')), 500), ''), true)
+  returning * into r;
+  return to_jsonb(r);
+end $$;
+
+create function public.web_task_done(p_id uuid, p_note text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff; r public.tasks;
+begin
+  s := public._staff();
+  if s.kind <> 'office' then return jsonb_build_object('error', 'NOT_OFFICE'); end if;
+  if not s.web_access then return jsonb_build_object('error', 'WEB_NOT_ALLOWED'); end if;
+  update public.tasks set status = 'done', done_at = now(), done_note = nullif(left(trim(coalesce(p_note, '')), 500), '')
+   where id = p_id and staff_id = s.id and status = 'new' returning * into r;
+  if r.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  return to_jsonb(r);
+end $$;
+
+-- отменить можно только задачу, которую создал сам
+create function public.web_task_cancel(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.staff; r public.tasks;
+begin
+  s := public._staff();
+  if s.kind <> 'office' then return jsonb_build_object('error', 'NOT_OFFICE'); end if;
+  if not s.web_access then return jsonb_build_object('error', 'WEB_NOT_ALLOWED'); end if;
+  update public.tasks set status = 'cancelled' where id = p_id and staff_id = s.id and status = 'new' and by_self returning * into r;
+  if r.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  return to_jsonb(r);
+end $$;
+
+revoke all on function public.cash_pin_state, public.cash_set_pin, public.cash_unlock, public.cash_lock, public.cash_pin_reset,
+  public.web_task_add, public.web_task_done, public.web_task_cancel from public, anon;
+grant execute on function public.cash_pin_state, public.cash_set_pin, public.cash_unlock, public.cash_lock, public.cash_pin_reset,
+  public.web_task_add, public.web_task_done, public.web_task_cancel to authenticated;
+revoke all on function public._cash_pin_hash from public, anon, authenticated;

@@ -56,9 +56,9 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 (function(){
 'use strict';
 var C=window.AREV_CONFIG||{};
-var sb=window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'arev-kassa-auth'}});
+var sb=window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'arev-kassa-auth',storage:(function(){try{window.sessionStorage.setItem('_t','1');window.sessionStorage.removeItem('_t');return window.sessionStorage}catch(_){return undefined}})()}});
 var DOMAIN='staff.arevservice.app';
-var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:'',from:'',to:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null};
+var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:'',from:'',to:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null,pin:null,tasks:null,last:Date.now()};
 var $=function(s){return document.querySelector(s)};
 var h=function(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
 var hu=function(x){return '<span data-noi18n>'+h(x)+'</span>'};
@@ -71,8 +71,8 @@ var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+
 var ms=function(x){return x?new Date(x).getTime():null};
 var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
 function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
-var ERR={SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден'};
-function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
+var ERR={LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден'};
+function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';if((m==='LOCKED'||m==='NO_PIN')&&S.pin){S.pin.unlocked=false;S.pin.set=m==='LOCKED';render()}if(m==='PIN_WRONG'&&r.data&&r.data.left!=null)return 'Неверный PIN. Осталось попыток: '+r.data.left;for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
 function stat(x){
   if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
   if(x.voided_at)return '<span class="chip">отменено</span><div class="tiny muted">'+hu((x.void_by||'')+': '+(x.void_reason||''))+'</div>';
@@ -89,20 +89,23 @@ async function load(){
     sb.from('staff').select('id,name,status,is_cashier,web_access,kind').eq('id',u).maybeSingle(),
     sb.from('cash_ledger').select('*').order('at',{ascending:false}).limit(2000),
     sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle(),
-    sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5)
+    sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5),
+    sb.from('tasks').select('id,day,title,note,status,by_self,done_at,done_note').eq('staff_id',u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200)
   ]);
+  S.tasks=q[4].error?null:(q[4].data||[]);
   S.shifts=q[3].error?null:(q[3].data||[]);
   S.me=q[0].data||null;S.cash=q[1].data||[];S.err=q[1].error?q[1].error.message:'';
   var c=q[2].data||{};S.purposes=Array.isArray(c.cash_purposes)&&c.cash_purposes.length?c.cash_purposes:['Закупка материалов','Командировка','Топливо','Зарплата / аванс','Прочее'];S.hours=+c.cash_confirm_hours||24;
   S.bal=null;S.people=[];
   if(S.me&&S.me.is_cashier&&S.me.status==='approved'){
-    var r=await Promise.all([sb.rpc('cash_balance'),sb.rpc('cash_people')]);
-    S.bal=r[0].error?null:Number(r[0].data);S.people=Array.isArray(r[1].data)?r[1].data:[];
+    var pr=await sb.rpc('cash_pin_state');S.pin=pr.error?{set:false,unlocked:false}:pr.data;
+    if(S.pin.unlocked){var r=await Promise.all([sb.rpc('cash_balance'),sb.rpc('cash_people')]);
+    S.bal=r[0].error?null:Number(r[0].data);S.people=Array.isArray(r[1].data)?r[1].data:[]}
   }
   S.loaded=true;render();
 }
 
-function header(){return '<header><b>Arev Касса</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
+function header(){return '<header><b>'+(S.me&&S.me.is_cashier?'Arev Касса':'Arev')+'</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
 
 function loginView(){
   var reg=!!S.reg;
@@ -150,8 +153,6 @@ function ledger(){
   return '<section class="card"><div class="row between"><h2 style="margin:0">Журнал кассы</h2><button class="sm" data-a="csv">Скачать для Excel</button></div>'+
    '<div class="row" style="margin:10px 0">'+
    '<select data-fl="who" style="width:auto"><option value="">Все сотрудники</option>'+Object.keys(names).map(function(id){return '<option value="'+h(id)+'"'+(S.flt.who===id?' selected':'')+'>'+h(names[id])+'</option>'}).join('')+'</select>'+
-   '<select data-fl="per" style="width:auto">'+[['week','7 дней'],['month','Месяц'],['all','Всё время'],['range','Свой период']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.per===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+ '</select>'+
-   (S.flt.per==='range'?'<label class="small muted">с <input type="date" data-fl="from" value="'+h(S.flt.from||'')+'" style="width:auto"></label><label class="small muted">по <input type="date" data-fl="to" value="'+h(S.flt.to||'')+'" style="width:auto"></label>':'')+
    '<select data-fl="st" style="width:auto">'+[['','Все записи'],['pending','Ждут подтверждения'],['disputed','Оспоренные'],['void','Отменённые']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.st===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select>'+
    '<span class="small muted">Выдано: '+money(out)+' · Пополнено: '+money(inn)+'</span></div>'+
    '<div class="tw"><table><thead><tr><th>Когда</th><th>Кому</th><th class="n">Сумма</th><th>Цель</th><th>Статус</th><th></th></tr></thead><tbody>'+
@@ -178,6 +179,55 @@ function shiftBlock(){
     (open?'<button class="p" data-a="shout"'+(S.busy?' disabled':'')+'>Ушёл с работы</button>':'<button class="p" data-a="shin"'+(S.busy?' disabled':'')+'>Пришёл на работу</button>')+'</section>';
 }
 
+
+function lockView(){
+  var st=S.pin||{};var f=S.form;
+  var until=st.locked_until?new Date(st.locked_until):null;
+  if(until&&until>new Date())return '<section class="card"><h2>Касса заблокирована</h2><p class="muted">Слишком много неверных PIN. Попробуйте после '+p2(until.getHours())+':'+p2(until.getMinutes())+' или попросите администратора сбросить кассовый PIN.</p></section>';
+  if(!st.set)return '<section class="card"><h2>Задайте кассовый PIN</h2><p class="muted small">Этот PIN (4–6 цифр) открывает кассу на компьютере. Он отличается от PIN для входа. Через 10 минут без действий касса блокируется, PIN понадобится снова.</p>'+
+   '<div class="row" style="align-items:flex-end"><div class="field"><label for="k1">Новый кассовый PIN</label><input id="k1" data-f="k1" type="password" inputmode="numeric" maxlength="6" autocomplete="off" value="'+h(f.k1||'')+'"></div>'+
+   '<div class="field"><label for="k2">Повторите PIN</label><input id="k2" data-f="k2" type="password" inputmode="numeric" maxlength="6" autocomplete="off" value="'+h(f.k2||'')+'"></div>'+
+   '<button class="p" data-a="pinset"'+(S.busy?' disabled':'')+'>Сохранить</button></div></section>';
+  return '<section class="card"><h2>Касса заблокирована</h2><p class="muted small">Введите кассовый PIN, чтобы открыть кассу.</p>'+
+   '<div class="row" style="align-items:flex-end"><div class="field"><label for="k0">Кассовый PIN</label><input id="k0" data-f="k0" type="password" inputmode="numeric" maxlength="6" autocomplete="off" value="'+h(f.k0||'')+'"></div>'+
+   '<button class="p" data-a="pinunlock"'+(S.busy?' disabled':'')+'>Открыть кассу</button></div></section>';
+}
+
+function periodBar(){
+  return '<section class="card"><div class="row" style="align-items:center"><b>Период</b>'+
+   '<select data-fl="per" style="width:auto">'+[['week','7 дней'],['month','Месяц'],['all','Всё время'],['range','Свой период']].map(function(x){return '<option value="'+x[0]+'"'+(S.flt.per===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select>'+
+   (S.flt.per==='range'?'<label class="small muted">с <input type="date" data-fl="from" value="'+h(S.flt.from||'')+'" style="width:auto"></label><label class="small muted">по <input type="date" data-fl="to" value="'+h(S.flt.to||'')+'" style="width:auto"></label>':'')+
+   '<span class="sp"></span><button class="sm" data-a="lockcash">Заблокировать кассу</button></div></section>';
+}
+
+function flowTiles(){
+  var from=perFrom(S.flt.per),to=perTo();
+  var rows=S.cash.filter(function(x){var t=ms(x.at);return t>=from&&t<to&&!x.voided_at});
+  var inn=rows.filter(function(x){return x.kind==='topup'}),out=rows.filter(function(x){return x.kind==='issue'});
+  var sum=function(a){return a.reduce(function(m,x){return m+x.amount},0)};
+  var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
+  return '<div class="kpis">'+
+   '<div class="kpi"><span class="muted small">Приход за период</span><b style="color:var(--ok,#2e7d32)">'+money(sum(inn))+'</b><span class="tiny muted">записей: '+inn.length+'</span></div>'+
+   '<div class="kpi"><span class="muted small">Расход за период</span><b>'+money(sum(out))+'</b><span class="tiny muted">записей: '+out.length+'</span></div>'+
+   '<div class="kpi'+(S.bal!=null&&S.bal<0?' neg':'')+'"><span class="muted small">Остаток в кассе сейчас</span><b>'+money(S.bal)+'</b>'+(pend.length?'<span class="tiny muted">ждут подтверждения: '+pend.length+' · '+money(sum(pend))+'</span>':'')+'</div></div>';
+}
+
+function tasksBlock(){
+  if(!S.me||S.me.kind!=='office'||S.tasks===null)return '';
+  var f=S.form,today=new Date().toISOString().slice(0,10);
+  var open=S.tasks.filter(function(x){return x.status==='new'}),done=S.tasks.filter(function(x){return x.status==='done'}).slice(-5).reverse();
+  var dl=function(d){return d===today?'сегодня':d<today?'просрочено · '+d.split('-').reverse().slice(0,2).join('.'):d.split('-').reverse().slice(0,2).join('.')};
+  var row=function(x){return '<div class="recv" style="padding:10px 12px"><div class="row between"><div><b>'+hu(x.title)+'</b>'+(x.note?'<div class="small muted">'+hu(x.note)+'</div>':'')+'<div class="tiny '+(x.day<today&&x.status==='new'?'':'muted')+'" style="'+(x.day<today&&x.status==='new'?'color:var(--bad)':'')+'">'+dl(x.day)+' · '+(x.by_self?'моя задача':'от руководителя')+'</div></div>'+
+    (S.doneId===x.id?'':'<div class="row"><button class="ok" data-a="taskdoneopen" data-id="'+h(x.id)+'">Выполнено</button>'+(x.by_self?'<button class="sm" data-a="taskcancel" data-id="'+h(x.id)+'">Убрать</button>':'')+'</div>')+'</div>'+
+    (S.doneId===x.id?'<div class="field" style="margin-top:8px"><label>Комментарий (необязательно)</label><input data-f="tdn" maxlength="500" value="'+h(f.tdn||'')+'"></div><div class="row"><button class="ok" data-a="taskdone" data-id="'+h(x.id)+'">Подтвердить</button><button data-a="taskdoneno">Отмена</button></div>':'')+'</div>'};
+  return '<section class="card"><h2>Мои задачи</h2>'+
+   '<div class="row" style="align-items:flex-end;margin-bottom:12px"><div class="field" style="flex:2;min-width:220px"><label for="t-t">Новая задача для себя</label><input id="t-t" data-f="tt" maxlength="200" placeholder="что нужно сделать" value="'+h(f.tt||'')+'"></div>'+
+   '<div class="field"><label for="t-d">Срок</label><input id="t-d" type="date" data-f="td" value="'+h(f.td||today)+'" style="width:auto"></div>'+
+   '<button class="p" data-a="taskadd"'+(S.busy?' disabled':'')+'>Добавить</button></div>'+
+   (open.length?'<div style="display:flex;flex-direction:column;gap:8px">'+open.map(row).join('')+'</div>':'<p class="muted">Открытых задач нет.</p>')+
+   (done.length?'<details style="margin-top:10px"><summary class="small muted">Недавно выполненные ('+done.length+')</summary>'+done.map(function(x){return '<div class="small" style="padding:6px 0">✓ '+hu(x.title)+' <span class="muted">· '+fT(ms(x.done_at))+'</span></div>'}).join('')+'</details>':'')+'</section>';
+}
+
 function mainView(){
   if(!S.loaded)return header()+'<main><p class="muted">Загрузка…</p></main>';
   if(!S.me)return header()+'<main><div class="flag">Этот номер ещё не зарегистрирован как сотрудник. Выйдите и зарегистрируйтесь на странице входа.</div></main>';
@@ -186,10 +236,12 @@ function mainView(){
   var s=header()+'<main>';
   if(S.err)s+='<div class="flag">Касса не готова: администратору нужно выполнить обновление базы (файл ALL.sql).</div>';
   s+=shiftBlock();
+  s+=tasksBlock();
   s+=recvBlock();
-  if(S.me.is_cashier){
+  if(S.me.is_cashier&&!(S.pin&&S.pin.unlocked))s+=lockView();
+  else if(S.me.is_cashier){
     var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
-    s+='<div class="kpis"><div class="kpi'+(S.bal!=null&&S.bal<0?' neg':'')+'"><span class="muted small">Остаток кассы</span><b>'+money(S.bal)+'</b></div><div class="kpi"><span class="muted small">Ждут подтверждения</span><b>'+pend.length+(pend.length?' · '+money(pend.reduce(function(a,x){return a+x.amount},0)):'')+'</b></div></div>';
+    s+=periodBar()+flowTiles();
     s+=issueForm()+topupForm()+ledger();
   }else s+=myHistory();
   return s+'</main>'}
@@ -208,6 +260,23 @@ var A={
   shin:function(){return run(async function(){var r=await sb.rpc('web_shift',{p_action:'in'});var e=errOf(r);if(e)return toast(e);toast('Приход отмечен');await load()})},
   shout:function(){return run(async function(){var r=await sb.rpc('web_shift',{p_action:'out'});var e=errOf(r);if(e)return toast(e);toast('Уход отмечен');await load()})},
   logout:async function(){await sb.auth.signOut()},
+  pinset:function(){return run(async function(){var a=String(S.form.k1||''),b=String(S.form.k2||'');
+    if(!/^\d{4,6}$/.test(a))return toast('PIN — от 4 до 6 цифр');if(a!==b)return toast('PIN не совпадает');
+    var r=await sb.rpc('cash_set_pin',{p_pin:a,p_old:null});var e=errOf(r);if(e)return toast(e);
+    S.form.k1='';S.form.k2='';toast('Кассовый PIN сохранён');S.last=Date.now();await load()})},
+  pinunlock:function(){return run(async function(){var p=String(S.form.k0||'');if(!p)return toast('Введите PIN');
+    var r=await sb.rpc('cash_unlock',{p_pin:p});var e=errOf(r);S.form.k0='';
+    if(r.data&&r.data.error==='PIN_LOCKED'){S.pin=Object.assign({},S.pin,{locked_until:r.data.until})}
+    if(e)return toast(e);S.last=Date.now();await load()})},
+  lockcash:function(){return doLock()},
+  taskadd:function(){return run(async function(){var t=String(S.form.tt||'').trim();if(!t)return toast('Впишите название задачи');
+    var r=await sb.rpc('web_task_add',{p_title:t,p_note:null,p_day:S.form.td||null});var e=errOf(r);if(e)return toast(e);
+    S.form.tt='';toast('Задача добавлена');await load()})},
+  taskdoneopen:function(d){S.doneId=d.id;S.form.tdn='';render()},
+  taskdoneno:function(){S.doneId=null;render()},
+  taskdone:function(d){return run(async function(){var r=await sb.rpc('web_task_done',{p_id:d.id,p_note:S.form.tdn||null});var e=errOf(r);if(e)return toast(e);
+    S.doneId=null;toast('Задача выполнена');await load()})},
+  taskcancel:function(d){return run(async function(){var r=await sb.rpc('web_task_cancel',{p_id:d.id});var e=errOf(r);if(e)return toast(e);toast('Задача убрана');await load()})},
   regmode:function(d){S.reg=d.v==='1';render()},
   register:function(){return run(async function(){
     var nm=String(S.form.nm||'').trim();if(nm.length<3)return toast('Укажите имя и фамилию');
@@ -262,6 +331,10 @@ document.addEventListener('change',function(e){var el=e.target;if(el.dataset.fl)
 document.addEventListener('keydown',function(e){if(e.key==='Enter'&&e.target.dataset&&(e.target.dataset.f==='pin'||e.target.dataset.f==='ph')&&!S.sess)A.login()});
 
 function onSession(s){S.sess=s;S.loaded=false;S.me=null;if(s){if(!S.registering)load();else render()}else render()}
+
+async function doLock(){try{await sb.rpc('cash_lock')}catch(_){}if(S.pin){S.pin.unlocked=false}S.bal=null;S.people=[];render()}
+['click','keydown','mousemove','touchstart','scroll'].forEach(function(ev){document.addEventListener(ev,function(){S.last=Date.now()},{passive:true})});
+setInterval(function(){if(S.sess&&S.pin&&S.pin.unlocked&&Date.now()-S.last>10*60*1000){doLock();toast('Касса заблокирована: 10 минут без действий')}},15000);
 sb.auth.getSession().then(function(r){onSession(r.data.session||null)});
 sb.auth.onAuthStateChange(function(ev,s){if(ev==='SIGNED_IN'&&!S.sess)onSession(s);if(ev==='SIGNED_OUT')onSession(null)});
 setInterval(function(){if(S.sess&&S.loaded&&!S.step&&!S.dispute&&!S.voidId&&document.visibilityState==='visible'&&!document.activeElement.matches('input,select'))load()},60000);
