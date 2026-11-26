@@ -90,7 +90,7 @@ async function load(){
     sb.from('cash_ledger').select('*').order('at',{ascending:false}).limit(2000),
     sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle(),
     sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5),
-    sb.from('tasks').select('id,day,title,note,status,by_self,done_at,done_note').eq('staff_id',u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200)
+    sb.from('tasks').select('id,day,title,note,status,by_self,done_at,done_note,seen_at').eq('staff_id',u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200)
   ]);
   S.tasks=q[4].error?null:(q[4].data||[]);
   S.shifts=q[3].error?null:(q[3].data||[]);
@@ -292,7 +292,10 @@ var A={
   tpick:function(){var i=document.getElementById('tfile');if(i)i.click()},
   tunpick:function(){S.tfile=null;render()},
   notifon:function(){try{Notification.requestPermission().then(function(){render()})}catch(e){}},
-  taskopen:function(d){if(S.openT===d.id){S.openT=null;return render()}S.openT=d.id;S.tlog=null;S.tfile=null;S.form.tsay='';render();return loadLog(d.id)},
+  taskopen:function(d){if(S.openT===d.id){S.openT=null;return render()}S.openT=d.id;S.tlog=null;S.tfile=null;S.form.tsay='';render();
+    var tk=S.tasks.filter(function(x){return x.id===d.id})[0];
+    if(tk&&!tk.by_self&&!tk.seen_at){tk.seen_at=new Date().toISOString();sb.rpc('task_seen',{p_id:d.id}).then(function(){loadLog(d.id)},function(){})}
+    return loadLog(d.id)},
   tasksay:function(d){return run(async function(){var t=String(S.form.tsay||'').trim(),fl=S.tfile;if(!t&&!fl)return toast('Напишите текст или прикрепите файл');
     var r;
     if(fl){if(fl.size>25*1024*1024)return toast('Файл больше 25 МБ');toast('Загружаю файл…');
