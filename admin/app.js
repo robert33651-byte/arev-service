@@ -856,7 +856,7 @@ function logHtml(t,log){if(!log.length)return '<p class="small muted">Запис
   if(l.kind==='event'){const f=EVT[l.code];body='<span class="muted">'+h(f?f(l.body||''):(l.code||'событие'))+'</span>'+(l.actor_role!=='system'&&l.code!=='created'&&l.code!=='seen'?' · '+who:l.code==='seen'?' · '+who:'')}
   else{const to=l.actor_role==='staff'?'менеджеру':'→ '+h(tnames(t));
    body='<div><b>'+who+'</b> <span class="tiny muted">'+(l.actor_role==='staff'?'→ менеджеру':to)+'</span></div>'+
-    (l.kind==='voice'&&l.path?'<audio controls preload="none" style="width:100%;max-width:340px" src="'+h(S.urls[l.path]||'')+'"></audio>':l.kind==='photo'&&l.path?thumb(l.path,'thumb lg'):'')+
+    (l.kind==='voice'&&l.path?'<audio controls preload="none" style="width:100%;max-width:340px" src="'+h(S.urls[l.path]||'')+'"></audio>':l.kind==='photo'&&l.path?thumb(l.path,'thumb lg'):l.kind==='file'&&l.path?'<div><a href="'+h(S.urls[l.path]||'#')+'" target="_blank" rel="noopener">📎 '+hu(l.code||'файл')+'</a></div>':'')+
     (l.body?'<div style="white-space:pre-wrap;overflow-wrap:anywhere">'+hu(l.body)+'</div>':'')}
   s+='<div class="tl-i"><time>'+fHM(ms(l.at))+'</time><div>'+body+'</div></div>'});
  return '<div class="tl">'+s+'</div>'}
