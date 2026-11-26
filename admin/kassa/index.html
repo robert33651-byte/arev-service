@@ -71,7 +71,7 @@ var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+
 var ms=function(x){return x?new Date(x).getTime():null};
 var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
 function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
-var ERR={LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',TASK_CLOSED:'Задача уже закрыта',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
+var ERR={LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Фото не загрузилось, повторите',PHOTO_TOO_OLD:'Фото устарело, выберите заново',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
 function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';if((m==='LOCKED'||m==='NO_PIN')&&S.pin){S.pin.unlocked=false;S.pin.set=m==='LOCKED';render()}if(m==='PIN_WRONG'&&r.data&&r.data.left!=null)return 'Неверный PIN. Осталось попыток: '+r.data.left;for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
 function stat(x){
   if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
@@ -217,10 +217,11 @@ function thread(x){
   var EV={created:'Задача создана',self_added:'Добавлена сотрудником',done:'Выполнено',reopened:'Возвращена в работу',disc_open:'Обсуждение открыто'};
   var items=L===null?'<div class="small muted">Загрузка…</div>':L.length?L.map(function(m){
     var who=m.actor_role==='admin'?'Руководитель':m.actor_role==='staff'?'Вы':'Система';
-    var txt=m.kind==='text'?hu(m.body||''):m.kind==='event'?'<span class="muted">'+(EV[m.code]||hu(m.code||''))+(m.body&&m.code!=='created'?': '+hu(m.body):'')+'</span>':'<span class="muted">'+(m.kind==='voice'?'Голосовое сообщение':'Фото')+' — см. в приложении</span>';
+    var txt=m.kind==='text'?hu(m.body||''):m.kind==='event'?'<span class="muted">'+(EV[m.code]||hu(m.code||''))+(m.body&&m.code!=='created'?': '+hu(m.body):'')+'</span>':m.kind==='photo'?(S.turls&&S.turls[m.path]?'<a href="'+h(S.turls[m.path])+'" target="_blank" rel="noopener"><img src="'+h(S.turls[m.path])+'" alt="" style="max-width:220px;max-height:180px;border-radius:8px;display:block"></a>':'<span class="muted">Фото</span>')+(m.body?'<div>'+hu(m.body)+'</div>':''):'<span class="muted">Голосовое сообщение — см. в приложении</span>';
     return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+who+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>';
   return '<div style="margin-top:8px;border-top:1px solid var(--line,#ddd);padding-top:8px">'+(x.note?'<div class="small"><b>Описание:</b> '+hu(x.note)+'</div>':'')+items+
-   '<div class="row" style="align-items:flex-end;margin-top:6px"><div class="field" style="flex:1;min-width:200px"><label>Ваш комментарий</label><input data-f="tsay" maxlength="1000" value="'+h(f.tsay||'')+'"></div><button class="p" data-a="tasksay" data-id="'+h(x.id)+'"'+(S.busy?' disabled':'')+'>Отправить</button></div></div>'}
+   '<div class="row" style="align-items:flex-end;margin-top:6px"><div class="field" style="flex:1;min-width:200px"><label>Ваш комментарий</label><input data-f="tsay" maxlength="1000" value="'+h(f.tsay||'')+'"></div><button class="p" data-a="tasksay" data-id="'+h(x.id)+'"'+(S.busy?' disabled':'')+'>Отправить</button></div>'+
+   '<div class="small" style="margin-top:6px"><label for="tfile" class="muted">📎 Прикрепить фото: </label><input id="tfile" type="file" accept="image/*">'+(S.tfile?' <span class="muted">'+hu(S.tfile.name)+'</span>':'')+'</div></div>'}
 
 function tasksBlock(){
   if(!S.me||S.me.kind!=='office'||S.tasks===null)return '';
@@ -264,8 +265,12 @@ function render(){
 
 async function run(fn){if(S.busy)return;S.busy=true;render();try{await fn()}catch(e){toast('Ошибка: '+(e&&e.message||e))}finally{S.busy=false;render()}}
 
-async function loadLog(id){var r=await sb.from('task_log').select('at,actor_role,kind,code,body').eq('task_id',id).order('at').order('id');
-  if(S.openT===id){S.tlog=r.error?[]:(r.data||[]);render()}}
+async function loadLog(id){var r=await sb.from('task_log').select('at,actor_role,kind,code,body,path').eq('task_id',id).order('at').order('id');
+  var L=r.error?[]:(r.data||[]);S.turls=S.turls||{};
+  await Promise.all(L.filter(function(m){return m.kind==='photo'&&m.path&&!S.turls[m.path]}).map(async function(m){try{var u=await sb.storage.from('photos').createSignedUrl(m.path,3600);if(u.data)S.turls[m.path]=u.data.signedUrl}catch(e){}}));
+  if(S.openT===id){S.tlog=L;render()}}
+function shrink(f){return new Promise(function(res,rej){var im=new Image(),u=URL.createObjectURL(f);im.onload=function(){var k=Math.min(1,1600/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(function(b){b?res(b):rej(new Error('img'))},'image/jpeg',0.8)};im.onerror=function(){rej(new Error('Не удалось прочитать фото'))};im.src=u})}
+document.addEventListener('change',function(e){var t=e.target;if(t&&t.id==='tfile'){S.tfile=t.files&&t.files[0]||null;render()}});
 var A={
   lang:function(d){window.setAdminLang(d.v)},
   reload:function(){return load()},
@@ -284,10 +289,15 @@ var A={
   taskadd:function(){return run(async function(){var t=String(S.form.tt||'').trim();if(!t)return toast('Впишите название задачи');
     var r=await sb.rpc('web_task_add',{p_title:t,p_note:null,p_day:S.form.td||null});var e=errOf(r);if(e)return toast(e);
     S.form.tt='';toast('Задача добавлена');await load()})},
-  taskopen:function(d){if(S.openT===d.id){S.openT=null;return render()}S.openT=d.id;S.tlog=null;S.form.tsay='';render();return loadLog(d.id)},
-  tasksay:function(d){return run(async function(){var t=String(S.form.tsay||'').trim();if(!t)return toast('Напишите текст');
-    var r=await sb.rpc('task_post',{p_id:d.id,p_kind:'text',p_body:t});var e=errOf(r);if(e)return toast(e);
-    S.form.tsay='';toast('Комментарий отправлен');await loadLog(d.id)})},
+  taskopen:function(d){if(S.openT===d.id){S.openT=null;return render()}S.openT=d.id;S.tlog=null;S.tfile=null;S.form.tsay='';render();return loadLog(d.id)},
+  tasksay:function(d){return run(async function(){var t=String(S.form.tsay||'').trim(),fl=S.tfile;if(!t&&!fl)return toast('Напишите текст или прикрепите фото');
+    var r;
+    if(fl){toast('Загружаю фото…');var b=await shrink(fl),path=S.sess.user.id+'/task_'+Date.now()+'.jpg';
+      var up=await sb.storage.from('photos').upload(path,b,{contentType:'image/jpeg',upsert:false});if(up.error)return toast('Ошибка: '+up.error.message);
+      r=await sb.rpc('task_post',{p_id:d.id,p_kind:'photo',p_body:t||null,p_path:path})}
+    else r=await sb.rpc('task_post',{p_id:d.id,p_kind:'text',p_body:t});
+    var e=errOf(r);if(e)return toast(e);
+    S.form.tsay='';S.tfile=null;toast('Отправлено');await loadLog(d.id)})},
   taskdoneopen:function(d){S.doneId=d.id;S.form.tdn='';render()},
   taskdoneno:function(){S.doneId=null;render()},
   taskdone:function(d){return run(async function(){var r=await sb.rpc('web_task_done',{p_id:d.id,p_note:S.form.tdn||null});var e=errOf(r);if(e)return toast(e);
