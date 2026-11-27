@@ -264,6 +264,13 @@ a.chip{text-decoration:none}
 .thumb.lg{width:96px;height:96px}
 .sheet{max-width:480px;border-radius:20px;margin-bottom:auto;margin-top:auto}
 .scrim{align-items:center}
+.scrim.bot{align-items:flex-end}.scrim.bot .sheet{max-width:560px;width:100%;border-radius:24px 24px 0 0;margin:0;gap:16px}
+.xbtn{border:0;background:var(--line);color:var(--ink,inherit);width:40px;height:40px;border-radius:50%;font-size:18px;cursor:pointer;flex:none}
+.mtiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mtile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:84px;padding:12px 6px;border:1px solid var(--line);background:var(--bg,transparent);border-radius:16px;color:inherit;font:inherit;font-size:13px;font-weight:600;text-align:center;cursor:pointer}
+.mtile svg{width:26px;height:26px;color:var(--pine)}
+:root[data-theme="dark"] .mtile svg{color:var(--sun)}
+.mtile:active{transform:scale(.97);background:var(--line)}
 .field label{font-size:13px;font-weight:600}
 
 /* маршрут дня */
