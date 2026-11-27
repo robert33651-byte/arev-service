@@ -1,11 +1,11 @@
--- Запросы денег: работник просит → кассир передаёт шефу со своим комментарием → шеф одобряет / отклоняет / «ждать»
+-- Запросы денег: работник просит → кассир передаёт директору со своим комментарием → директор одобряет / отклоняет / «ждать»
 -- (может изменить сумму) → кассир выдаёт наличные (обычная запись кассы, работник подтверждает получение).
--- Шеф может и сам создать выдачу для сотрудника (с комментарием или голосовым).
+-- Директор может и сам создать выдачу для сотрудника (с комментарием или голосовым).
 -- Запускать после migration_cash.sql. Можно запускать повторно, данные не удаляются.
 --  * cash_requests — сами запросы; удалять нельзя, только менять статус
 --  * cash_request_log — переписка и события по запросу (текст, голос)
 --  * архив: у работника основной список — текущий месяц, старые запросы остаются в архиве (отбор по дате)
---  * напоминание шефу каждый час, пока запрос не решён (pg_cron); кассиру — пока одобренное не выдано
+--  * напоминание директору каждый час, пока запрос не решён (pg_cron); кассиру — пока одобренное не выдано
 
 create table if not exists public.cash_requests(
   id uuid primary key default gen_random_uuid(),
@@ -119,7 +119,7 @@ begin
   return to_jsonb(r);
 end $$;
 
--- 2) кассир передаёт запрос шефу со своими словами / голосовым → уведомление шефу, далее напоминание каждый час
+-- 2) кассир передаёт запрос директору со своими словами / голосовым → уведомление директору, далее напоминание каждый час
 create function public.req_forward(p_id uuid, p_note text default null, p_voice text default null, p_device text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.staff; e text; r public.cash_requests;
@@ -140,12 +140,12 @@ begin
   if p_voice is not null then
     perform public._req_log(r.id, s.id, 'cashier', 'voice', null, null, p_voice);
   end if;
-  perform public._notify(r.requester_id, false, 'Ваш запрос передан шефу', r.amount_asked || ' ֏: ' || r.purpose, null);
+  perform public._notify(r.requester_id, false, 'Ваш запрос передан директору', r.amount_asked || ' ֏: ' || r.purpose, null);
   perform public._notify(null, true, 'Запрос денег: ' || r.requester_name || ', ' || r.amount_asked || ' ֏', r.purpose || coalesce(' · кассир: ' || nullif(left(trim(coalesce(p_note, '')), 120), ''), ''), null);
   return to_jsonb(r);
 end $$;
 
--- 3) шеф решает: approve / reject / wait; при одобрении может изменить сумму
+-- 3) директор решает: approve / reject / wait; при одобрении может изменить сумму
 create function public.req_decide(p_id uuid, p_decision text, p_amount int default null, p_note text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare r public.cash_requests; who text; amt int;
@@ -171,8 +171,8 @@ begin
   else
     update public.cash_requests set status = 'waiting', decided_at = now(), decided_by = who, last_reminded_at = now() where id = r.id returning * into r;
     perform public._req_log(r.id, auth.uid(), 'admin', 'event', 'waiting', null, null);
-    perform public._notify(r.requester_id, false, 'Запрос: подождите', coalesce(nullif(left(trim(coalesce(p_note, '')), 200), ''), 'Шеф попросил подождать.'), null);
-    perform public._req_notify_cashiers('Шеф: подождать по запросу ' || r.requester_name, r.amount_asked || ' ֏');
+    perform public._notify(r.requester_id, false, 'Запрос: подождите', coalesce(nullif(left(trim(coalesce(p_note, '')), 200), ''), 'Директор попросил подождать.'), null);
+    perform public._req_notify_cashiers('Директор: подождать по запросу ' || r.requester_name, r.amount_asked || ' ֏');
   end if;
   if coalesce(trim(p_note), '') <> '' then
     perform public._req_log(r.id, auth.uid(), 'admin', 'text', null, left(trim(p_note), 500), null);
@@ -180,7 +180,7 @@ begin
   return to_jsonb(r);
 end $$;
 
--- шеф сам создаёт выдачу для сотрудника (уже одобрена): кассир получает «к выдаче»
+-- директор сам создаёт выдачу для сотрудника (уже одобрена): кассир получает «к выдаче»
 create function public.req_admin_create(p_staff uuid, p_amount int, p_purpose text, p_note text default null, p_voice text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare t public.staff; r public.cash_requests; e text; who text;
@@ -203,8 +203,8 @@ begin
   if p_voice is not null then
     perform public._req_log(r.id, auth.uid(), 'admin', 'voice', null, null, p_voice);
   end if;
-  perform public._req_notify_cashiers('Шеф: выдать ' || t.name || ', ' || p_amount || ' ֏', left(trim(p_purpose), 200));
-  perform public._notify(t.id, false, 'Шеф выделил вам ' || p_amount || ' ֏', left(trim(p_purpose), 200), null);
+  perform public._req_notify_cashiers('Директор: выдать ' || t.name || ', ' || p_amount || ' ֏', left(trim(p_purpose), 200));
+  perform public._notify(t.id, false, 'Директор выделил вам ' || p_amount || ' ֏', left(trim(p_purpose), 200), null);
   return to_jsonb(r);
 end $$;
 
@@ -224,7 +224,7 @@ begin
   return to_jsonb(r);
 end $$;
 
--- комментарий в переписке запроса (работник — к своему; кассир и шеф — к любому открытому)
+-- комментарий в переписке запроса (работник — к своему; кассир и директор — к любому открытому)
 create function public.req_say(p_id uuid, p_body text default null, p_voice text default null, p_device text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.staff; r public.cash_requests; e text; role text; uid uuid := auth.uid();
@@ -255,13 +255,13 @@ begin
   elsif role = 'cashier' then
     perform public._notify(r.requester_id, false, 'Кассир по запросу', left(coalesce(trim(p_body), 'голосовое'), 120), null);
   else
-    perform public._notify(r.requester_id, false, 'Шеф по запросу', left(coalesce(trim(p_body), 'голосовое'), 120), null);
-    perform public._req_notify_cashiers('Шеф по запросу ' || r.requester_name, left(coalesce(trim(p_body), 'голосовое'), 120));
+    perform public._notify(r.requester_id, false, 'Директор по запросу', left(coalesce(trim(p_body), 'голосовое'), 120), null);
+    perform public._req_notify_cashiers('Директор по запросу ' || r.requester_name, left(coalesce(trim(p_body), 'голосовое'), 120));
   end if;
   return jsonb_build_object('ok', true);
 end $$;
 
--- напоминания: шефу каждый час, пока запрос не решён; кассиру — пока одобренное не выдано
+-- напоминания: директору каждый час, пока запрос не решён; кассиру — пока одобренное не выдано
 create function public.req_reminders() returns int
 language plpgsql security definer set search_path = public as $$
 declare r record; n int := 0;

@@ -72,7 +72,7 @@ var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+
 var ms=function(x){return x?new Date(x).getTime():null};
 var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
 function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
-var ERR={LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',CASHIER_CANNOT:'Кассир запрашивает деньги через шефа',REQ_CLOSED:'Запрос уже закрыт',BAD_DECISION:'Неверное решение',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Файл не загрузился, повторите',PHOTO_TOO_OLD:'Файл устарел, выберите заново',NEED_FILE:'Выберите файл',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
+var ERR={LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',CASHIER_CANNOT:'Кассир запрашивает деньги через директора',REQ_CLOSED:'Запрос уже закрыт',BAD_DECISION:'Неверное решение',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Файл не загрузился, повторите',PHOTO_TOO_OLD:'Файл устарел, выберите заново',NEED_FILE:'Выберите файл',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
 function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';if((m==='LOCKED'||m==='NO_PIN')&&S.pin){S.pin.unlocked=false;S.pin.set=m==='LOCKED';render()}if(m==='PIN_WRONG'&&r.data&&r.data.left!=null)return 'Неверный PIN. Осталось попыток: '+r.data.left;for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
 function stat(x){
   if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
@@ -228,7 +228,7 @@ function thread(x){
 
 
 /* ===== Запросы денег ===== */
-var RST={new:['У кассира','chip'],forwarded:['У шефа','chip c-warn'],waiting:['Шеф просит подождать','chip c-warn'],approved:['Одобрено','chip c-ok'],rejected:['Отклонено','chip c-bad'],paid:['Выдано','chip c-ok'],cancelled:['Отменено','chip']};
+var RST={new:['У кассира','chip'],forwarded:['У директора','chip c-warn'],waiting:['Директор просит подождать','chip c-warn'],approved:['Одобрено','chip c-ok'],rejected:['Отклонено','chip c-bad'],paid:['Выдано','chip c-ok'],cancelled:['Отменено','chip']};
 var VPB='<button type="button" class="vpb" data-vp aria-label="Слушать"><img class="vpi" src="../icons/play.png" alt="" width="30" height="30"><span>Слушать</span></button>';
 function rAmt(r){var a=r.amount_approved;return a&&a!==r.amount_asked?'<b>'+money(a)+'</b> <span class="small muted">(просили '+money(r.amount_asked)+')</span>':'<b>'+money(r.amount_approved||r.amount_asked)+'</b>'}
 function rChip(r){var t=RST[r.status]||[r.status,'chip'];return '<span class="'+t[1]+'">'+t[0]+'</span>'}
@@ -240,8 +240,8 @@ function recUI(key){
 }
 function rThread(r){
   var L=S.rlog,f=S.form;
-  var EV={created:'Запрос создан',forwarded:'Передан шефу',approved:'Одобрено',rejected:'Отклонено',waiting:'Шеф: подождать',paid:'Деньги выданы',cancelled:'Отменён работником',boss_created:'Выдачу назначил шеф',reminder:'Напоминание'};
-  var ROLE={worker:'Работник',cashier:'Кассир',admin:'Шеф',system:'Система'};
+  var EV={created:'Запрос создан',forwarded:'Передан директору',approved:'Одобрено',rejected:'Отклонено',waiting:'Директор: подождать',paid:'Деньги выданы',cancelled:'Отменён работником',boss_created:'Выдачу назначил директор',reminder:'Напоминание'};
+  var ROLE={worker:'Работник',cashier:'Кассир',admin:'Директор',system:'Система'};
   var items=L===null?'<div class="small muted">Загрузка…</div>':L.length?L.map(function(m){
     var who=(S.me&&m.actor_role==='worker'&&r.requester_id===S.me.id)?'Вы':(S.me&&m.actor_role==='cashier'&&S.me.is_cashier)?'Вы':ROLE[m.actor_role]||m.actor_role;
     var txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rurls&&S.rurls[m.path]?''+VPB+'<audio hidden src="'+h(S.rurls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(EV[m.code]||hu(m.code||''))+((m.code==='created'||m.code==='approved'||m.code==='paid'||m.code==='boss_created')&&m.body?': '+money(+m.body):'')+'</span>';
@@ -253,12 +253,12 @@ function rRow(r,role){
   var open=S.reqOpen===r.id,btns='';
   btns+='<button class="sm" data-a="reqopen" data-id="'+h(r.id)+'">'+(open?'Свернуть':'Открыть')+'</button>';
   if(role==='worker'&&r.origin==='worker'&&(r.status==='new'||r.status==='forwarded'||r.status==='waiting'))btns+='<button class="sm" data-a="reqcancel" data-id="'+h(r.id)+'">Отменить запрос</button>';
-  if(role==='cashier'&&(r.status==='new'||r.status==='waiting'))btns+='<button class="p sm" data-a="fwopen" data-id="'+h(r.id)+'">Передать шефу</button>';
+  if(role==='cashier'&&(r.status==='new'||r.status==='waiting'))btns+='<button class="p sm" data-a="fwopen" data-id="'+h(r.id)+'">Передать директору</button>';
   if(role==='cashier'&&r.status==='approved'&&S.issueReq!==r.id)btns+='<button class="bad" data-a="reqissueask" data-id="'+h(r.id)+'">Выдать '+money(r.amount_approved)+'</button>';
   var extra='';
   if(role==='cashier'&&r.status==='approved'&&S.issueReq===r.id)extra='<div class="flag" style="margin-top:8px">Выдать <b>'+money(r.amount_approved)+'</b> сотруднику <b>'+hu(r.requester_name)+'</b> наличными из кассы?<div class="row" style="margin-top:6px"><button class="bad" data-a="reqissue" data-id="'+h(r.id)+'"'+(S.busy?' disabled':'')+'>Да, выдать</button><button data-a="reqissueno">Отмена</button></div></div>';
-  if(role==='cashier'&&S.fwId===r.id)extra+='<div style="margin-top:8px"><div class="field"><label>Ваш комментарий шефу (необязательно)</label><input data-f="rq_fw" maxlength="500" value="'+h(S.form.rq_fw||'')+'"></div>'+recUI('fw:'+r.id)+'<div class="row" style="margin-top:8px"><button class="p" data-a="reqforward" data-id="'+h(r.id)+'"'+(S.busy?' disabled':'')+'>Отправить шефу</button><button data-a="fwno">Отмена</button></div></div>';
-  return '<div class="recv" style="padding:10px 12px"><div class="row between"><div><div>'+(role==='cashier'?'<b>'+hu(r.requester_name)+'</b> · ':'')+rAmt(r)+' · '+hu(r.purpose)+'</div><div class="tiny muted">'+fT(ms(r.created_at))+(r.origin==='boss'?' · назначил шеф':'')+' · '+rChip(r)+'</div></div><div class="row">'+btns+'</div></div>'+extra+(open?rThread(r):'')+'</div>'}
+  if(role==='cashier'&&S.fwId===r.id)extra+='<div style="margin-top:8px"><div class="field"><label>Ваш комментарий директору (необязательно)</label><input data-f="rq_fw" maxlength="500" value="'+h(S.form.rq_fw||'')+'"></div>'+recUI('fw:'+r.id)+'<div class="row" style="margin-top:8px"><button class="p" data-a="reqforward" data-id="'+h(r.id)+'"'+(S.busy?' disabled':'')+'>Отправить директору</button><button data-a="fwno">Отмена</button></div></div>';
+  return '<div class="recv" style="padding:10px 12px"><div class="row between"><div><div>'+(role==='cashier'?'<b>'+hu(r.requester_name)+'</b> · ':'')+rAmt(r)+' · '+hu(r.purpose)+'</div><div class="tiny muted">'+fT(ms(r.created_at))+(r.origin==='boss'?' · назначил директор':'')+' · '+rChip(r)+'</div></div><div class="row">'+btns+'</div></div>'+extra+(open?rThread(r):'')+'</div>'}
 function monthStart(){var d=new Date();return new Date(d.getFullYear(),d.getMonth(),1).getTime()}
 function reqWorker(){
   if(S.reqs===null||!S.me||S.me.is_cashier)return '';
@@ -277,7 +277,7 @@ function reqCashier(){
   var pay=g(['approved']),nw=g(['new']),boss=g(['forwarded','waiting']),done=g(['paid','rejected','cancelled']).slice(0,10);
   var sec=function(t,a){return a.length?'<h3 style="margin:12px 0 6px;font-size:15px">'+t+' ('+a.length+')</h3><div style="display:flex;flex-direction:column;gap:8px">'+a.map(function(r){return rRow(r,'cashier')}).join('')+'</div>':''};
   return '<section class="card"><h2>Запросы денег</h2>'+
-    (pay.length+nw.length+boss.length?sec('К выдаче: шеф одобрил',pay)+sec('Новые: нужно передать шефу',nw)+sec('У шефа или ждут',boss):'<p class="muted">Открытых запросов нет.</p>')+
+    (pay.length+nw.length+boss.length?sec('К выдаче: директор одобрил',pay)+sec('Новые: нужно передать директору',nw)+sec('У директора или ждут',boss):'<p class="muted">Открытых запросов нет.</p>')+
     (done.length?'<details style="margin-top:10px"><summary class="small muted">Недавно закрытые ('+done.length+')</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">'+done.map(function(r){return rRow(r,'cashier')}).join('')+'</div></details>':'')+'</section>'}
 async function loadRlog(id){
   var r=await sb.from('cash_request_log').select('at,actor_role,kind,code,body,path').eq('request_id',id).order('at').order('id');
@@ -379,7 +379,7 @@ var A={
   reqforward:function(d){return run(async function(){var t=String(S.form.rq_fw||'').trim(),voice=null;
     if(S.rec&&S.rec.blob&&S.rec.key==='fw:'+d.id){voice=await upVoice()}
     var r=await sb.rpc('req_forward',{p_id:d.id,p_note:t||null,p_voice:voice,p_device:'web'});var e=errOf(r);if(e)return toast(e);
-    S.fwId=null;S.form.rq_fw='';recClear();toast('Запрос передан шефу');await load()})},
+    S.fwId=null;S.form.rq_fw='';recClear();toast('Запрос передан директору');await load()})},
   reqissueask:function(d){S.issueReq=d.id;render()},
   reqissueno:function(){S.issueReq=null;render()},
   reqissue:function(d){return run(async function(){var r=await sb.rpc('req_issue',{p_id:d.id,p_device:'web'});var e=errOf(r);if(e)return toast(e);
@@ -512,10 +512,10 @@ async function pollNew(){
     if(cs){
       if(x.status==='new')items.push('Новый запрос денег: '+x.requester_name+', '+money(x.amount_asked));
       else if(x.status==='approved')items.push('К выдаче: '+x.requester_name+', '+money(x.amount_approved));
-      else if(x.status==='waiting')items.push('Шеф просит подождать: '+x.requester_name);
+      else if(x.status==='waiting')items.push('Директор просит подождать: '+x.requester_name);
       else if(x.status==='rejected')items.push('Запрос отклонён: '+x.requester_name);
     }else{
-      if(x.status==='forwarded')items.push('Ваш запрос передан шефу');
+      if(x.status==='forwarded')items.push('Ваш запрос передан директору');
       else if(x.status==='approved')items.push('Запрос одобрен: '+money(x.amount_approved));
       else if(x.status==='waiting')items.push('По запросу: подождите');
       else if(x.status==='rejected')items.push('Запрос отклонён');

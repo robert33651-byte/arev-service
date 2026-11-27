@@ -139,7 +139,7 @@ function Main({ session }) {
   const load = useCallback(async () => {
     try {
       const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, eqR, fuR, ntR, tlR, cashR] = await Promise.all([
+      const [staffR, cfgR, shiftR, myR, poolR, buyR, wpR, plR, eqR, fuR, ntR, tlR, cashR, reqR] = await Promise.all([
         supabase.from('staff').select('*').eq('id', uid).maybeSingle(),
         supabase.from('config').select('*').eq('id', 1).maybeSingle(),
         supabase.from('shifts').select('*').eq('staff_id', uid).order('start_at', { ascending: false }).limit(10),
@@ -153,6 +153,7 @@ function Main({ session }) {
         supabase.rpc('my_tasks'),
         supabase.from('talks').select('id,at,object,duration_s,status').eq('staff_id', uid).gte('at', d0.toISOString()).order('at', { ascending: false }),
         supabase.from('cash_ledger').select('id,amount').eq('staff_id', uid).eq('status', 'pending').is('voided_at', null),
+        supabase.from('cash_requests').select('id,amount_asked,amount_approved,purpose,status,origin,created_at').eq('requester_id', uid).order('created_at', { ascending: false }).limit(6),
       ]);
       // нет связи: запрос не бросает ошибку, а возвращает её. Данные на экране не трогаем,
       // иначе работник без интернета попадал на анкету регистрации и терял открытый экран.
@@ -181,6 +182,7 @@ function Main({ session }) {
         fuelToday: fuR.data || [],
         talks: tlR.data || [],
         cashPend: cashR.error ? 0 : (cashR.data || []).length,
+        reqs: reqR.error ? [] : (reqR.data || []),
         nTasks: (ntR.data || []).filter((t) => t.status === 'new').length,
         err: staffR.error ? errText(staffR.error) : null,
       };
@@ -546,11 +548,12 @@ function Home({ ctx }) {
         <Action icon="archive" title={tr('Со склада')} sub={tr('взял материал')} onPress={() => nav('take')} />
         {isOff ? null : <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />}
         <Action icon="mic" title={tr('Разговор')} sub={tr('запись с клиентом')} onPress={() => nav('talk')} />
-        <Action icon="wallet" title={tr('Запросить деньги')} sub={tr('шеф решит, кассир выдаст')} kind="primary" onPress={() => nav('req')} />
+        <Action icon="wallet" title={tr('Открыть запрос')} sub={tr('директор решит, кассир выдаст')} kind="primary" onPress={() => nav('req')} />
         <Action icon="cash" title={tr('Деньги')} sub={st.cashPend ? tr('подтвердите получение') : st.staff.is_cashier ? tr('касса') : tr('сколько получено')} kind={st.cashPend ? 'primary' : undefined} onPress={() => nav('cash')} />
         <Action icon="help-circle" title={tr('Помощь')} sub={tr('как пользоваться')} onPress={() => nav('help')} />
       </View>
       {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
+      <ReqCard ctx={ctx} />
       <BuyList ctx={ctx} items={st.buys} />
       <Card>
         <H2>{tr('План на день')}</H2>
@@ -580,6 +583,28 @@ function Home({ ctx }) {
       <Btn kind="dark" title={tr('Конец рабочего дня')} big onPress={() => nav('shift')} />
       <CallOffice cfg={st.cfg} />
     </Page>
+  );
+}
+
+const REQ_ST = { new: ['У кассира', 'info'], forwarded: ['У директора', 'warn'], waiting: ['Директор просит подождать', 'warn'], approved: ['Одобрено: получите наличными у кассира', 'ok'], rejected: ['Отклонено директором', 'bad'], paid: ['Деньги выданы', 'ok'], cancelled: ['Отменено', 'note'] };
+function ReqCard({ ctx }) {
+  const rs = (ctx.st.reqs || []).slice(0, 3);
+  if (!rs.length) return null;
+  return (
+    <Card>
+      <H2>{tr('Мои запросы денег')}</H2>
+      {rs.map((r) => {
+        const s = REQ_ST[r.status] || [r.status, 'note'];
+        const a = r.amount_approved && r.amount_approved !== r.amount_asked ? r.amount_approved : r.amount_asked;
+        return (
+          <Pressable key={r.id} onPress={() => ctx.nav('req')} style={{ paddingVertical: 6, gap: 3 }}>
+            <T>{money(a)} · {r.purpose}</T>
+            <Chip kind={s[1]}>{tr(s[0])}</Chip>
+          </Pressable>
+        );
+      })}
+      <Btn title={tr('Все запросы и история')} kind="ghost" onPress={() => ctx.nav('req')} />
+    </Card>
   );
 }
 
