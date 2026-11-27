@@ -957,9 +957,19 @@ const rqAmt=r=>r.amount_approved&&r.amount_approved!==r.amount_asked?'<b>'+money
 function rqThread(){const L=S.rqLog;if(L===null||L===undefined)return '<div class="small muted">Загрузка…</div>';
  return L.length?L.map(m=>{const txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rqUrls&&S.rqUrls[m.path]?'<audio controls src="'+h(S.rqUrls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(RQEV[m.code]||hu(m.code||''))+((['created','approved','paid','boss_created'].includes(m.code)&&m.body)?': '+money(+m.body):'')+'</span>';
   return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+(RQROLE[m.actor_role]||m.actor_role)+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>'}
+function rqVoiceBox(id){const R=S.rqVoice&&S.rqVoice.id===id?S.rqVoice:null;
+ if(rqRec&&rqRec.rid===id)return '<div class="row" style="gap:8px"><b class="small" style="color:var(--bad)">● Идёт запись…</b><button class="btn danger" data-act="rqrec" data-id="'+h(id)+'">Остановить запись</button></div>';
+ if(R)return '<div class="row wrapx" style="gap:8px"><audio controls src="'+h(R.url)+'" style="height:36px;max-width:100%"></audio><button class="btn ghost sm" data-act="rqrecdel">Удалить запись</button></div>';
+ return '<button class="btn ghost block" data-act="rqrec" data-id="'+h(id)+'">🎤 Записать голосовое</button>'}
 function rqRow(r){const open=S.rqOpen===r.id;const t=RQST[r.status]||[r.status,'chip'];const live=['new','forwarded','waiting'].includes(r.status);
- return '<section class="card tight"><div class="row between wrapx"><div><div><b>'+hu(r.requester_name||'—')+'</b> · '+rqAmt(r)+' · '+hu(r.purpose||'')+'</div><div class="tiny muted">'+fT(ms(r.created_at))+(r.origin==='boss'?' · назначили вы':'')+' · <span class="'+t[1]+'">'+t[0]+'</span></div></div>'+
-  '<div class="row wrapx"><button class="btn ghost sm" data-act="rqopen" data-id="'+h(r.id)+'">'+(open?'Свернуть':'Открыть')+'</button>'+(live?'<button class="btn primary sm" data-act="rqdecide" data-id="'+h(r.id)+'">Решить</button>':'')+'</div></div>'+
+ const ak='rqa_'+r.id,nk='rqn_'+r.id;const av=S.form[ak]!=null?S.form[ak]:String(r.amount_approved||r.amount_asked);
+ const dec=live?'<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">'+
+  '<div class="field" style="margin:0"><label for="ra-'+h(r.id)+'">Сумма, ֏ (можно изменить)</label><div class="row" style="gap:8px"><button class="btn ghost" style="min-width:52px;font-size:20px" data-act="rqstep" data-id="'+h(r.id)+'" data-v="-5000" aria-label="Уменьшить">−</button><input id="ra-'+h(r.id)+'" class="inp num" style="text-align:center;font-size:18px;flex:1;min-width:0" inputmode="numeric" data-f="'+ak+'" value="'+h(av)+'"><button class="btn ghost" style="min-width:52px;font-size:20px" data-act="rqstep" data-id="'+h(r.id)+'" data-v="5000" aria-label="Увеличить">+</button></div></div>'+
+  '<input class="inp" data-f="'+nk+'" maxlength="500" placeholder="Комментарий (необязательно)" value="'+h(S.form[nk]||'')+'">'+rqVoiceBox(r.id)+
+  '<button class="btn primary block" style="padding:14px;font-size:17px;background:var(--ok,#2e7d32);border-color:var(--ok,#2e7d32)" data-act="rqdo" data-id="'+h(r.id)+'" data-v="approve">✓ Одобрить</button>'+
+  '<div class="row" style="gap:10px"><button class="btn ghost" style="flex:1;padding:14px;font-size:16px" data-act="rqdo" data-id="'+h(r.id)+'" data-v="wait">⏳ Подождать</button><button class="btn danger" style="flex:1;padding:14px;font-size:16px" data-act="rqdo" data-id="'+h(r.id)+'" data-v="reject">✕ Отклонить</button></div></div>':'';
+ return '<section class="card tight"><div><div><b>'+hu(r.requester_name||'—')+'</b> · '+rqAmt(r)+'</div><div>'+hu(r.purpose||'')+'</div><div class="tiny muted">'+fT(ms(r.created_at))+(r.origin==='boss'?' · назначили вы':'')+' · <span class="'+t[1]+'">'+t[0]+'</span></div></div>'+dec+
+  '<div style="margin-top:8px"><button class="btn ghost sm" data-act="rqopen" data-id="'+h(r.id)+'">'+(open?'Скрыть переписку':'Переписка и голосовые')+'</button></div>'+
   (open?'<div style="margin-top:8px;border-top:1px solid var(--line,#ddd);padding-top:8px">'+rqThread()+'</div>':'')+'</section>'}
 function vReq(){const f=S.rqF||'wait';const all=S.reqs||[];
  const wait=all.filter(r=>r.status==='forwarded'||r.status==='waiting'),nw=all.filter(r=>r.status==='new'),pay=all.filter(r=>r.status==='approved');
@@ -972,16 +982,17 @@ function vReq(){const f=S.rqF||'wait';const all=S.reqs||[];
  s+='<p class="small muted">Запрос идёт кассиру; вы видите его сразу, но уведомление приходит, когда кассир передаст его вам. Решение: одобрить (можно изменить сумму), отклонить или попросить подождать. Выдаёт деньги кассир наличными.</p>';
  return s}
 let rqRec=null;
-async function rqRecord(){if(rqRec){rqRec.stop();return}
+async function rqRecord(rid){if(rqRec){rqRec.stop();return}
  if(!navigator.mediaDevices||!window.MediaRecorder)return toast('Этот браузер не умеет записывать голос');
  let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){return toast('Нет доступа к микрофону')}
  const mime=['audio/mp4','audio/webm;codecs=opus','audio/webm'].find(x=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(x))||'';
  const mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);const chunks=[];
  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
- mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());rqRec=null;const blob=new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'});S.rqVoice={blob,url:URL.createObjectURL(blob)};rqVoiceUi()};
- rqRec=mr;mr.start();rqVoiceUi()}
+ mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());rqRec=null;const blob=new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'});if(S.rqVoice&&S.rqVoice.url)try{URL.revokeObjectURL(S.rqVoice.url)}catch(e){}S.rqVoice={id:rid,blob,url:URL.createObjectURL(blob)};render(true);rqVoiceUi()};
+ if(S.rqVoice&&S.rqVoice.id!==rid)rqClear();
+ rqRec=mr;mr.rid=rid;mr.start();render(true);rqVoiceUi()}
 function rqVoiceUi(){const el=document.getElementById('rq-voice');if(!el)return;
- el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec">Остановить</button>':S.rqVoice?'<audio controls src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost sm" data-act="rqrec">🎤 Записать голосовое</button>'}
+ el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec" data-id="new">Остановить</button>':S.rqVoice?'<audio controls src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost sm" data-act="rqrec">🎤 Записать голосовое</button>'}
 async function rqUpload(){const R=S.rqVoice;if(!R||!R.blob)return null;const path=S.session.user.id+'/req_'+Date.now()+'.webm';
  const up=await sb.storage.from('photos').upload(path,R.blob,{contentType:R.blob.type||'audio/webm',upsert:false});if(up.error)throw new Error(up.error.message);return path}
 function rqClear(){if(S.rqVoice&&S.rqVoice.url)try{URL.revokeObjectURL(S.rqVoice.url)}catch(e){}S.rqVoice=null;rqRec=null}
@@ -1177,30 +1188,27 @@ Object.assign(ACT,{
   const r=await sb.from('cash_request_log').select('at,actor_role,kind,code,body,path').eq('request_id',d.id).order('at').order('id');const L=r.error?[]:(r.data||[]);S.rqUrls=S.rqUrls||{};
   await Promise.all(L.filter(m=>m.kind==='voice'&&m.path&&!S.rqUrls[m.path]).map(async m=>{try{const u=await sb.storage.from('photos').createSignedUrl(m.path,3600);if(u.data)S.rqUrls[m.path]=u.data.signedUrl}catch(e){}}));
   if(S.rqOpen===d.id){S.rqLog=L;render(true)}},
- rqrec(){rqRecord()},
- rqrecdel(){rqClear();rqVoiceUi()},
- async rqdecide(d){const r=(S.reqs||[]).find(x=>x.id===d.id);if(!r)return;S.form.rqa=String(r.amount_approved||r.amount_asked);S.form.rqn='';rqClear();
-  const v=await sheet('<h2>Решение по запросу</h2><p class="small">'+hu((r.requester_name||'')+': '+money(r.amount_asked)+' · '+(r.purpose||''))+(r.status==='waiting'?'<br>Ранее вы просили подождать.':'')+'</p>'+
-   '<div class="field"><label for="rq-sa">Сумма, ֏ (можно изменить)</label><input id="rq-sa" class="inp num" inputmode="numeric" data-f="rqa" value="'+h(S.form.rqa)+'"></div>'+
-   '<div class="field"><label for="rq-sn">Комментарий (необязательно)</label><input id="rq-sn" class="inp" data-f="rqn" maxlength="500"></div><div id="rq-voice" style="margin-bottom:10px"></div>'+
-   '<button class="btn primary block" data-act="sheet" data-v="approve">Одобрить</button><button class="btn ghost block" data-act="sheet" data-v="wait">Подождать</button><button class="btn danger block" data-act="sheet" data-v="reject">Отклонить</button><button class="btn ghost block" data-act="sheet" data-v="">Закрыть</button>');
-  rqVoiceUi();
-  if(!v){rqClear();return}
-  const amt=parseInt(String(S.form.rqa||'').replace(/\D/g,''),10);if(v==='approve'&&!amt)return toast('Введите сумму');
-  try{const note=String(S.form.rqn||'').trim()||null;const vp=await rqUpload();
+ rqrec(d){rqRecord(d.id||'new')},
+ rqrecdel(){rqClear();render(true);rqVoiceUi()},
+ rqstep(d){const r=(S.reqs||[]).find(x=>x.id===d.id);if(!r)return;const k='rqa_'+d.id;const cur=parseInt(String(S.form[k]!=null?S.form[k]:(r.amount_approved||r.amount_asked)).replace(/\D/g,''),10)||0;S.form[k]=String(Math.max(0,cur+(+d.v)));render(true)},
+ async rqdo(d){const r=(S.reqs||[]).find(x=>x.id===d.id);if(!r||S.busy)return;const v=d.v;const k='rqa_'+d.id;
+  const amt=parseInt(String(S.form[k]!=null?S.form[k]:(r.amount_approved||r.amount_asked)).replace(/\D/g,''),10);
+  if(v==='approve'&&!amt)return toast('Введите сумму');
+  if(v==='reject'&&await confirmBox('Отклонить запрос?',hu((r.requester_name||'')+': '+money(r.amount_asked)),'Отклонить')!=='y')return;
+  try{const note=String(S.form['rqn_'+d.id]||'').trim()||null;const vp=S.rqVoice&&S.rqVoice.id===d.id?await rqUpload():null;
    const x=await sb.rpc('req_decide',{p_id:d.id,p_decision:v,p_amount:v==='approve'?amt:null,p_note:note});if(x.error)throw x.error;if(x.data&&x.data.error)throw new Error(x.data.error);
    if(vp){const y=await sb.rpc('req_say',{p_id:d.id,p_body:null,p_voice:vp,p_device:'web'});if(y.error)throw y.error}
-   rqClear();toast(v==='approve'?'Одобрено: кассир увидит и выдаст':v==='reject'?'Отклонено':'Отмечено: подождать');S.rqOpen=null;await load()}catch(e){toast(rqErr(e))}},
+   if(S.rqVoice&&S.rqVoice.id===d.id)rqClear();delete S.form[k];delete S.form['rqn_'+d.id];
+   toast(v==='approve'?'Одобрено: кассир увидит и выдаст':v==='reject'?'Отклонено':'Отмечено: подождать');await load()}catch(e){toast(rqErr(e))}},
  async rqnew(){const act=S.staff.filter(m=>m.status==='approved'&&!m.is_admin);S.form.rna='';S.form.rnp='';S.form.rnn='';S.form.rns='';rqClear();
-  const v=await sheet('<h2>Назначить выдачу сотруднику</h2><p class="small">Запрос уйдёт кассиру уже одобренным. Сотрудник получит уведомление.</p>'+
+  setTimeout(rqVoiceUi,50);const v=await sheet('<h2>Назначить выдачу сотруднику</h2><p class="small">Запрос уйдёт кассиру уже одобренным. Сотрудник получит уведомление.</p>'+
    '<div class="field"><label for="rn-s">Сотрудник</label><select id="rn-s" class="inp" data-f="rns"><option value="">— выберите —</option>'+act.map(m=>'<option value="'+h(m.id)+'">'+hu(m.name)+'</option>').join('')+'</select></div>'+
    '<div class="field"><label for="rn-a">Сумма, ֏</label><input id="rn-a" class="inp num" inputmode="numeric" data-f="rna"></div>'+
    '<div class="field"><label for="rn-p">На что</label><input id="rn-p" class="inp" data-f="rnp" maxlength="200"></div>'+
    '<div class="field"><label for="rn-n">Комментарий (необязательно)</label><input id="rn-n" class="inp" data-f="rnn" maxlength="500"></div><div id="rq-voice" style="margin-bottom:10px"></div>'+
    '<button class="btn primary block" data-act="sheet" data-v="y">Назначить</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');
-  rqVoiceUi();
   if(v!=='y'){rqClear();return}
-  const amt=parseInt(String(S.form.rna||'').replace(/\D/g,''),10);if(!S.form.rns)return toast('Выберите сотрудника');if(!amt)return toast('Введите сумму');if(!String(S.form.rnp||'').trim())return toast('Впишите, на что деньги');
+  if(S.rqVoice&&S.rqVoice.id!=='new')rqClear();const amt=parseInt(String(S.form.rna||'').replace(/\D/g,''),10);if(!S.form.rns)return toast('Выберите сотрудника');if(!amt)return toast('Введите сумму');if(!String(S.form.rnp||'').trim())return toast('Впишите, на что деньги');
   try{const vp=await rqUpload();const x=await sb.rpc('req_admin_create',{p_staff:S.form.rns,p_amount:amt,p_purpose:String(S.form.rnp).trim(),p_note:String(S.form.rnn||'').trim()||null,p_voice:vp});
    if(x.error)throw x.error;if(x.data&&x.data.error)throw new Error(x.data.error);rqClear();toast('Назначено: кассир увидит запрос');await load()}catch(e){toast(rqErr(e))}}
 });
