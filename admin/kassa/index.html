@@ -111,8 +111,8 @@ function loginView(){
   var reg=!!S.reg;
   return header()+'<div class="login"><div class="card"><h2>'+(reg?'Регистрация сотрудника':'Вход')+'</h2><p class="muted small">'+(reg?'Для офисных сотрудников. Придумайте PIN-код (минимум 6 цифр): им вы будете входить сюда и в приложение. После регистрации руководитель подтвердит анкету.':'Тот же номер телефона и PIN-код, что в приложении Arev Service.')+'</p>'+
   (reg?'<div class="field"><label for="nm">Имя и фамилия</label><input id="nm" data-f="nm" autocomplete="name" value="'+h(S.form.nm||'')+'"></div>':'')+
-  '<div class="field" style="margin-top:10px"><label for="ph">Телефон</label><input id="ph" data-f="ph" type="tel" inputmode="tel" autocomplete="username" placeholder="+374 91 123456" value="'+h(S.form.ph||'')+'"></div>'+
-  '<div class="field" style="margin-top:10px"><label for="pin">PIN-код</label><input id="pin" data-f="pin" type="password" inputmode="numeric" autocomplete="'+(reg?'new-password':'current-password')+'" value="'+h(S.form.pin||'')+'"></div>'+
+  '<div class="field" style="margin-top:10px"><label for="ph">Телефон</label><input id="ph" data-f="ph" type="tel" inputmode="tel" autocomplete="off" placeholder="+374 91 123456" value="'+h(S.form.ph||'')+'"></div>'+
+  '<div class="field" style="margin-top:10px"><label for="pin">PIN-код</label><input id="pin" data-f="pin" type="password" inputmode="numeric" autocomplete="new-password" value="'+h(S.form.pin||'')+'"></div>'+
   (reg?'<p class="muted small" style="margin-top:10px">Нажимая «Зарегистрироваться», вы соглашаетесь, что время прихода и ухода записывается и видно руководителю.</p>':'')+
   '<button class="p" style="width:100%;margin-top:14px" data-a="'+(reg?'register':'login')+'"'+(S.busy?' disabled':'')+'>'+(reg?'Зарегистрироваться':'Войти')+'</button>'+
   '<p style="text-align:center;margin:14px 0 0"><a href="#" data-a="regmode" data-v="'+(reg?'0':'1')+'" class="small">'+(reg?'У меня уже есть аккаунт — войти':'Нет аккаунта? Зарегистрироваться')+'</a></p></div></div>'}
@@ -260,6 +260,7 @@ function mainView(){
 function render(){
   var a=document.activeElement,id=a&&a.id,pos=a&&a.selectionStart;
   $('#app').innerHTML=S.sess?mainView():loginView();
+  [].forEach.call(document.querySelectorAll('#app input,#app textarea'),function(i){if(!i.hasAttribute('autocomplete')||i.getAttribute('autocomplete')==='current-password'||i.getAttribute('autocomplete')==='username')i.setAttribute('autocomplete','off')});
   if(id){var e=document.getElementById(id);if(e){e.focus();try{if(pos!=null)e.setSelectionRange(pos,pos)}catch(_){}}}
 }
 
@@ -363,7 +364,22 @@ var A={
 document.addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(!b)return;if(b.tagName==='A')e.preventDefault();var f=A[b.dataset.a];if(f)f({id:b.dataset.id,v:b.dataset.v})});
 document.addEventListener('input',function(e){var el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value});
 document.addEventListener('change',function(e){var el=e.target;if(el.dataset.fl){S.flt[el.dataset.fl]=el.value;render()}else if(el.dataset.f&&el.tagName==='SELECT'){S.form[el.dataset.f]=el.value}});
-document.addEventListener('keydown',function(e){if(e.key==='Enter'&&e.target.dataset&&(e.target.dataset.f==='pin'||e.target.dataset.f==='ph')&&!S.sess)A.login()});
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'||e.isComposing||!e.target||!e.target.dataset||!e.target.dataset.f||S.busy)return;
+  var f=e.target.dataset.f,go=null;
+  if(!S.sess){if(f==='pin'||f==='ph'||f==='nm')go=S.reg?'register':'login'}
+  else if(f==='k0')go='pinunlock';
+  else if(f==='k1'||f==='k2')go='pinset';
+  else if(f==='tt'||f==='td')go='taskadd';
+  else if(f==='tdn'&&S.doneId)go='taskdone';
+  else if(f==='tsay'&&S.openT)go='tasksay';
+  else if(f==='ia'||f==='ip'||f==='in'||f==='is')go='issue';
+  else if(f==='ta'||f==='tn')go='topup';
+  if(!go||!A[go])return;
+  e.preventDefault();
+  var d={id:go==='taskdone'?S.doneId:go==='tasksay'?S.openT:undefined};
+  A[go](d);
+});
 
 function onSession(s){S.sess=s;S.loaded=false;S.me=null;if(s){if(!S.registering)load();else render()}else render()}
 
