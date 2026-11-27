@@ -58,6 +58,12 @@
         {
           "color": "#123a33"
         }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Вход по отпечатку или лицу."
+        }
       ]
     ],
     "extra": {

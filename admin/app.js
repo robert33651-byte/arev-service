@@ -331,7 +331,7 @@ function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':
 let installEvt=null;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;if(S.loaded)render(true)});
 const standalone=()=>window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches||(window.navigator||{}).standalone===true;
 const isIOS=()=>/iphone|ipad|ipod/i.test((typeof navigator!=='undefined'&&navigator.userAgent)||'');
-const installable=()=>!standalone()&&(!!installEvt||isIOS());
+const installable=()=>!window.AREV_NATIVE&&!standalone()&&(!!installEvt||isIOS());
 
 /* ---------- экраны ---------- */
 function vLogin(){const f=S.form;return '<div class="loginwrap"><div class="card" style="max-width:420px;width:100%"><div class="row"><span class="sunmark"></span><h2>Arev Service</h2></div><p class="muted small">'+(f.reg?'Новый администратор. Имя увидят сотрудники в переписке по задачам.':'Вход в админку. Используйте свой e-mail, не номер сотрудника.')+'</p>'+
@@ -1222,7 +1222,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!S.session&&e.target
 document.getElementById('fileSheet').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;try{S.imp=await readSheet(file);render(true)}catch(err){toast('Не удалось прочитать файл. Нужен Excel (.xlsx) или CSV')}});
 
 /* ---------- запуск ---------- */
-async function onSession(s){S.session=s;S.isAdmin=false;S.loaded=false;if(s){const r=await sb.rpc('is_admin');S.isAdmin=!!r.data;if(S.isAdmin)await load()}render();if(S.isAdmin)syncMyName()}
+async function onSession(s){S.session=s;S.isAdmin=false;S.loaded=false;if(s){const r=await sb.rpc('is_admin');S.isAdmin=!!r.data;if(S.isAdmin){await load();if(window.AREV_PUSH)try{await sb.rpc('save_push_token',{p_token:window.AREV_PUSH})}catch(e){}}}render();if(S.isAdmin)syncMyName()}
 const myName=()=>String(((S.session&&S.session.user&&S.session.user.user_metadata)||{}).name||'').trim();
 // имя из регистрации → в таблицу админов; нет имени — спросить один раз
 let nameSynced=false;

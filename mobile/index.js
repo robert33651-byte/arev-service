@@ -1,8 +1,13 @@
+import 'react-native-url-polyfill/auto';
 import { registerRootComponent } from 'expo';
-import { defineTrackTask } from './src/track';
-import App from './App';
+import Constants from 'expo-constants';
 
-// Фоновая задача записи маршрута должна быть объявлена до запуска интерфейса
-defineTrackTask();
-
-registerRootComponent(App);
+const isAdmin = !!(Constants.expoConfig && Constants.expoConfig.extra && Constants.expoConfig.extra.adminApp);
+if (isAdmin) {
+  registerRootComponent(require('./AdminApp').default);
+} else {
+  const { defineTrackTask } = require('./src/track');
+  // Фоновая задача записи маршрута должна быть объявлена до запуска интерфейса
+  defineTrackTask();
+  registerRootComponent(require('./App').default);
+}

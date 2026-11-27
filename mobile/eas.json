@@ -22,6 +22,18 @@
       "env": {
         "APP_VARIANT": "test"
       }
+    },
+    "admintest": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "admintest"
+      }
+    },
+    "admin": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "admin"
+      }
     }
   }
 }
