@@ -16,6 +16,12 @@
         "buildType": "app-bundle"
       },
       "node": "20.18.0"
+    },
+    "test": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "test"
+      }
     }
   }
 }

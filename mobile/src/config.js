@@ -4,8 +4,12 @@
 //   SUPABASE_ANON_KEY — ключ «anon public» (он публичный, его можно хранить в приложении)
 // Никогда не вставляйте сюда ключ «service_role».
 
-export const SUPABASE_URL = 'https://fmndfdfrcdbuktmdwrgf.supabase.co';
-export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZtbmRmZGZyY2RidWt0bWR3cmdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIzODkyMDEsImV4cCI6MjEwNzk2NTIwMX0.xvwrFiWk4PpfhJO0FRO0_8J_lc2sqhR2j6LWnI45TfY';
+import Constants from 'expo-constants';
+const TEST = !!(Constants.expoConfig && Constants.expoConfig.extra && Constants.expoConfig.extra.testBuild);
+export const IS_TEST = TEST;
+
+export const SUPABASE_URL = TEST ? 'https://rnwmjxdlxyuehwyacxtu.supabase.co' : 'https://fmndfdfrcdbuktmdwrgf.supabase.co';
+export const SUPABASE_ANON_KEY = TEST ? 'sb_publishable_aqHFC_KiTYlljRr_Ab9frg_gch32xSP' : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZtbmRmZGZyY2RidWt0bWR3cmdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIzODkyMDEsImV4cCI6MjEwNzk2NTIwMX0.xvwrFiWk4PpfhJO0FRO0_8J_lc2sqhR2j6LWnI45TfY';
 
 // Вход сотрудников по номеру телефона и PIN-коду.
 // Технически это e-mail вида 37491123456@staff.arevservice.app — писем на него не отправляется.
