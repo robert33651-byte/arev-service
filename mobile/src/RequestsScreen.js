@@ -125,8 +125,18 @@ export default function RequestsScreen({ ctx }) {
       <Card>
         <H2>{tr('Новый запрос')}</H2>
         <Field label={tr('Сумма, ֏')} value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="25000" />
-        <Field label={tr('На что нужны деньги')} value={purpose} onChangeText={setPurpose} maxLength={200} />
-        <Field label={tr('Комментарий (необязательно)')} value={note} onChangeText={setNote} maxLength={500} />
+        <Label>{tr('На что нужны деньги')}</Label>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {['Заправка', 'Закупка материалов', 'Командировка', 'Инструмент'].map((q) => {
+            const on = purpose === tr(q);
+            return (
+              <Pressable key={q} onPress={() => setPurpose(on ? '' : tr(q))} style={{ paddingVertical: 9, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, borderColor: on ? C.pine : C.line, backgroundColor: on ? C.pine : C.surface }}>
+                <Text style={{ color: on ? C.pineInk : C.ink, fontWeight: '600' }}>{tr(q)}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Field label={tr('или впишите своё')} value={purpose} onChangeText={setPurpose} maxLength={200} />
         <Btn title={rec ? '⏹ ' + tr('Остановить запись') : voiceUri ? '🎤 ' + tr('Записать заново') : '🎤 ' + tr('Записать голосовое')} kind={rec ? 'danger' : 'ghost'} onPress={toggleRec} disabled={busy} />
         {voiceUri && !rec ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>

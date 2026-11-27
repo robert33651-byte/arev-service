@@ -76,19 +76,10 @@ export async function planReminders({ cfg, open, startedToday, buys, wphCount, t
       const H = hours(new Date().getDay());
       const e = new Date(); e.setHours(H.eh || 18, (H.em || 0) + 20, 0, 0);
       await add(e, tr('Не забудьте отметить конец рабочего дня'), isOff ? tr('Отметьте конец рабочего дня в приложении.') : tr('Отметьте конец рабочего дня с фото одометра: в офисе или там, где закончили работу.'), 'end');
-      if (!wphCount && !isOff) {
-        const t = new Date(new Date(open.start_at).getTime() + 3 * 3600000);
-        await add(t, tr('Нет фото работ'), tr('За рабочий день ещё нет ни одного фото работ. Снимите работу до и после.'), 'photo');
-      }
       if (tasksLeft) {
         const t = new Date(); t.setHours((H.eh || 18) - 1, H.em || 0, 0, 0);
         await add(t, tr('Остались задачи'), tr('Не выполнено задач на сегодня: ') + tasksLeft + '.', 'tasks');
       }
-    }
-    for (const b of buys || []) {
-      const t = new Date(new Date(b.created_at).getTime() + 3 * 3600000);
-      const what = (b.lines || []).map((l) => l.name).join(', ');
-      await add(t, tr('Не сдана закупка'), what + tr('. Сдайте на склад или отметьте на объекте.'), 'buy' + b.id);
     }
   } catch (e) {}
 }

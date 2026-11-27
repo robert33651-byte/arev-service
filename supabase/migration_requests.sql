@@ -29,6 +29,9 @@ create index if not exists cash_requests_who on public.cash_requests(requester_i
 create index if not exists cash_requests_open on public.cash_requests(status) where status in ('new','forwarded','waiting','approved');
 alter table public.cash_requests add column if not exists task_id uuid;
 alter table public.tasks add column if not exists money int;   -- сколько денег директор выделил на эту задачу
+alter table public.cash_requests add column if not exists kind text not null default 'advance';  -- advance: просит заранее; reimb: купил за свои, просит вернуть
+alter table public.cash_requests add column if not exists purchase_id uuid;
+alter table public.cash_requests add column if not exists photo text;                             -- фото чека или товара
 alter table public.cash_requests enable row level security;
 
 create table if not exists public.cash_request_log(
@@ -44,6 +47,8 @@ create table if not exists public.cash_request_log(
   path text
 );
 create index if not exists cash_request_log_req on public.cash_request_log(request_id, at);
+alter table public.cash_request_log drop constraint if exists cash_request_log_kind_check;
+alter table public.cash_request_log add constraint cash_request_log_kind_check check (kind in ('event','text','voice','photo'));
 alter table public.cash_request_log enable row level security;
 
 do $$ begin
@@ -70,7 +75,7 @@ do $$ begin
 
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.proname in ('req_create','req_cancel','req_forward','req_decide','req_issue','req_say','req_admin_create','_req_log','_req_notify_cashiers','req_reminders','exp_add','exp_close')
+           where n.nspname = 'public' and p.proname in ('req_create','req_cancel','req_forward','req_decide','req_issue','req_say','req_admin_create','_req_log','_req_notify_cashiers','req_reminders','exp_add','exp_close','req_reimb')
   loop execute 'drop function ' || f.sig || ' cascade'; end loop;
 end $$;
 
@@ -320,6 +325,38 @@ do $$ begin
     raise notice 'pg_cron не включён: включите его в Database → Extensions и запустите файл ещё раз';
   end if;
 end $$;
+
+-- работник купил за свои и просит вернуть: фото чека или товара обязательно, покупка попадает в «Закупки» (её проверяет ИИ)
+create function public.req_reimb(p_amount int, p_what text, p_supplier text, p_photo text, p_lat double precision, p_lng double precision,
+  p_acc real, p_mocked boolean, p_device text, p_voice text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; e text; r public.cash_requests; pid uuid; sh uuid;
+begin
+  s := public._staff();
+  if s.status <> 'approved' then return jsonb_build_object('error', 'NOT_APPROVED'); end if;
+  if s.is_cashier then return jsonb_build_object('error', 'CASHIER_CANNOT'); end if;
+  e := public._guard(s, p_device, p_mocked); if e is not null then return jsonb_build_object('error', e); end if;
+  e := public._check_photo(p_photo); if e is not null then return jsonb_build_object('error', e); end if;
+  if p_voice is not null then
+    e := public._check_photo(p_voice); if e is not null then return jsonb_build_object('error', e); end if;
+  end if;
+  if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
+  if coalesce(trim(p_what), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;
+  select id into sh from public.shifts where staff_id = s.id and end_at is null;
+  insert into public.purchases(staff_id, supplier, lines, amount, photo, lat, lng, acc, device, shift_id, dest, source, status, accepted_at, accept_note)
+  values (s.id, coalesce(nullif(trim(p_supplier), ''), 'Куплено за свои'), jsonb_build_array(jsonb_build_object('name', left(trim(p_what), 200), 'qty', 1, 'unit', 'шт')),
+          p_amount, p_photo, p_lat, p_lng, p_acc, p_device, sh, 'warehouse', 'shop', 'accepted', now(), 'Куплено за свои, возврат через кассу')
+  returning id into pid;
+  insert into public.cash_requests(requester_id, requester_name, origin, amount_asked, purpose, kind, purchase_id, photo)
+  values (s.id, s.name, 'worker', p_amount, left('Возврат за покупку: ' || trim(p_what), 200), 'reimb', pid, p_photo) returning * into r;
+  perform public._req_log(r.id, s.id, 'worker', 'event', 'created', p_amount::text, null);
+  perform public._req_log(r.id, s.id, 'worker', 'photo', null, nullif(trim(coalesce(p_supplier, '')), ''), p_photo);
+  if p_voice is not null then perform public._req_log(r.id, s.id, 'worker', 'voice', null, null, p_voice); end if;
+  perform public._req_notify_cashiers('Купил за свои: ' || s.name || ', ' || p_amount || ' ֏', left(trim(p_what), 200));
+  return to_jsonb(r);
+end $$;
+revoke all on function public.req_reimb from public, anon;
+grant execute on function public.req_reimb to authenticated;
 
 -- ожидаемые (предстоящие) приходы: наличными и на банк. В остаток кассы не входят.
 -- Наличный приход при получении превращается в обычное пополнение кассы; банковский просто закрывается.

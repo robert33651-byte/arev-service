@@ -259,7 +259,7 @@ function rThread(r){
   var ROLE={worker:'Работник',cashier:'Кассир',admin:'Директор',system:'Система'};
   var items=L===null?'<div class="small muted">Загрузка…</div>':L.length?L.map(function(m){
     var who=(S.me&&m.actor_role==='worker'&&r.requester_id===S.me.id)?'Вы':(S.me&&m.actor_role==='cashier'&&S.me.is_cashier)?'Вы':ROLE[m.actor_role]||m.actor_role;
-    var txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rurls&&S.rurls[m.path]?''+VPB+'<audio hidden src="'+h(S.rurls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(EV[m.code]||hu(m.code||''))+((m.code==='created'||m.code==='approved'||m.code==='paid'||m.code==='boss_created')&&m.body?': '+money(+m.body):'')+'</span>';
+    var txt=m.kind==='text'?hu(m.body||''):m.kind==='photo'?((m.body?hu(m.body)+'<br>':'')+(S.rurls&&S.rurls[m.path]?'<a href="'+h(S.rurls[m.path])+'" target="_blank" rel="noopener"><img src="'+h(S.rurls[m.path])+'" alt="Фото чека" style="max-width:260px;max-height:340px;border-radius:10px;display:block"></a>':'<span class="muted">Фото чека</span>')):m.kind==='voice'?(S.rurls&&S.rurls[m.path]?''+VPB+'<audio hidden src="'+h(S.rurls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(EV[m.code]||hu(m.code||''))+((m.code==='created'||m.code==='approved'||m.code==='paid'||m.code==='boss_created')&&m.body?': '+money(+m.body):'')+'</span>';
     return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+who+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>';
   var closed=r.status==='paid'||r.status==='cancelled'||r.status==='rejected';
   return '<div style="margin-top:8px;border-top:1px solid var(--line,#ddd);padding-top:8px">'+items+(closed?'':
@@ -297,7 +297,7 @@ function reqCashier(){
 async function loadRlog(id){
   var r=await sb.from('cash_request_log').select('at,actor_role,kind,code,body,path').eq('request_id',id).order('at').order('id');
   var L=r.error?[]:(r.data||[]);S.rurls=S.rurls||{};
-  await Promise.all(L.filter(function(m){return m.kind==='voice'&&m.path&&!S.rurls[m.path]}).map(async function(m){try{var u=await sb.storage.from('photos').createSignedUrl(m.path,3600);if(u.data)S.rurls[m.path]=u.data.signedUrl}catch(e){}}));
+  await Promise.all(L.filter(function(m){return (m.kind==='voice'||m.kind==='photo')&&m.path&&!S.rurls[m.path]}).map(async function(m){try{var u=await sb.storage.from('photos').createSignedUrl(m.path,3600);if(u.data)S.rurls[m.path]=u.data.signedUrl}catch(e){}}));
   if(S.reqOpen===id){S.rlog=L;render()}}
 async function upVoice(){
   var R=S.rec;if(!R||!R.blob)return null;

@@ -60,7 +60,7 @@ export function Chip({ kind = 'note', children }) {
 export const s = StyleSheet.create({
   btn: { borderRadius: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   btnT: { fontWeight: '700' },
-  card: { backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 16, gap: 10 },
+  card: { backgroundColor: C.surface, borderRadius: 20, borderWidth: 1, borderColor: C.line, padding: 16, gap: 10, shadowColor: '#0b2a24', shadowOpacity: 0.07, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   h1: { fontSize: 22, fontWeight: '700', color: C.ink },
   h2: { fontSize: 17, fontWeight: '700', color: C.ink },
   label: { fontSize: 11.5, fontWeight: '700', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 },
@@ -95,10 +95,10 @@ export function Action({ icon, title, sub, onPress, kind = 'plain' }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [u.action, primary && { backgroundColor: C.sun, borderColor: C.sun }, { opacity: pressed ? 0.85 : 1 }]}>
       <View style={[u.actIc, { backgroundColor: primary ? 'rgba(255,255,255,0.35)' : C.surface2 }]}>
-        <Icon name={icon} size={24} color={primary ? C.sunInk : C.pine} />
+        <Icon name={icon} size={26} color={primary ? C.sunInk : C.pine} />
       </View>
-      <Text style={{ fontSize: 15.5, fontWeight: '700', color: primary ? C.sunInk : C.ink }}>{title}</Text>
-      {sub ? <Text style={{ fontSize: 12, color: primary ? C.sunInk : C.muted, opacity: 0.85 }} numberOfLines={1}>{sub}</Text> : null}
+      <Text style={{ fontSize: 16.5, fontWeight: '800', color: primary ? C.sunInk : C.ink }}>{title}</Text>
+      {sub ? <Text style={{ fontSize: 12.5, color: primary ? C.sunInk : C.muted, opacity: 0.85 }} numberOfLines={2}>{sub}</Text> : null}
     </Pressable>
   );
 }
@@ -153,9 +153,9 @@ export function TabBar({ tab, onTab, badges }) {
 }
 
 const u = StyleSheet.create({
-  tile: { flex: 1, minWidth: '46%', borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 12 },
-  action: { flex: 1, minWidth: '46%', backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.line, padding: 14, gap: 4 },
-  actIc: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  tile: { flex: 1, minWidth: '46%', borderRadius: 18, borderWidth: 1, borderColor: C.line, padding: 14 },
+  action: { flex: 1, minWidth: '46%', minHeight: 112, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: C.line, padding: 16, gap: 4, shadowColor: '#0b2a24', shadowOpacity: 0.07, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  actIc: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
   rowIc: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   tabs: { flexDirection: 'row', backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 6, paddingBottom: 10 },
