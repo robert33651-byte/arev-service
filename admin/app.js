@@ -349,10 +349,13 @@ function dashCard(m,st,t0){const sh=st.sh;const gk=sh?shiftGps(sh):null;const ls
   (sh?'<span class="mgrid">'+cell(gk!=null?n1(gk):'—','км GPS')+cell(ls.length,'стоянки',ls.length?'w':'')+cell(wp,'фото',!wp&&Date.now()-sh.startAt>3*36e5?'w':'')+cell(tk.length?tk.filter(t=>t.status==='done').length+'/'+tk.length:nb,tk.length?'задачи':'не сдано',!tk.length&&nb?'b':'')+'</span>':'')+
   (st.flags.length?'<span class="mflags">'+st.flags.slice(0,3).map(f=>'<span class="'+f.lv+'">'+ft(f)+'</span>').join('')+(st.flags.length>3?'<span class="muted">и ещё '+(st.flags.length-3)+'</span>':'')+'</span>':'')+'</button>'}
 function bossTop(){const all=S.reqs||[];const wait=all.filter(r=>r.status==='forwarded'),hold=all.filter(r=>r.status==='waiting'),pay=all.filter(r=>r.status==='approved'),nw=all.filter(r=>r.status==='new');
- const bal=cashBal(),pend=cashPend();
- let h2='<section class="card" style="border:2px solid '+(wait.length?'var(--warn,#b86d06)':'var(--line,#ddd)')+'"><div class="kgrid">'+kpi(money(bal),'касса сейчас',bal<0,'a-cash')+kpi(wait.length,'запросов ждут вашего решения',wait.length>0,'a-req')+kpi(pay.length+nw.length+hold.length,'в пути: у кассира '+nw.length+', ждут '+hold.length+', к выдаче '+pay.length,false,'a-req')+(pend.length?kpi(pend.length+' · '+money(pend.reduce((a,x)=>a+x.amount,0)),'выдано, сотрудник не подтвердил',cashLate().length>0,'a-cash'):'')+'</div>';
- if(wait.length)h2+=wait.slice(0,3).map(r=>'<div class="row between wrapx" style="padding:8px 0;border-top:1px solid var(--line,#ddd)"><div><b>'+hu(r.requester_name||'—')+'</b> · '+rqAmt(r)+'<div class="small">'+hu(r.purpose||'')+'</div></div><button class="btn primary sm" data-act="nav" data-v="a-req">Решить</button></div>').join('')+(wait.length>3?'<div class="small muted">и ещё '+(wait.length-3)+'</div>':'');
- return h2+'</section>'}
+ const bal=cashBal(),pend=cashPend(),t0=dayStart(Date.now());const td=cashLive().filter(x=>x.at>=t0);const tin=td.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0),tout=td.filter(x=>x.kind!=='topup').reduce((a,x)=>a+x.amount,0);
+ const tOpen=(S.tasks||[]).filter(t=>t.status==='open').length,tRep=(S.tasks||[]).filter(t=>t.status==='report').length;
+ let s='<button class="chero'+(bal<0?' neg':'')+'" data-act="nav" data-v="a-cash"><span class="hl">Касса сейчас</span><b class="num">'+money(bal)+'</b><div class="hrow"><div><i>сегодня пришло</i><em>+'+money(tin)+'</em></div><div><i>сегодня выдано</i><em>−'+money(tout)+'</em></div>'+(pend.length?'<div><i>не подтверждено</i><em>'+pend.length+' · '+money(pend.reduce((a,x)=>a+x.amount,0))+'</em></div>':'')+'</div></button>';
+ s+='<div class="qa"><button class="qbtn" data-act="hometask">'+I.check+'<span>Дать задачу</span></button><button class="qbtn" data-act="rqnew">'+I.cash+'<span>Выдать деньги</span></button></div>';
+ if(wait.length)s+='<section class="card hreq"><div class="row between"><h2 style="margin:0">Ждут вашего решения</h2><span class="chip c-bad">'+wait.length+'</span></div>'+wait.slice(0,3).map(r=>'<button class="hreqrow" data-act="nav" data-v="a-req"><div><b>'+hu(r.requester_name||'—')+'</b><div class="small">'+hu(r.purpose||'')+'</div></div><div class="hamt">'+rqAmt(r)+'</div></button>').join('')+(wait.length>3?'<button class="btn ghost block" data-act="nav" data-v="a-req">Все запросы</button>':'')+'</section>';
+ s+='<div class="hchips"><button data-act="nav" data-v="a-req"><b>'+(nw.length+hold.length)+'</b><span>запросы у кассира</span></button><button data-act="nav" data-v="a-req"><b>'+pay.length+'</b><span>к выдаче</span></button><button data-act="nav" data-v="a-tasks"><b>'+tOpen+'</b><span>задач в работе</span></button><button data-act="nav" data-v="a-tasks" class="'+(tRep?'al':'')+'"><b>'+tRep+'</b><span>ждут приёмки</span></button></div>';
+ return s}
 function vDash(){const now=Date.now(),t0=dayStart(now);const staff=approved();const rows=staff.map(m=>({m,st:todayStatus(m)}));
  const on=rows.filter(r=>r.st.code==='on').length;const lateAbs=rows.filter(r=>r.st.code==='absent'||r.st.flags.some(f=>/Опоздание/.test(f.t))).length;
  const act=S.tickets.filter(t=>['assigned','enroute','onsite'].includes(t.status)).length;const nw=S.tickets.filter(t=>t.status==='new').length;
@@ -1050,6 +1053,7 @@ const ACT={
   if(r.error)return toast('Ошибка: '+r.error.message);toast('Задача добавлена: '+(tech(tk.emp)||{}).name+(tk.emp2?' и '+(tech(tk.emp2)||{}).name:'')+'. Уведомление отправлено');S.form.tk={emp:tk.emp,place:''};S.tnew=false;await load()},
  async tdel(d){if(await confirmBox('Отменить задачу?','Сотрудник перестанет её видеть.','Отменить задачу')!=='y')return;await upd('tasks',d.id,{status:'cancelled'},'Задача отменена')},
  tnew(){S.tnew=!S.tnew;render(true)},
+ hometask(){S.tnew=true;go('a-tasks')},
  tmode(d){S.tmode=d.v;S.form={};render(true)},
  tper(d){S.tper=d.v;LS.set('tper',d.v);render(true)},
  tdue(d){S.form.tk=S.form.tk||{};S.form.tk.due=d.v||'';render(true)},
