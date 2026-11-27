@@ -537,7 +537,7 @@ function Home({ ctx }) {
         <Tile icon="checkbox" value={st.nTasks || 0} label={tr('задачи')} tone={st.nTasks ? 'warn' : 'ok'} onPress={() => ctx.goTab('tasks')} />
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <Action icon="wallet" title={tr('Открыть запрос')} sub={tr('попросить деньги у кассира')} kind="primary" onPress={() => nav('req')} />
+        <Action icon="wallet" title={tr('Открыть запрос')} kind="primary" onPress={() => nav('req')} />
         <Action icon="receipt" title={tr('Купил за свои')} sub={tr('чек → вернуть деньги')} onPress={() => nav('purchase')} />
         <Action icon="cash" title={tr('Деньги')} sub={st.cashPend ? tr('подтвердите получение') : st.staff.is_cashier ? tr('касса') : tr('сколько получено')} kind={st.cashPend ? 'primary' : undefined} onPress={() => nav('cash')} />
         {isOff ? null : <Action icon="camera" title={tr('Фото работ')} sub={tr('по желанию')} onPress={() => nav('work')} />}
