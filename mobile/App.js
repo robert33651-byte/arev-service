@@ -12,6 +12,7 @@ import { cap, C, Btn, Card, H1, H2, Label, Muted, T, Field, Flag, Chip, Icon, Ti
 import { setupNotify, planReminders, notifyGranted } from './src/notify';
 import { addToBox, flushBox, boxCount, isNetErr } from './src/outbox';
 import TasksScreen from './src/TasksScreen';
+import RequestsScreen from './src/RequestsScreen';
 import { tr, loc, getLang, setLang, loadLang, onLang } from './src/i18n';
 import { startTalk, stopTalk, uploadTalk, requestTalkAi, talkRecording, TALK_MAX_MS, saveTalkPending, loadTalkPending, clearTalkPending } from './src/talk';
 import { registerPush, onTaskNotificationTap, lastTaskTap } from './src/tasks';
@@ -123,7 +124,7 @@ function Auth() {
 
 /* ---------------- основное приложение ---------------- */
 const TAB_TITLE = { home: 'Arev Service', tasks: 'Задачи', day: 'Мой день', history: 'История', profile: 'Профиль' };
-const SUB_TITLE = { shift: 'Рабочий день', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', talk: 'Разговор с клиентом', cash: 'Касса', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
+const SUB_TITLE = { shift: 'Рабочий день', fuel: 'Заправка', ticket: 'Заказ', purchase: 'Закупка', take: 'Со склада', deliver: 'Сдать материал', work: 'Фото работ', talk: 'Разговор с клиентом', cash: 'Касса', req: 'Запрос денег', task: 'Задача', help: 'Как пользоваться', perms: 'Разрешения' };
 
 function Main({ session }) {
   const uid = session.user.id;
@@ -270,6 +271,7 @@ function Main({ session }) {
     else if (view.name === 'work') body = <WorkScreen ctx={ctx} ticket={view.ticket} />;
     else if (view.name === 'task') body = <TaskScreen ctx={ctx} id={view.id} />;
     else if (view.name === 'cash') body = <CashScreen ctx={ctx} />;
+    else if (view.name === 'req') body = <RequestsScreen ctx={ctx} />;
     else if (view.name === 'help') body = <Help ctx={ctx} />;
     else if (view.name === 'talk') body = <TalkScreen ctx={ctx} />;
     else if (view.name === 'perms') body = <Page><PermCard always office={st.staff.kind === 'office'} /><NotifyCard /></Page>;
@@ -544,6 +546,7 @@ function Home({ ctx }) {
         <Action icon="archive" title={tr('Со склада')} sub={tr('взял материал')} onPress={() => nav('take')} />
         {isOff ? null : <Action icon="water" title={tr('Заправка')} sub={tr('чек АЗС')} onPress={() => nav('fuel')} />}
         <Action icon="mic" title={tr('Разговор')} sub={tr('запись с клиентом')} onPress={() => nav('talk')} />
+        <Action icon="wallet" title={tr('Запросить деньги')} sub={tr('шеф решит, кассир выдаст')} kind="primary" onPress={() => nav('req')} />
         <Action icon="cash" title={tr('Деньги')} sub={st.cashPend ? tr('подтвердите получение') : st.staff.is_cashier ? tr('касса') : tr('сколько получено')} kind={st.cashPend ? 'primary' : undefined} onPress={() => nav('cash')} />
         <Action icon="help-circle" title={tr('Помощь')} sub={tr('как пользоваться')} onPress={() => nav('help')} />
       </View>

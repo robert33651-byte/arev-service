@@ -1,0 +1,122 @@
+// Запрос денег: работник просит сумму → кассир → шеф решает → кассир выдаёт наличными.
+// Работник видит все стадии; уведомления приходят push-ом. Каждый месяц список начинается заново, прошлые — в архиве.
+import React, { useCallback, useEffect, useState } from 'react';
+import { ScrollView, View, Text, Pressable, RefreshControl, Alert, TextInput } from 'react-native';
+import { SafeAreaView } from 'react-native';
+import { supabase, rpc, errText } from './supabase';
+import { deviceId } from './device';
+import { C, Btn, Card, H2, Label, Muted, T, Field, Chip } from './ui';
+import { tr, loc } from './i18n';
+
+const money = (n) => (n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ֏');
+const ST = {
+  new: ['У кассира', 'info'], forwarded: ['У шефа', 'warn'], waiting: ['Шеф просит подождать', 'warn'],
+  approved: ['Одобрено: получите наличными у кассира', 'ok'], rejected: ['Отклонено', 'bad'], paid: ['Деньги выданы', 'ok'], cancelled: ['Отменено', 'note'],
+};
+const EV = { created: 'Запрос создан', forwarded: 'Передан шефу', approved: 'Одобрено', rejected: 'Отклонено', waiting: 'Шеф: подождать', paid: 'Деньги выданы', cancelled: 'Отменён', boss_created: 'Выдачу назначил шеф', reminder: 'Напоминание' };
+const ROLE = { worker: 'Вы', cashier: 'Кассир', admin: 'Шеф', system: 'Система' };
+const RQ_ERR = { BAD_AMOUNT: 'Неверная сумма', NEED_PURPOSE: 'Впишите, на что нужны деньги', REQ_CLOSED: 'Запрос уже закрыт', NOT_FOUND: 'Запрос не найден', EMPTY: 'Впишите сообщение' };
+const eText = (e) => { const m = (e && (e.error || e.message)) || ''; for (const k of Object.keys(RQ_ERR)) if (m.includes(k)) return tr(RQ_ERR[k]); return errText(e); };
+const fmt = (iso) => { const d = new Date(iso); return d.toLocaleDateString(loc(), { day: 'numeric', month: 'short' }) + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+
+function Thread({ id, uid }) {
+  const [log, setLog] = useState(null);
+  const [say, setSay] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    const r = await supabase.from('cash_request_log').select('at,actor_role,kind,code,body,path').eq('request_id', id).order('at').order('id');
+    setLog(r.error ? [] : r.data || []);
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
+  const send = async () => {
+    if (!say.trim()) return;
+    setBusy(true);
+    try { await rpc('req_say', { p_id: id, p_body: say.trim(), p_voice: null, p_device: deviceId() }); setSay(''); await load(); }
+    catch (e) { Alert.alert(tr('Не получилось'), eText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 8, gap: 6 }}>
+      {log === null ? <Muted>{tr('Загрузка…')}</Muted> : log.length === 0 ? <Muted>{tr('Сообщений пока нет.')}</Muted> : log.map((m, i) => (
+        <View key={i}>
+          <Muted style={{ fontSize: 11 }}>{fmt(m.at)} · {tr(ROLE[m.actor_role] || m.actor_role)}</Muted>
+          <T>{m.kind === 'text' ? m.body : m.kind === 'voice' ? tr('🎤 Голосовое сообщение (послушайте в админке или на компьютере)') : tr(EV[m.code] || m.code || '') + (['created', 'approved', 'paid', 'boss_created'].includes(m.code) && m.body ? ': ' + money(+m.body) : '')}</T>
+        </View>
+      ))}
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
+        <View style={{ flex: 1 }}><Field label={tr('Ваше сообщение')} value={say} onChangeText={setSay} maxLength={500} /></View>
+        <Btn title={tr('Отправить')} onPress={send} busy={busy} kind="ghost" />
+      </View>
+    </View>
+  );
+}
+
+export default function RequestsScreen({ ctx }) {
+  const { uid, load: reloadMain } = ctx;
+  const [rows, setRows] = useState([]);
+  const [mo, setMo] = useState(0);
+  const [amount, setAmount] = useState('');
+  const [purpose, setPurpose] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = useCallback(async () => {
+    const now = new Date();
+    const m0 = new Date(now.getFullYear(), now.getMonth() + mo, 1), m1 = new Date(now.getFullYear(), now.getMonth() + mo + 1, 1);
+    const r = await supabase.from('cash_requests').select('*').eq('requester_id', uid).gte('created_at', m0.toISOString()).lt('created_at', m1.toISOString()).order('created_at', { ascending: false });
+    setRows(r.data || []);
+  }, [uid, mo]);
+  useEffect(() => { refresh(); const t = setInterval(refresh, 20000); return () => clearInterval(t); }, [refresh]);
+  const sum = parseInt(String(amount).replace(/\D/g, ''), 10) || 0;
+  const send = async () => {
+    if (!sum) return Alert.alert(tr('Сумма'), tr('Укажите сумму'));
+    if (!purpose.trim()) return Alert.alert(tr('На что'), tr('Впишите, на что нужны деньги'));
+    setBusy(true);
+    try {
+      await rpc('req_create', { p_amount: sum, p_purpose: purpose.trim(), p_note: note.trim() || null, p_device: deviceId() });
+      setAmount(''); setPurpose(''); setNote(''); setMo(0); await refresh(); reloadMain && reloadMain();
+      Alert.alert(tr('Запрос отправлен кассиру'));
+    } catch (e) { Alert.alert(tr('Не получилось'), eText(e)); } finally { setBusy(false); }
+  };
+  const cancel = (r) => Alert.alert(tr('Отменить запрос?'), money(r.amount_asked) + ' · ' + r.purpose, [
+    { text: tr('Нет'), style: 'cancel' },
+    { text: tr('Отменить запрос'), style: 'destructive', onPress: async () => { try { await rpc('req_cancel', { p_id: r.id }); await refresh(); } catch (e) { Alert.alert(tr('Не получилось'), eText(e)); } } },
+  ]);
+  const monthName = new Date(new Date().getFullYear(), new Date().getMonth() + mo, 1).toLocaleDateString(loc(), { month: 'long', year: 'numeric' });
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 40 }} keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refresh(); setRefreshing(false); }} />}>
+      <Card>
+        <H2>{tr('Запросить деньги')}</H2>
+        <Field label={tr('Сумма, ֏')} value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="25000" />
+        <Field label={tr('На что нужны деньги')} value={purpose} onChangeText={setPurpose} maxLength={200} />
+        <Field label={tr('Комментарий (необязательно)')} value={note} onChangeText={setNote} maxLength={500} />
+        <Btn title={tr('Отправить запрос')} onPress={send} busy={busy} big />
+        <Muted>{tr('Запрос идёт кассиру, затем шефу. Вы увидите каждый этап и получите уведомление. Деньги выдаёт кассир наличными.')}</Muted>
+      </Card>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Pressable onPress={() => setMo(mo - 1)} hitSlop={10}><Text style={{ color: C.pine, fontSize: 15, fontWeight: '700' }}>‹ {tr('Раньше')}</Text></Pressable>
+        <Label>{monthName}{mo < 0 ? ' · ' + tr('архив') : ''}</Label>
+        <Pressable onPress={() => setMo(Math.min(0, mo + 1))} hitSlop={10} disabled={mo === 0}><Text style={{ color: mo === 0 ? C.muted : C.pine, fontSize: 15, fontWeight: '700' }}>{tr('Позже')} ›</Text></Pressable>
+      </View>
+      {rows.length === 0 ? <Muted>{tr('Запросов за этот месяц нет.')}</Muted> : rows.map((r) => {
+        const s = ST[r.status] || [r.status, 'note'];
+        const live = ['new', 'forwarded', 'waiting'].includes(r.status);
+        const amt = r.amount_approved && r.amount_approved !== r.amount_asked ? money(r.amount_approved) + ' (' + tr('просили') + ' ' + money(r.amount_asked) + ')' : money(r.amount_approved || r.amount_asked);
+        return (
+          <Card key={r.id}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: C.ink }}>{amt}</Text>
+            <T>{r.purpose}</T>
+            <Muted>{fmt(r.created_at)}{r.origin === 'boss' ? ' · ' + tr('назначил шеф') : ''}</Muted>
+            <Chip kind={s[1]}>{tr(s[0])}</Chip>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+              <Btn title={open === r.id ? tr('Скрыть переписку') : tr('Переписка')} kind="ghost" onPress={() => setOpen(open === r.id ? null : r.id)} />
+              {live && r.origin === 'worker' ? <Btn title={tr('Отменить запрос')} kind="ghost" onPress={() => cancel(r)} /> : null}
+            </View>
+            {open === r.id ? <Thread id={r.id} uid={uid} /> : null}
+          </Card>
+        );
+      })}
+    </ScrollView>
+  );
+}
