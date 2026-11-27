@@ -44,6 +44,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:9;max-width:90vw}
 .flag{padding:10px 12px;border-radius:10px;background:var(--warn-soft);color:var(--warn)}
 @media(max-width:600px){main{padding:10px}.kpi b{font-size:22px}}
+.vpb{display:inline-flex;align-items:center;gap:8px;background:transparent;border:1px solid #ccc;border-radius:999px;padding:4px 14px 4px 6px;font:inherit;color:inherit;cursor:pointer}@media (prefers-color-scheme:dark){.vpi{filter:brightness(0) invert(1)}}
 </style>
 </head>
 <body>
@@ -228,12 +229,13 @@ function thread(x){
 
 /* ===== Запросы денег ===== */
 var RST={new:['У кассира','chip'],forwarded:['У шефа','chip c-warn'],waiting:['Шеф просит подождать','chip c-warn'],approved:['Одобрено','chip c-ok'],rejected:['Отклонено','chip c-bad'],paid:['Выдано','chip c-ok'],cancelled:['Отменено','chip']};
+var VPB='<button type="button" class="vpb" data-vp aria-label="Слушать"><img class="vpi" src="../icons/play.png" alt="" width="30" height="30"><span>Слушать</span></button>';
 function rAmt(r){var a=r.amount_approved;return a&&a!==r.amount_asked?'<b>'+money(a)+'</b> <span class="small muted">(просили '+money(r.amount_asked)+')</span>':'<b>'+money(r.amount_approved||r.amount_asked)+'</b>'}
 function rChip(r){var t=RST[r.status]||[r.status,'chip'];return '<span class="'+t[1]+'">'+t[0]+'</span>'}
 function recUI(key){
   var R=S.rec||{};
   if(R.on)return '<div class="small" style="margin-top:6px"><b>Идёт запись…</b> <button class="bad sm" data-a="recstop">Остановить запись</button></div>';
-  if(R.blob&&R.key===key)return '<div class="small" style="margin-top:6px"><audio controls src="'+h(R.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="sm" data-a="recdel">Удалить запись</button></div>';
+  if(R.blob&&R.key===key)return '<div class="small" style="margin-top:6px">'+VPB+'<audio hidden src="'+h(R.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="sm" data-a="recdel">Удалить запись</button></div>';
   return '<div style="margin-top:6px"><button class="sm" data-a="recstart" data-k="'+h(key)+'"><img src="../icons/voice.png" alt="" width="22" height="22" style="vertical-align:middle"> Записать голосовое</button></div>';
 }
 function rThread(r){
@@ -242,7 +244,7 @@ function rThread(r){
   var ROLE={worker:'Работник',cashier:'Кассир',admin:'Шеф',system:'Система'};
   var items=L===null?'<div class="small muted">Загрузка…</div>':L.length?L.map(function(m){
     var who=(S.me&&m.actor_role==='worker'&&r.requester_id===S.me.id)?'Вы':(S.me&&m.actor_role==='cashier'&&S.me.is_cashier)?'Вы':ROLE[m.actor_role]||m.actor_role;
-    var txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rurls&&S.rurls[m.path]?'<audio controls src="'+h(S.rurls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(EV[m.code]||hu(m.code||''))+((m.code==='created'||m.code==='approved'||m.code==='paid'||m.code==='boss_created')&&m.body?': '+money(+m.body):'')+'</span>';
+    var txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rurls&&S.rurls[m.path]?''+VPB+'<audio hidden src="'+h(S.rurls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(EV[m.code]||hu(m.code||''))+((m.code==='created'||m.code==='approved'||m.code==='paid'||m.code==='boss_created')&&m.body?': '+money(+m.body):'')+'</span>';
     return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+who+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>';
   var closed=r.status==='paid'||r.status==='cancelled'||r.status==='rejected';
   return '<div style="margin-top:8px;border-top:1px solid var(--line,#ddd);padding-top:8px">'+items+(closed?'':
@@ -458,6 +460,10 @@ var A={
     var blob=new Blob(['﻿'+out.join('\r\n')],{type:'text/csv;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kassa-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)}
 };
 
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-vp]');if(!b)return;var a=b.nextElementSibling;if(!a||a.tagName!=='AUDIO')return;var lab=b.querySelector('span');
+  if(!a.paused){a.pause();return}
+  document.querySelectorAll('audio').forEach(function(x){if(x!==a&&!x.paused)x.pause()});
+  a.onended=a.onpause=function(){if(lab)lab.textContent='Слушать'};a.play().then(function(){if(lab)lab.textContent='Пауза'}).catch(function(){toast('Не удалось воспроизвести')})});
 document.addEventListener('click',function(e){var b=e.target.closest('[data-a]');if(!b)return;if(b.tagName==='A')e.preventDefault();var f=A[b.dataset.a];if(f)f({id:b.dataset.id,v:b.dataset.v})});
 document.addEventListener('input',function(e){var el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value});
 document.addEventListener('change',function(e){var el=e.target;if(el.dataset.fl){S.flt[el.dataset.fl]=el.value;render()}else if(el.dataset.f&&el.tagName==='SELECT'){S.form[el.dataset.f]=el.value}});

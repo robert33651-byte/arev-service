@@ -139,7 +139,7 @@ async function signPending(){const list=[...pending].filter(p=>!S.urls[p]);pendi
  const r=await sb.storage.from('photos').createSignedUrls(list,3600);(r.data||[]).forEach(x=>{if(x.signedUrl)S.urls[x.path]=x.signedUrl});
  document.querySelectorAll('img[data-path]').forEach(im=>{const u=S.urls[im.dataset.path];if(u&&!im.getAttribute('src'))im.src=u});
  document.querySelectorAll('audio[data-apath]').forEach(a=>{const u=S.urls[a.dataset.apath];if(u&&!a.getAttribute('src'))a.src=u})}
-function audioEl(path){if(!path)return '';const u=S.urls[path];if(!u){pending.add(path);clearTimeout(pendT);pendT=setTimeout(signPending,30)}return '<audio controls preload="none" data-apath="'+h(path)+'" '+(u?'src="'+h(u)+'"':'')+' style="width:100%;max-width:420px"></audio>'}
+function audioEl(path){if(!path)return '';const u=S.urls[path];if(!u){pending.add(path);clearTimeout(pendT);pendT=setTimeout(signPending,30)}return ''+VPB+'<audio hidden preload="none" data-apath="'+h(path)+'" '+(u?'src="'+h(u)+'"':'')+' style="width:100%;max-width:420px"></audio>'}
 
 /* ---------- расчёты и отклонения ---------- */
 function routeKm(sh){return sh.route_km!=null?+sh.route_km:0}
@@ -858,7 +858,7 @@ function logHtml(t,log){if(!log.length)return '<p class="small muted">Запис
   if(l.kind==='event'){const f=EVT[l.code];body='<span class="muted">'+h(f?f(l.body||''):(l.code||'событие'))+'</span>'+(l.actor_role!=='system'&&l.code!=='created'&&l.code!=='seen'?' · '+who:l.code==='seen'?' · '+who:'')}
   else{const to=l.actor_role==='staff'?'менеджеру':'→ '+h(tnames(t));
    body='<div><b>'+who+'</b> <span class="tiny muted">'+(l.actor_role==='staff'?'→ менеджеру':to)+'</span></div>'+
-    (l.kind==='voice'&&l.path?'<audio controls preload="none" style="width:100%;max-width:340px" src="'+h(S.urls[l.path]||'')+'"></audio>':l.kind==='photo'&&l.path?thumb(l.path,'thumb lg'):l.kind==='file'&&l.path?'<div><a href="'+h(S.urls[l.path]||'#')+'" target="_blank" rel="noopener">Файл: '+hu(l.code||'файл')+'</a></div>':'')+
+    (l.kind==='voice'&&l.path?''+VPB+'<audio hidden preload="none" style="width:100%;max-width:340px" src="'+h(S.urls[l.path]||'')+'"></audio>':l.kind==='photo'&&l.path?thumb(l.path,'thumb lg'):l.kind==='file'&&l.path?'<div><a href="'+h(S.urls[l.path]||'#')+'" target="_blank" rel="noopener">Файл: '+hu(l.code||'файл')+'</a></div>':'')+
     (l.body?'<div style="white-space:pre-wrap;overflow-wrap:anywhere">'+hu(l.body)+'</div>':'')}
   s+='<div class="tl-i"><time>'+fHM(ms(l.at))+'</time><div>'+body+'</div></div>'});
  return '<div class="tl">'+s+'</div>'}
@@ -870,7 +870,7 @@ function taskSheet(t,log){const live=!t.archived_at&&t.status!=='cancelled';
   (t.note?'<div class="flag note">'+hu(t.note)+'</div>':'')+(t.done_note?'<div class="flag note">Сотрудник: '+hu(t.done_note)+'</div>':'')+
   '<hr class="sep"><div class="label">Хронология</div>'+logHtml(t,log)+
   (live||fin?'<hr class="sep"><div class="field"><label for="tr-text">Ответ или комментарий</label><textarea id="tr-text" class="inp" placeholder="Напишите ответ, можно добавить фото или голосовое"></textarea></div>'+
-   '<div class="row wrapx" style="gap:8px"><button class="btn primary sm" data-act="treply">Отправить</button><button class="btn ghost sm" data-act="tphoto">'+I.camera+'Фото</button><button class="btn ghost sm" id="tr-rec" data-act="trec">🎤 Голосовое</button></div>':'')+
+   '<div class="row wrapx" style="gap:8px"><button class="btn primary sm" data-act="treply">Отправить</button><button class="btn ghost sm" data-act="tphoto">'+I.camera+'Фото</button><button class="btn ghost sm" id="tr-rec" data-act="trec">'+VIC+' Голосовое</button></div>':'')+
   '<div class="row wrapx" style="gap:8px">'+
    (t.disc_status==='open'?'<button class="btn ghost sm" data-act="tdisc">✔ Вопрос решён</button>':'')+
    (live&&(t.status==='new'||t.status==='report')?'<button class="btn dark sm" data-act="tconfirm">✔ Принять и в архив</button>':'')+
@@ -892,7 +892,7 @@ const A_ERR={EMPTY:'Напишите текст ответа',TASK_CLOSED:'За�
 const aErr=e=>{const m=String((e&&(e.message||e.error))||e);for(const k in A_ERR)if(m.includes(k))return A_ERR[k];return 'Ошибка: '+m};
 async function afterTask(msg){if(msg)toast(msg);await load();if(S.tcur)await openTask(S.tcur,true)}
 let recSt=null;
-function recUi(on){const b=document.getElementById('tr-rec');if(b){b.textContent=on?'⏹ Остановить и отправить':'🎤 Голосовое';b.classList.toggle('danger',on)}}
+function recUi(on){const b=document.getElementById('tr-rec');if(b){b.innerHTML=on?'⏹ Остановить и отправить':VIC+' Голосовое';b.classList.toggle('danger',on)}}
 async function shrinkImg(file){try{const bmp=await createImageBitmap(file);const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
  return await new Promise(r=>c.toBlob(b=>r(b||file),'image/jpeg',0.8))}catch(e){return file}}
 async function sendTaskMedia(kind,blob){const id=S.tcur;if(!id)return;const uid=S.session.user.id;const ty=blob.type||'';const ext=ty.includes('mp4')?'m4a':ty.includes('webm')?'webm':ty.includes('ogg')?'ogg':ty.includes('jpeg')?'jpg':ty.includes('png')?'png':'bin';
@@ -955,11 +955,11 @@ const RQEV={created:'Запрос создан',forwarded:'Кассир пере
 const RQROLE={worker:'Сотрудник',cashier:'Кассир',admin:'Шеф',system:'Система'};
 const rqAmt=r=>r.amount_approved&&r.amount_approved!==r.amount_asked?'<b>'+money(r.amount_approved)+'</b> <span class="small muted">(просили '+money(r.amount_asked)+')</span>':'<b>'+money(r.amount_approved||r.amount_asked)+'</b>';
 function rqThread(){const L=S.rqLog;if(L===null||L===undefined)return '<div class="small muted">Загрузка…</div>';
- return L.length?L.map(m=>{const txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rqUrls&&S.rqUrls[m.path]?'<audio controls src="'+h(S.rqUrls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(RQEV[m.code]||hu(m.code||''))+((['created','approved','paid','boss_created'].includes(m.code)&&m.body)?': '+money(+m.body):'')+'</span>';
+ return L.length?L.map(m=>{const txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rqUrls&&S.rqUrls[m.path]?''+VPB+'<audio hidden src="'+h(S.rqUrls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(RQEV[m.code]||hu(m.code||''))+((['created','approved','paid','boss_created'].includes(m.code)&&m.body)?': '+money(+m.body):'')+'</span>';
   return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+(RQROLE[m.actor_role]||m.actor_role)+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>'}
 function rqVoiceBox(id){const R=S.rqVoice&&S.rqVoice.id===id?S.rqVoice:null;
  if(rqRec&&rqRec.rid===id)return '<div class="row" style="gap:8px"><b class="small" style="color:var(--bad)">● Идёт запись…</b><button class="btn danger" data-act="rqrec" data-id="'+h(id)+'">Остановить запись</button></div>';
- if(R)return '<div class="row wrapx" style="gap:8px"><audio controls src="'+h(R.url)+'" style="height:36px;max-width:100%"></audio><button class="btn ghost sm" data-act="rqrecdel">Удалить запись</button></div>';
+ if(R)return '<div class="row wrapx" style="gap:8px">'+VPB+'<audio hidden src="'+h(R.url)+'" style="height:36px;max-width:100%"></audio><button class="btn ghost sm" data-act="rqrecdel">Удалить запись</button></div>';
  return '<button class="btn ghost block" data-act="rqrec" data-id="'+h(id)+'">'+VIC+' Записать голосовое</button>'}
 function rqRow(r){const open=S.rqOpen===r.id;const t=RQST[r.status]||[r.status,'chip'];const live=['new','forwarded','waiting'].includes(r.status);
  const ak='rqa_'+r.id,nk='rqn_'+r.id;const av=S.form[ak]!=null?S.form[ak]:String(r.amount_approved||r.amount_asked);
@@ -981,6 +981,7 @@ function vReq(){const f=S.rqF||'wait';const all=S.reqs||[];
  s+=lst.length?lst.slice(0,200).map(rqRow).join(''):'<div class="empty">Запросов нет.</div>';
  s+='<p class="small muted">Запрос идёт кассиру; вы видите его сразу, но уведомление приходит, когда кассир передаст его вам. Решение: одобрить (можно изменить сумму), отклонить или попросить подождать. Выдаёт деньги кассир наличными.</p>';
  return s}
+const VPB='<button type="button" class="vpb" data-vp aria-label="Слушать"><img class="vpi" src="icons/play.png" alt="" width="30" height="30"><span>Слушать</span></button>';
 const VIC='<img class="vic" src="icons/voice.png" alt="" width="26" height="26" style="vertical-align:middle">';
 let rqRec=null;
 async function rqRecord(rid){if(rqRec){rqRec.stop();return}
@@ -993,7 +994,7 @@ async function rqRecord(rid){if(rqRec){rqRec.stop();return}
  if(S.rqVoice&&S.rqVoice.id!==rid)rqClear();
  rqRec=mr;mr.rid=rid;mr.start();render(true);rqVoiceUi()}
 function rqVoiceUi(){const el=document.getElementById('rq-voice');if(!el)return;
- el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec" data-id="new">Остановить</button>':S.rqVoice?'<audio controls src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost" data-act="rqrec" data-id="new">'+VIC+' Записать голосовое</button>'}
+ el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec" data-id="new">Остановить</button>':S.rqVoice?''+VPB+'<audio hidden src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost" data-act="rqrec" data-id="new">'+VIC+' Записать голосовое</button>'}
 async function rqUpload(){const R=S.rqVoice;if(!R||!R.blob)return null;const path=S.session.user.id+'/req_'+Date.now()+'.webm';
  const up=await sb.storage.from('photos').upload(path,R.blob,{contentType:R.blob.type||'audio/webm',upsert:false});if(up.error)throw new Error(up.error.message);return path}
 function rqClear(){if(S.rqVoice&&S.rqVoice.url)try{URL.revokeObjectURL(S.rqVoice.url)}catch(e){}S.rqVoice=null;rqRec=null}
@@ -1237,3 +1238,10 @@ setInterval(()=>{if(S.isAdmin&&!document.hidden&&S.view.name==='a-day'&&S.dayEmp
  if(S.isAdmin&&!document.hidden&&!S.busy&&S.view.name!=='a-day'&&S.view.name!=='a-places'&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
 render();
 })();
+
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-vp]');if(!b)return;const a=b.nextElementSibling;if(!a||a.tagName!=='AUDIO')return;
+ const lab=b.querySelector('span');
+ if(!a.paused){a.pause();if(lab)lab.textContent='Слушать';return}
+ document.querySelectorAll('audio').forEach(x=>{if(x!==a&&!x.paused)x.pause()});
+ if(!a.getAttribute('src')){toast('Запись ещё загружается');return}
+ a.onended=a.onpause=()=>{if(lab)lab.textContent='Слушать'};a.play().then(()=>{if(lab)lab.textContent='Пауза'}).catch(()=>toast('Не удалось воспроизвести'))});
