@@ -98,7 +98,8 @@ async function load(){
   pages(()=>sb.from('equipment').select('*').order('created_at')),
   pages(()=>sb.from('admin_log').select('*').gte('at',new Date(Date.now()-60*864e5).toISOString()).order('id',{ascending:false}),3000),
   sb.rpc('last_positions'),
-  pages(()=>sb.from('cash_ledger').select('*').gte('at',new Date(Date.now()-400*864e5).toISOString()).order('at',{ascending:false}),5000)
+  pages(()=>sb.from('cash_ledger').select('*').gte('at',new Date(Date.now()-400*864e5).toISOString()).order('at',{ascending:false}),5000),
+  pages(()=>sb.from('cash_requests').select('*').order('created_at',{ascending:false}),2000)
  ]);
  const err=q.slice(0,13).find(r=>r&&r.error);if(err){toast('Ошибка загрузки: '+err.error.message);if(S.loaded)return}  // при сбое связи оставляем прежние данные на экране
  S.cfg=q[0].data||{};S.staff=q[1].data||[];
@@ -124,7 +125,7 @@ async function load(){
  S.buys=(q[9].data||[]).map(x=>({...x,masterId:x.staff_id,at:ms(x.created_at),dAt:ms(x.delivered_at),lAt:ms(x.left_at),accAt:ms(x.accepted_at),loc:x.lat!=null?{lat:x.lat,lng:x.lng}:null}));
  const ids=S.tickets.map(t=>t.id);S.tphotos={};
  if(ids.length){for(let i=0;i<ids.length;i+=150){const r=await sb.from('ticket_photos').select('*').in('ticket_id',ids.slice(i,i+150));(r.data||[]).forEach(p=>{(S.tphotos[p.ticket_id]=S.tphotos[p.ticket_id]||[]).push({...p,at:ms(p.at)})})}}
- S.cash=(q[18].data||[]).map(x=>({...x,at:ms(x.at),cAt:ms(x.confirmed_at),vAt:ms(x.voided_at)}));S.cashMissing=!!q[18].error;
+ S.cash=(q[18].data||[]).map(x=>({...x,at:ms(x.at),cAt:ms(x.confirmed_at),vAt:ms(x.voided_at)}));S.cashMissing=!!q[18].error;S.reqMissing=!!(q[19]&&q[19].error);S.reqs=S.reqMissing?[]:((q[19]&&q[19].data)||[]).map(x=>({...x,at:ms(x.created_at)}));
  S.loaded=true;render(true);
  // раз в день — очистка старых данных по срокам из настроек
  if(LS.get('clean','')!==ymd(Date.now())){LS.set('clean',ymd(Date.now()));ACT.cleanup()}}
@@ -285,6 +286,7 @@ function todayStatus(m){const now=Date.now(),t0=dayStart(now),c=S.cfg;const sh=S
 const nowDoing=m=>{const t=S.tickets.find(x=>x.techId===m.id&&['enroute','onsite'].includes(x.status))||S.tickets.find(x=>x.techId===m.id&&x.status==='assigned');return t?ST[t.status][0]+' · '+t.num:''};
 function allIssues(from){const out=[];const t0=dayStart(Date.now());
  S.alerts.filter(a=>a.at>=from).forEach(a=>out.push({lv:a.level,t:a.message,who:a.staff_id,at:a.at,kind:a.kind==='mock'?'Подмена GPS':a.kind==='device'?'Чужой телефон':'Сервер',go:['a-emp',a.staff_id]}));
+ (S.reqs||[]).filter(r=>r.status==='forwarded').forEach(r=>out.push({lv:'warn',t:'Запрос денег '+money(r.amount_asked)+' ждёт решения: '+(r.requester_name||'')+', '+(r.purpose||''),who:r.requester_id,at:ms(r.created_at),kind:'Запрос денег',go:['a-req','']}));
  cashLate().forEach(x=>out.push({lv:'warn',t:'Выдача '+money(x.amount)+' не подтверждена: '+ago(x.at),who:x.staff_id,at:x.at,kind:'Касса',go:['a-cash','']}));
  if(S.cash&&S.cash.length&&cashBal()<0)out.push({lv:'warn',t:'Остаток кассы отрицательный: '+money(cashBal()),who:null,at:Date.now(),kind:'Касса',go:['a-cash','']});
  approved().forEach(m=>{const st=todayStatus(m);if(st.code==='absent')out.push({lv:'bad',t:'Нет отметки о приходе',who:m.id,at:hmToTs(t0,(schedOf(t0)||{s:S.cfg.work_start}).s),kind:'Рабочий день',go:['a-emp',m.id]});
@@ -317,9 +319,9 @@ const perSeg=()=>'<div class="seg" style="width:min(100%,360px)">'+PERS.map(x=>'
 const empSel=()=>'<select class="inp" id="f-emp" data-act="emp" style="width:min(100%,260px);padding:9px 12px;font-size:14px"><option value="">Все сотрудники</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(S.empF===m.id?' selected':'')+'>'+h(m.name)+'</option>').join('')+'</select>';
 const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не задана точка офиса. Откройте «Настройки» и укажите координаты, иначе приход и уход не проверяются.</span></div>';
 
-const ANAV=[['a-dash','Сводка','chart'],['a-live','Где все сейчас','map'],['a-report','Отчёт','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-talks','Разговоры','mic'],['a-buys','Закупки','box'],['a-cash','Касса','cash'],['a-places','Объекты','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Рабочие дни','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-log','Журнал','book'],['a-settings','Настройки','cog']];
+const ANAV=[['a-dash','Сводка','chart'],['a-live','Где все сейчас','map'],['a-report','Отчёт','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-talks','Разговоры','mic'],['a-buys','Закупки','box'],['a-cash','Касса','cash'],['a-req','Запросы денег','cash'],['a-places','Объекты','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Рабочие дни','clock'],['a-staff','Сотрудники','team'],['a-orders','Заявки','list'],['a-log','Журнал','book'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-place':'a-places','a-order':'a-orders','a-new':'a-orders'}[n]||n;
- const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&t.status==='new').length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
+ const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-req':(S.reqs||[]).filter(r=>r.status==='forwarded'||r.status==='waiting').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&t.status==='new').length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  const MN=[['a-dash','Сводка','chart'],['a-live','Карта','map'],['a-day','Маршрут','route'],['a-buys','Закупки','box']];const inMN=MN.some(x=>x[0]===cur);
  const title=(ANAV.find(x=>x[0]===cur)||['','Arev Admin'])[1];
  const top='<header class="mtop"><span class="sunmark" aria-hidden="true"></span><b class="grow">'+h(title)+'</b>'+(installable()?'<button class="mtbtn" data-act="install">Установить</button>':'')+'<button class="mtbtn ic" data-act="reload" aria-label="Обновить данные">'+I.refresh+'</button></header>';
@@ -947,7 +949,46 @@ function rpCsv(){const rows=rpRows();const hd=['Сотрудник','Перио�
  const body=rows.map(x=>[x.m.name,per,x.days,Math.round(x.hrs*10)/10,Math.round(x.km),x.given,x.done,x.ontime,x.late,x.avgOpen==null?'':Math.round(x.avgOpen),x.ph,x.nb,Math.round(x.sb),x.byOpen,x.bad]);
  const csv='﻿'+[hd].concat(body).map(r=>r.map(q).join(';')).join('\r\n');
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const el=document.createElement('a');el.href=url;el.download='arev-otchet-'+per.replace(/[^0-9a-zа-я]+/gi,'_')+'.csv';document.body.appendChild(el);el.click();el.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
-const VIEWS={'a-cash':vCash,'a-report':vReport,'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-place':vPlace,'a-live':vLive,'a-log':vLog,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-talks':vTalks,'a-settings':vSettings};
+/* ---------- запросы денег (шеф) ---------- */
+const RQST={new:['у кассира','chip'],forwarded:['ждёт решения шефа','chip c-warn'],waiting:['шеф: подождать','chip c-warn'],approved:['одобрено, касса выдаст','chip c-ok'],rejected:['отклонено','chip c-bad'],paid:['выдано','chip c-ok'],cancelled:['отменено','chip']};
+const RQEV={created:'Запрос создан',forwarded:'Кассир передал шефу',approved:'Одобрено',rejected:'Отклонено',waiting:'Шеф: подождать',paid:'Деньги выданы',cancelled:'Отменён работником',boss_created:'Выдачу назначил шеф',reminder:'Напоминание'};
+const RQROLE={worker:'Сотрудник',cashier:'Кассир',admin:'Шеф',system:'Система'};
+const rqAmt=r=>r.amount_approved&&r.amount_approved!==r.amount_asked?'<b>'+money(r.amount_approved)+'</b> <span class="small muted">(просили '+money(r.amount_asked)+')</span>':'<b>'+money(r.amount_approved||r.amount_asked)+'</b>';
+function rqThread(){const L=S.rqLog;if(L===null||L===undefined)return '<div class="small muted">Загрузка…</div>';
+ return L.length?L.map(m=>{const txt=m.kind==='text'?hu(m.body||''):m.kind==='voice'?(S.rqUrls&&S.rqUrls[m.path]?'<audio controls src="'+h(S.rqUrls[m.path])+'" style="height:34px"></audio>':'<span class="muted">Голосовое сообщение</span>'):'<span class="muted">'+(RQEV[m.code]||hu(m.code||''))+((['created','approved','paid','boss_created'].includes(m.code)&&m.body)?': '+money(+m.body):'')+'</span>';
+  return '<div class="small" style="padding:4px 0"><span class="tiny muted">'+fT(ms(m.at))+' · '+(RQROLE[m.actor_role]||m.actor_role)+'</span><div>'+txt+'</div></div>'}).join(''):'<div class="small muted">Сообщений пока нет.</div>'}
+function rqRow(r){const open=S.rqOpen===r.id;const t=RQST[r.status]||[r.status,'chip'];const live=['new','forwarded','waiting'].includes(r.status);
+ return '<section class="card tight"><div class="row between wrapx"><div><div><b>'+hu(r.requester_name||'—')+'</b> · '+rqAmt(r)+' · '+hu(r.purpose||'')+'</div><div class="tiny muted">'+fT(ms(r.created_at))+(r.origin==='boss'?' · назначили вы':'')+' · <span class="'+t[1]+'">'+t[0]+'</span></div></div>'+
+  '<div class="row wrapx"><button class="btn ghost sm" data-act="rqopen" data-id="'+h(r.id)+'">'+(open?'Свернуть':'Открыть')+'</button>'+(live?'<button class="btn primary sm" data-act="rqdecide" data-id="'+h(r.id)+'">Решить</button>':'')+'</div></div>'+
+  (open?'<div style="margin-top:8px;border-top:1px solid var(--line,#ddd);padding-top:8px">'+rqThread()+'</div>':'')+'</section>'}
+function vReq(){const f=S.rqF||'wait';const all=S.reqs||[];
+ const wait=all.filter(r=>r.status==='forwarded'||r.status==='waiting'),nw=all.filter(r=>r.status==='new'),pay=all.filter(r=>r.status==='approved');
+ const lst=f==='wait'?wait:f==='new'?nw:f==='pay'?pay:all;
+ let s=atop('Запросы денег','<button class="btn primary sm" data-act="rqnew">Назначить выдачу сотруднику</button>');
+ if(S.reqMissing)s+='<div class="flag warn">'+I.alert+'<span>Выполните в Supabase файл migration_requests.sql: без него запросы денег не работают.</span></div>';
+ s+='<div class="kgrid">'+kpi(wait.length,'ждут вашего решения',wait.some(r=>r.status==='forwarded'))+kpi(nw.length,'у кассира, ещё не переданы')+kpi(pay.length,'одобрено, касса выдаёт')+'</div>';
+ s+='<div class="filters">'+[['wait','Ждут решения'],['new','У кассира'],['pay','К выдаче'],['all','Все']].map(x=>'<button class="'+(f===x[0]?'on':'')+'" data-act="rqf" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>';
+ s+=lst.length?lst.slice(0,200).map(rqRow).join(''):'<div class="empty">Запросов нет.</div>';
+ s+='<p class="small muted">Запрос идёт кассиру; вы видите его сразу, но уведомление приходит, когда кассир передаст его вам. Решение: одобрить (можно изменить сумму), отклонить или попросить подождать. Выдаёт деньги кассир наличными.</p>';
+ return s}
+let rqRec=null;
+async function rqRecord(){if(rqRec){rqRec.stop();return}
+ if(!navigator.mediaDevices||!window.MediaRecorder)return toast('Этот браузер не умеет записывать голос');
+ let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){return toast('Нет доступа к микрофону')}
+ const mime=['audio/mp4','audio/webm;codecs=opus','audio/webm'].find(x=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(x))||'';
+ const mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);const chunks=[];
+ mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+ mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());rqRec=null;const blob=new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'});S.rqVoice={blob,url:URL.createObjectURL(blob)};rqVoiceUi()};
+ rqRec=mr;mr.start();rqVoiceUi()}
+function rqVoiceUi(){const el=document.getElementById('rq-voice');if(!el)return;
+ el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec">Остановить</button>':S.rqVoice?'<audio controls src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost sm" data-act="rqrec">🎤 Записать голосовое</button>'}
+async function rqUpload(){const R=S.rqVoice;if(!R||!R.blob)return null;const path=S.session.user.id+'/req_'+Date.now()+'.webm';
+ const up=await sb.storage.from('photos').upload(path,R.blob,{contentType:R.blob.type||'audio/webm',upsert:false});if(up.error)throw new Error(up.error.message);return path}
+function rqClear(){if(S.rqVoice&&S.rqVoice.url)try{URL.revokeObjectURL(S.rqVoice.url)}catch(e){}S.rqVoice=null;rqRec=null}
+const RQERR={BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Впишите, на что деньги',NOT_FOUND:'Запрос не найден',FORBIDDEN:'Нет прав',BAD_DECISION:'Неверное решение',BAD_RECIPIENT:'Сотрудник не подходит',REQ_CLOSED:'Запрос уже закрыт',EMPTY:'Впишите сообщение или запишите голос'};
+const rqErr=e=>RQERR[e&&e.message]||('Ошибка: '+(e&&e.message||e));
+
+const VIEWS={'a-req':vReq,'a-cash':vCash,'a-report':vReport,'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-place':vPlace,'a-live':vLive,'a-log':vLog,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-talks':vTalks,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else{let body;try{body=(VIEWS[S.view.name]||vDash)()}catch(e){console.error(e);body='<div class="card"><h2>Не удалось показать страницу</h2><p class="small">Сообщите разработчику текст ошибки: '+h(String(e&&e.message||e))+'</p></div>'}root.innerHTML=shell(body)}
@@ -1130,6 +1171,40 @@ const ACT={
    warehouse_lat:wm?+wm[1].replace(',','.'):null,warehouse_lng:wm?+wm[2].replace(',','.'):null,purchase_max_hours:num('purchase_max_hours')||24,stop_min:num('stop_min')||20,long_stop_min:num('long_stop_min')||30,keep_track_days:Math.max(30,num('keep_track_days')||180),keep_photo_months:Math.max(0,Math.round(num('keep_photo_months')||0)),office_phone:(c.office_phone||'').trim()||null,updated_at:new Date().toISOString()};
   const r=await sb.from('config').update(patch).eq('id',1);if(r.error)return toast('Ошибка: '+r.error.message);toast('Настройки сохранены');S.form={};await load()}
 };
+Object.assign(ACT,{
+ rqf(d){S.rqF=d.v||'wait';render(true)},
+ async rqopen(d){if(S.rqOpen===d.id){S.rqOpen=null;render(true);return}S.rqOpen=d.id;S.rqLog=null;render(true);
+  const r=await sb.from('cash_request_log').select('at,actor_role,kind,code,body,path').eq('request_id',d.id).order('at').order('id');const L=r.error?[]:(r.data||[]);S.rqUrls=S.rqUrls||{};
+  await Promise.all(L.filter(m=>m.kind==='voice'&&m.path&&!S.rqUrls[m.path]).map(async m=>{try{const u=await sb.storage.from('photos').createSignedUrl(m.path,3600);if(u.data)S.rqUrls[m.path]=u.data.signedUrl}catch(e){}}));
+  if(S.rqOpen===d.id){S.rqLog=L;render(true)}},
+ rqrec(){rqRecord()},
+ rqrecdel(){rqClear();rqVoiceUi()},
+ async rqdecide(d){const r=(S.reqs||[]).find(x=>x.id===d.id);if(!r)return;S.form.rqa=String(r.amount_approved||r.amount_asked);S.form.rqn='';rqClear();
+  const v=await sheet('<h2>Решение по запросу</h2><p class="small">'+hu((r.requester_name||'')+': '+money(r.amount_asked)+' · '+(r.purpose||''))+(r.status==='waiting'?'<br>Ранее вы просили подождать.':'')+'</p>'+
+   '<div class="field"><label for="rq-sa">Сумма, ֏ (можно изменить)</label><input id="rq-sa" class="inp num" inputmode="numeric" data-f="rqa" value="'+h(S.form.rqa)+'"></div>'+
+   '<div class="field"><label for="rq-sn">Комментарий (необязательно)</label><input id="rq-sn" class="inp" data-f="rqn" maxlength="500"></div><div id="rq-voice" style="margin-bottom:10px"></div>'+
+   '<button class="btn primary block" data-act="sheet" data-v="approve">Одобрить</button><button class="btn ghost block" data-act="sheet" data-v="wait">Подождать</button><button class="btn danger block" data-act="sheet" data-v="reject">Отклонить</button><button class="btn ghost block" data-act="sheet" data-v="">Закрыть</button>');
+  rqVoiceUi();
+  if(!v){rqClear();return}
+  const amt=parseInt(String(S.form.rqa||'').replace(/\D/g,''),10);if(v==='approve'&&!amt)return toast('Введите сумму');
+  try{const note=String(S.form.rqn||'').trim()||null;const vp=await rqUpload();
+   const x=await sb.rpc('req_decide',{p_id:d.id,p_decision:v,p_amount:v==='approve'?amt:null,p_note:note});if(x.error)throw x.error;if(x.data&&x.data.error)throw new Error(x.data.error);
+   if(vp){const y=await sb.rpc('req_say',{p_id:d.id,p_body:null,p_voice:vp,p_device:'web'});if(y.error)throw y.error}
+   rqClear();toast(v==='approve'?'Одобрено: кассир увидит и выдаст':v==='reject'?'Отклонено':'Отмечено: подождать');S.rqOpen=null;await load()}catch(e){toast(rqErr(e))}},
+ async rqnew(){const act=S.staff.filter(m=>m.status==='approved'&&!m.is_admin);S.form.rna='';S.form.rnp='';S.form.rnn='';S.form.rns='';rqClear();
+  const v=await sheet('<h2>Назначить выдачу сотруднику</h2><p class="small">Запрос уйдёт кассиру уже одобренным. Сотрудник получит уведомление.</p>'+
+   '<div class="field"><label for="rn-s">Сотрудник</label><select id="rn-s" class="inp" data-f="rns"><option value="">— выберите —</option>'+act.map(m=>'<option value="'+h(m.id)+'">'+hu(m.name)+'</option>').join('')+'</select></div>'+
+   '<div class="field"><label for="rn-a">Сумма, ֏</label><input id="rn-a" class="inp num" inputmode="numeric" data-f="rna"></div>'+
+   '<div class="field"><label for="rn-p">На что</label><input id="rn-p" class="inp" data-f="rnp" maxlength="200"></div>'+
+   '<div class="field"><label for="rn-n">Комментарий (необязательно)</label><input id="rn-n" class="inp" data-f="rnn" maxlength="500"></div><div id="rq-voice" style="margin-bottom:10px"></div>'+
+   '<button class="btn primary block" data-act="sheet" data-v="y">Назначить</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');
+  rqVoiceUi();
+  if(v!=='y'){rqClear();return}
+  const amt=parseInt(String(S.form.rna||'').replace(/\D/g,''),10);if(!S.form.rns)return toast('Выберите сотрудника');if(!amt)return toast('Введите сумму');if(!String(S.form.rnp||'').trim())return toast('Впишите, на что деньги');
+  try{const vp=await rqUpload();const x=await sb.rpc('req_admin_create',{p_staff:S.form.rns,p_amount:amt,p_purpose:String(S.form.rnp).trim(),p_note:String(S.form.rnn||'').trim()||null,p_voice:vp});
+   if(x.error)throw x.error;if(x.data&&x.data.error)throw new Error(x.data.error);rqClear();toast('Назначено: кассир увидит запрос');await load()}catch(e){toast(rqErr(e))}}
+});
+
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const a=el.dataset.act;if(['assign','emp','impmap','urg','dayemp','daydate','tdate','logwho'].includes(a))return;if(el.tagName==='A')return;const fn=ACT[a];if(fn){e.preventDefault();fn(el.dataset,el)}});
 document.addEventListener('change',e=>{const el=e.target;const a=el.dataset.act;if(a==='assign')ACT.assign(el.dataset,el);if(a==='emp'){S.empF=el.value||null;render(true)}if(a==='impmap'&&S.imp){S.imp.map[el.dataset.k]=+el.value;render(true)}if(a==='urg')S.form.urgent=el.checked;if(a==='dayemp'){S.dayEmp=el.value;render(true)}if(a==='logwho'){S.logWho=el.value;render(true)}if(el.dataset.eq){S.form.eq=S.form.eq||{};S.form.eq[el.dataset.eq]=el.value}if(a==='tdate'&&el.value){S.taskDate=el.value;render(true)}if(el.dataset.tk){S.form.tk=S.form.tk||{};S.form.tk[el.dataset.tk]=el.value}if(a==='daydate'&&el.value){S.dayDate=el.value;render(true)}if(el.dataset.f&&el.tagName==='SELECT')S.form[el.dataset.f]=el.value;if(el.dataset.pl&&el.tagName==='SELECT'){S.form.pl=S.form.pl||{};S.form.pl[el.dataset.pl]=el.value}if((el.dataset.pl==='ll'||el.dataset.pl==='radius'||el.dataset.pl==='kind')&&S.view.name==='a-places')render(true)});
 document.addEventListener('input',e=>{const el=e.target;if(el.dataset.f)S.form[el.dataset.f]=el.value;if(el.dataset.pl){S.form.pl=S.form.pl||{};S.form.pl[el.dataset.pl]=el.value}if(el.dataset.eq&&el.tagName!=='SELECT'){S.form.eq=S.form.eq||{};S.form.eq[el.dataset.eq]=el.value}if(el.dataset.tk&&el.tagName!=='SELECT'){S.form.tk=S.form.tk||{};S.form.tk[el.dataset.tk]=el.value}if(el.dataset.c!=null)S.form.c[el.dataset.c]=el.value});
