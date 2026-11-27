@@ -533,7 +533,7 @@ function Home({ ctx }) {
       </View>
       {ctx.boxN ? <Flag kind="warn">{tr('Без интернета сохранено фото:')}{' '}{ctx.boxN}{tr('. Они отправятся сами, когда появится связь.')}</Flag> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        {isOff ? null : <Tile icon="camera" value={st.wph.length} label={tr('фото работ')} tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => ctx.goTab('day')} />}
+        {isOff ? null : <Tile icon="camera" value={st.wph.length} label={tr('фото работ')} tone={st.wph.length ? 'ok' : mins > 180 ? 'warn' : 'note'} onPress={() => nav('work')} />}
         <Tile icon="checkbox" value={st.nTasks || 0} label={tr('задачи')} tone={st.nTasks ? 'warn' : 'ok'} onPress={() => ctx.goTab('tasks')} />
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
@@ -545,10 +545,6 @@ function Home({ ctx }) {
       </View>
       {tasks.length ? <TaskList ctx={ctx} tasks={tasks} /> : null}
       <ReqCard ctx={ctx} />
-      <Card>
-        <H2>{tr('План на день')}</H2>
-        {checks.map((c, i) => <Check key={i} done={c.done} text={c.text} sub={c.sub} />)}
-      </Card>
       {mine.length ? <H2>{mine.length > 1 ? tr('Мои заказы') : tr('Мой заказ')}</H2> : null}
       {mine.map((t) => (
         <Pressable key={t.id} onPress={() => nav('ticket', { id: t.id })}>

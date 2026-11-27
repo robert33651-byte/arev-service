@@ -131,7 +131,7 @@ export function Check({ done, text, sub }) {
   );
 }
 
-export const TABS = [['home', 'Главная', 'home'], ['tasks', 'Задачи', 'checkbox'], ['day', 'Мой день', 'today'], ['history', 'История', 'calendar'], ['profile', 'Профиль', 'person']];
+export const TABS = [['home', 'Главная', 'home'], ['tasks', 'Задачи', 'checkbox'], ['profile', 'Профиль', 'person']];
 export function TabBar({ tab, onTab, badges }) {
   return (
     <View style={u.tabs}>
