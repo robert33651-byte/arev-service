@@ -35,7 +35,9 @@ const ACTIVE=['new','assigned','enroute','onsite'];
 /* ---------- помощники ---------- */
 const h=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // текст, который ввёл человек или написал ИИ: при армянском языке админки он не переводится
-const hu=s=>'<span data-noi18n>'+h(s)+'</span>';
+const SRV_X=['Офис','По запросу','Пополнение кассы','Приход (внёс кассир)','Куплено за свои','Куплено за свои, возврат через кассу','Тестовая корректировка остатка','Закупка материалов','Командировка','Топливо','Заправка','Зарплата / аванс','Прочее','Инструмент'],SRV_P=['Возврат за покупку: ','Доп. задача: ','К запросу: ','Ожидаемый приход: '];
+const srvT=s=>{if(window.ARLANG!=='hy'||s==null)return s;s=String(s);const D=window.HY_DICT||{};if(SRV_X.includes(s)&&D[s])return D[s];for(const p of SRV_P)if(s.startsWith(p)&&D[p])return D[p]+s.slice(p.length);return s};
+const hu=s=>'<span data-noi18n>'+h(srvT(s))+'</span>';
 const puT=x=>window.ARLANG==='hy'&&window.HY_DICT&&window.HY_DICT[x]?window.HY_DICT[x]:x;
 // текст отклонения: t — фраза интерфейса (переводится), u — слова человека или ИИ (не переводятся)
 const ft=f=>h(f.t)+(f.u?hu(f.u):'');
@@ -1022,7 +1024,10 @@ function render(keep){const y=window.scrollY;const root=document.getElementById(
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
  if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else{let body;try{body=(VIEWS[S.view.name]||vDash)()}catch(e){console.error(e);body='<div class="card"><h2>Не удалось показать страницу</h2><p class="small">Сообщите разработчику текст ошибки: '+h(String(e&&e.message||e))+'</p></div>'}root.innerHTML=shell(body)}
  if(keep)window.scrollTo(0,y);signPending();if(S.view.name==='a-day'&&S.loaded&&S.isAdmin)initDayMap();else if(S.view.name==='a-places'&&S.loaded&&S.isAdmin)initPlacesMap();else if(S.view.name==='a-live'&&S.loaded&&S.isAdmin)initLiveMap();else if(S.map){try{S.map.remove()}catch(e){}S.map=null}}
-function go(name,p){S.view={name,p:p||{}};S.form={};render();window.scrollTo(0,0)}
+function go(name,p){if(S.view&&S.view.name&&(S.view.name!==name||JSON.stringify(S.view.p||{})!==JSON.stringify(p||{}))){S.hist=S.hist||[];S.hist.push(S.view);if(S.hist.length>40)S.hist.shift();try{history.pushState({a:1},'')}catch(e){}}S.view={name,p:p||{}};S.form={};render();window.scrollTo(0,0)}
+// шаг назад: закрыть окно → предыдущий экран → главная; false — идти некуда (приложение закроется)
+function stepBack(){const v=document.querySelector('.viewer');if(v){v.remove();return true}if(document.getElementById('scrim')){closeSheet(null);return true}if(!S.session||!S.isAdmin)return false;if(S.hist&&S.hist.length){S.view=S.hist.pop();S.form={};render();window.scrollTo(0,0);return true}if(S.view&&S.view.name!=='a-dash'){S.view={name:'a-dash',p:{}};S.form={};render();return true}return false}
+window.AREV_BACK=stepBack;window.addEventListener('popstate',()=>{if(!window.AREV_NATIVE)stepBack()});
 let toastT;function toast(m){let el=document.getElementById('toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';document.body.appendChild(el)}el.textContent=m;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{el.hidden=true},3500)}
 let sheetRes=null;function sheet(html,cls){closeSheet(null);return new Promise(r=>{sheetRes=r;const s=document.createElement('div');s.className='scrim'+(cls?' '+cls:'');s.id='scrim';s.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';s.addEventListener('click',e=>{if(e.target===s)closeSheet(null)});document.body.appendChild(s);const i=s.querySelector('input,button');if(i)i.focus()})}
 function closeSheet(v){S.tcur=null;const s=document.getElementById('scrim');if(s)s.remove();if(sheetRes){const r=sheetRes;sheetRes=null;r(v)}}

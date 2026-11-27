@@ -1,7 +1,7 @@
 // Запрос денег: работник просит сумму → кассир → директор решает → кассир выдаёт наличными.
 // Работник видит все стадии; уведомления приходят push-ом. Каждый месяц список начинается заново, прошлые — в архиве.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, View, Text, Pressable, RefreshControl, Alert, TextInput } from 'react-native';
+import { ScrollView, View, Text, Pressable, RefreshControl, Alert, TextInput, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { supabase, rpc, errText } from './supabase';
 import { Audio } from 'expo-av';
@@ -86,6 +86,14 @@ export default function RequestsScreen({ ctx }) {
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [open, setOpen] = useState(null);
+  useEffect(() => {
+    const h = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (showForm) { setShowForm(false); return true; }
+      if (open) { setOpen(null); return true; }
+      return false;
+    });
+    return () => h.remove();
+  }, [showForm, open]);
   const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(async () => {
     const now = new Date();

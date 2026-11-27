@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, Pressable, TextInput, ScrollView, Modal, Image, ActivityIndicator, RefreshControl,
-  KeyboardAvoidingView, Platform, Alert, AppState, StyleSheet, Linking,
+  KeyboardAvoidingView, Platform, Alert, AppState, StyleSheet, Linking, BackHandler,
 } from 'react-native';
 import { supabase, errText } from './supabase';
 import { CameraSheet } from './photo';
@@ -154,6 +154,15 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
   const task = tasks.find((x) => x.id === openId) || null;
   // менеджер принял задачу, пока она открыта: она пропала из списка, закрываем карточку
   useEffect(() => { if (openId && !loading && !task) { setOpenId(null); openRef.current = null; } }, [openId, loading, task]);
+  // кнопка «Назад» на телефоне: сначала закрыть окно отчёта, затем открытую задачу
+  useEffect(() => {
+    const h = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (doneOpen) { setDoneOpen(false); return true; }
+      if (openId) { setOpenId(null); openRef.current = null; return true; }
+      return false;
+    });
+    return () => h.remove();
+  }, [openId, doneOpen]);
 
   async function openTask(id) {
     setOpenId(id); openRef.current = id; setLog([]); setText(''); setDonePhoto(null); setDoneNote('');

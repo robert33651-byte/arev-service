@@ -63,7 +63,9 @@ var DOMAIN='staff.arevservice.app';
 var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:'',from:'',to:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null,pin:null,tasks:null,last:Date.now()};
 var $=function(s){return document.querySelector(s)};
 var h=function(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
-var hu=function(x){return '<span data-noi18n>'+h(x)+'</span>'};
+var SRV_X=['Офис','По запросу','Пополнение кассы','Приход (внёс кассир)','Куплено за свои','Куплено за свои, возврат через кассу','Тестовая корректировка остатка','Закупка материалов','Командировка','Топливо','Заправка','Зарплата / аванс','Прочее','Инструмент'],SRV_P=['Возврат за покупку: ','Доп. задача: ','К запросу: ','Ожидаемый приход: '];
+var srvT=function(s){if(window.ARLANG!=='hy'||s==null)return s;s=String(s);var D=window.HY_DICT||{};if(SRV_X.indexOf(s)>=0&&D[s])return D[s];for(var i=0;i<SRV_P.length;i++){var p=SRV_P[i];if(s.indexOf(p)===0&&D[p])return D[p]+s.slice(p.length)}return s};
+var hu=function(x){return '<span data-noi18n>'+h(srvT(x))+'</span>'};
 var puT=function(x){return window.ARLANG==='hy'&&window.HY_DICT&&window.HY_DICT[x]?window.HY_DICT[x]:x};
 
 var money=function(n){return n==null||isNaN(n)?'—':Math.round(n).toLocaleString('ru-RU')+' ֏'};
@@ -92,7 +94,7 @@ async function load(){
     sb.from('cash_ledger').select('*').order('at',{ascending:false}).limit(2000),
     sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle(),
     sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5),
-    sb.from('tasks').select('id,day,title,note,status,by_self,done_at,done_note,seen_at').eq('staff_id',u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200),
+    sb.from('tasks').select('id,day,title,note,status,by_self,done_at,done_note,seen_at').or('staff_id.eq.'+u+',staff2_id.eq.'+u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200),
     sb.from('cash_requests').select('*').order('created_at',{ascending:false}).limit(500),
     sb.from('cash_expected').select('*').eq('status','open').order('created_at',{ascending:true}).limit(300)
   ]);
@@ -314,7 +316,7 @@ function tasksBlock(){
   var row=function(x){return '<div class="recv" style="padding:10px 12px"><div class="row between"><div><b>'+hu(x.title)+'</b>'+(x.note?'<div class="small muted">'+hu(x.note)+'</div>':'')+'<div class="tiny '+(x.day<today&&x.status==='new'?'':'muted')+'" style="'+(x.day<today&&x.status==='new'?'color:var(--bad)':'')+'">'+dl(x.day)+' · '+(x.by_self?'моя задача':'от руководителя')+'</div></div>'+
     (S.doneId===x.id?'':'<div class="row"><button class="sm" data-a="taskopen" data-id="'+h(x.id)+'">'+(S.openT===x.id?'Свернуть':'Открыть')+'</button><button class="ok" data-a="taskdoneopen" data-id="'+h(x.id)+'">Выполнено</button>'+(x.by_self?'<button class="sm" data-a="taskcancel" data-id="'+h(x.id)+'">Убрать</button>':'')+'</div>')+'</div>'+
     (S.openT===x.id?thread(x):'')+(S.doneId===x.id?'<div class="field" style="margin-top:8px"><label>Комментарий (необязательно)</label><input data-f="tdn" maxlength="500" value="'+h(f.tdn||'')+'"></div><div class="row"><button class="ok" data-a="taskdone" data-id="'+h(x.id)+'">Подтвердить</button><button data-a="taskdoneno">Отмена</button></div>':'')+'</div>'};
-  return '<section class="card"><div class="row between"><h2>Мои задачи</h2>'+(window.Notification&&Notification.permission==='default'?'<button class="sm" data-a="notifon">🔔 Включить уведомления</button>':'')+'</div>'+
+  return '<section class="card"><div class="row between"><h2>Мои задачи</h2>'+(!window.Notification?'':Notification.permission==='default'?'<button class="sm" data-a="notifon">🔔 Включить уведомления</button>':Notification.permission==='granted'?'<span class="small muted">🔔 Уведомления включены</span>':'<span class="small muted">🔕 Уведомления запрещены в настройках браузера</span>')+'</div>'+
    '<div class="row" style="align-items:flex-end;margin-bottom:12px"><div class="field" style="flex:2;min-width:220px"><label for="t-t">Новая задача для себя</label><input id="t-t" data-f="tt" maxlength="200" placeholder="что нужно сделать" value="'+h(f.tt||'')+'"></div>'+
    '<div class="field"><label for="t-d">Срок</label><input id="t-d" type="date" data-f="td" value="'+h(f.td||today)+'" style="width:auto"></div>'+
    '<button class="p" data-a="taskadd"'+(S.busy?' disabled':'')+'>Добавить</button></div>'+
@@ -525,7 +527,7 @@ async function pollNew(){
   if(!S.sess||!S.me||S.me.kind!=='office'||S.me.status!=='approved')return;
   var since=new Date(Date.now()-3*60000).toISOString(),u=S.sess.user.id;
   var q=await Promise.all([
-    sb.from('tasks').select('id,title,created_at,by_self').eq('staff_id',u).eq('status','new').gt('created_at',since),
+    sb.from('tasks').select('id,title,created_at,by_self').or('staff_id.eq.'+u+',staff2_id.eq.'+u).eq('status','new').gt('created_at',since),
     sb.from('task_log').select('id,kind,body,at').eq('actor_role','admin').in('kind',['text','file','voice','photo']).gt('at',since),
     sb.from('cash_requests').select('id,status,requester_name,amount_asked,amount_approved,created_at,forwarded_at,decided_at,paid_at').or('created_at.gt.'+since+',forwarded_at.gt.'+since+',decided_at.gt.'+since+',paid_at.gt.'+since)]);
   var items=[];

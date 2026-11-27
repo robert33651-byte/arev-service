@@ -85,7 +85,11 @@ export default function AdminApp() {
 
   useEffect(() => {
     const h = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!locked && canBack.current && web.current) { web.current.goBack(); return true; }
+      // «Назад» на телефоне = шаг назад внутри админки; с главной — выход из приложения
+      if (!locked && web.current) {
+        web.current.injectJavaScript("try{if(!(window.AREV_BACK&&window.AREV_BACK()))window.ReactNativeWebView.postMessage('exit')}catch(e){window.ReactNativeWebView.postMessage('exit')};true;");
+        return true;
+      }
       return false;
     });
     return () => h.remove();
@@ -115,6 +119,7 @@ export default function AdminApp() {
         source={{ uri: URL_ }}
         injectedJavaScriptBeforeContentLoaded={inject}
         onNavigationStateChange={(n) => { canBack.current = !!n.canGoBack; }}
+        onMessage={(e) => { if (e.nativeEvent && e.nativeEvent.data === 'exit') BackHandler.exitApp(); }}
         javaScriptEnabled
         domStorageEnabled
         pullToRefreshEnabled

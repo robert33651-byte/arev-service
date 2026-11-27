@@ -2200,7 +2200,7 @@ begin
   if s.kind <> 'office' then return jsonb_build_object('error', 'NOT_OFFICE'); end if;
   if not s.web_access then return jsonb_build_object('error', 'WEB_NOT_ALLOWED'); end if;
   update public.tasks set status = 'done', done_at = now(), done_note = nullif(left(trim(coalesce(p_note, '')), 500), '')
-   where id = p_id and staff_id = s.id and status = 'new' returning * into r;
+   where id = p_id and (staff_id = s.id or staff2_id = s.id) and status = 'new' returning * into r;
   if r.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
   return to_jsonb(r);
 end $$;
