@@ -73,7 +73,7 @@ var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+
 var ms=function(x){return x?new Date(x).getTime():null};
 var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
 function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
-var ERR={LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',CASHIER_CANNOT:'Кассир запрашивает деньги через директора',REQ_CLOSED:'Запрос уже закрыт',BAD_DECISION:'Неверное решение',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Файл не загрузился, повторите',PHOTO_TOO_OLD:'Файл устарел, выберите заново',NEED_FILE:'Выберите файл',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
+var ERR={NEED_APPROVAL:'Выдать можно только после одобрения директора',LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',CASHIER_CANNOT:'Кассир запрашивает деньги через директора',REQ_CLOSED:'Запрос уже закрыт',BAD_DECISION:'Неверное решение',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Файл не загрузился, повторите',PHOTO_TOO_OLD:'Файл устарел, выберите заново',NEED_FILE:'Выберите файл',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
 function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';if((m==='LOCKED'||m==='NO_PIN')&&S.pin){S.pin.unlocked=false;S.pin.set=m==='LOCKED';render()}if(m==='PIN_WRONG'&&r.data&&r.data.left!=null)return 'Неверный PIN. Осталось попыток: '+r.data.left;for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
 function stat(x){
   if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
@@ -135,12 +135,12 @@ function recvBlock(){
 function issueForm(){
   var f=S.form;
   if(S.step){var p=S.step.staff?(S.people.find(function(x){return x.id===S.step.staff})||{}):{name:'Офис'};
-    return '<section class="card"><h2>Проверьте выдачу</h2><p style="font-size:18px;margin:0 0 6px"><b>'+money(S.step.amount)+'</b> → '+hu(p.name||'')+'</p><p class="muted" style="margin:0 0 12px">'+hu(puT(S.step.purpose))+(S.step.note?' · '+S.step.note:'')+'</p><div class="row"><button class="out" data-a="issueok"'+(S.busy?' disabled':'')+'>↓ Выдать деньги</button><button data-a="issueback">Изменить</button></div></section>'}
-  return '<section class="card"><h2>Выдать наличные</h2><div class="row" style="align-items:flex-end">'+
+    return '<section class="card"><h2>Проверьте выдачу</h2><p class="muted small" style="margin:0 0 8px">Выдача уйдёт директору на подтверждение.</p><p style="font-size:18px;margin:0 0 6px"><b>'+money(S.step.amount)+'</b> → '+hu(p.name||'')+'</p><p class="muted" style="margin:0 0 12px">'+hu(puT(S.step.purpose))+(S.step.note?' · '+S.step.note:'')+'</p><div class="row"><button class="out" data-a="issueok"'+(S.busy?' disabled':'')+'>Отправить директору</button><button data-a="issueback">Изменить</button></div></section>'}
+  return '<section class="card"><h2>Выдать наличные</h2><p class="muted small" style="margin:0 0 10px">Любая выдача сначала подтверждается директором. После одобрения она появится выше в блоке «К выдаче».</p><div class="row" style="align-items:flex-end">'+
    '<div class="field"><label for="i-s">Кому</label><select id="i-s" data-f="is"><option value="">— выберите —</option><option value="__office"'+(f.is==='__office'?' selected':'')+'>Офис</option>'+S.people.map(function(x){return '<option value="'+h(x.id)+'"'+(f.is===x.id?' selected':'')+'>'+h(x.name)+'</option>'}).join('')+'</select></div>'+
    '<div class="field"><label for="i-a">Сумма, ֏</label><input id="i-a" data-f="ia" inputmode="numeric" placeholder="50000" value="'+h(f.ia||'')+'"></div>'+
    '<div class="field" style="flex:2;min-width:240px"><label for="i-p">За что выданы деньги</label><input id="i-p" data-f="ip" maxlength="200" placeholder="впишите вручную" value="'+h(f.ip||'')+'"></div>'+
-   '<button class="out" data-a="issue">↓ Выдать из кассы</button></div></section>'}
+   '<button class="out" data-a="issue">↓ Запросить выдачу</button></div></section>'}
 
 function topupForm(){
   var f=S.form;
@@ -255,7 +255,7 @@ function recUI(key){
 }
 function rThread(r){
   var L=S.rlog,f=S.form;
-  var EV={created:'Запрос создан',forwarded:'Передан директору',approved:'Одобрено',rejected:'Отклонено',waiting:'Директор: подождать',paid:'Деньги выданы',cancelled:'Отменён работником',boss_created:'Выдачу назначил директор',reminder:'Напоминание'};
+  var EV={created:'Запрос создан',forwarded:'Передан директору',approved:'Одобрено',rejected:'Отклонено',waiting:'Директор: подождать',paid:'Деньги выданы',cancelled:'Отменён работником',boss_created:'Выдачу назначил директор',cashier_created:'Выдачу запросил кассир',extra_task:'Директор добавил задачу и сумму',reminder:'Напоминание'};
   var ROLE={worker:'Работник',cashier:'Кассир',admin:'Директор',system:'Система'};
   var items=L===null?'<div class="small muted">Загрузка…</div>':L.length?L.map(function(m){
     var who=(S.me&&m.actor_role==='worker'&&r.requester_id===S.me.id)?'Вы':(S.me&&m.actor_role==='cashier'&&S.me.is_cashier)?'Вы':ROLE[m.actor_role]||m.actor_role;
@@ -468,8 +468,8 @@ var A={
   expno:function(d){return run(async function(){if(!confirm(puT('Убрать этот ожидаемый приход?')))return;
     var r=await sb.rpc('exp_close',{p_id:d.id,p_received:false,p_device:'web'});var e=errOf(r);if(e)return toast(e);await load()})},
   issueback:function(){S.step=null;render()},
-  issueok:function(){return run(async function(){var st=S.step;var r=await sb.rpc('cash_issue',{p_staff:st.staff,p_amount:st.amount,p_purpose:st.purpose,p_note:st.note,p_task:null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
-    S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast(st.staff?'Выдача записана. Получатель увидит её и подтвердит.':'Выдача записана');await load()})},
+  issueok:function(){return run(async function(){var st=S.step;var r=await sb.rpc('req_cashier_create',{p_staff:st.staff,p_amount:st.amount,p_purpose:st.purpose,p_note:st.note||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
+    S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast('Отправлено директору. Выдать можно после его одобрения.');await load()})},
   voidopen:function(d){S.voidId=d.id;S.form.vr='';render()},
   voidno:function(){S.voidId=null;render()},
   voidok:function(d){return run(async function(){if(!String(S.form.vr||'').trim())return toast('Впишите причину');var r=await sb.rpc('cash_void',{p_id:d.id,p_reason:S.form.vr});var e=errOf(r);if(e)return toast(e);S.voidId=null;toast('Выдача отменена');await load()})},

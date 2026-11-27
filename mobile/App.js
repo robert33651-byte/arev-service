@@ -886,12 +886,12 @@ function CashScreen({ ctx }) {
     if (!who) return Alert.alert(tr('Кому'), tr('Выберите сотрудника или «Офис»'));
     if (!sum) return Alert.alert(tr('Сумма'), tr('Укажите сумму'));
     if (!purpose.trim()) return Alert.alert(tr('За что'), tr('Впишите, за что выданы деньги'));
-    Alert.alert(tr('Выдать наличные?'), (who.office ? tr('Офис') : who.name) + '\n' + money(sum) + '\n' + purpose.trim(), [
+    Alert.alert(tr('Отправить директору на подтверждение?'), (who.office ? tr('Офис') : who.name) + '\n' + money(sum) + '\n' + purpose.trim(), [
       { text: tr('Отмена'), style: 'cancel' },
-      { text: tr('Выдать'), onPress: () => act(async () => {
-        await rpc('cash_issue', { p_staff: who.office ? null : who.id, p_amount: sum, p_purpose: purpose.trim(), p_note: null, p_task: null, p_device: deviceId() });
+      { text: tr('Отправить'), onPress: () => act(async () => {
+        await rpc('req_cashier_create', { p_staff: who.office ? null : who.id, p_amount: sum, p_purpose: purpose.trim(), p_note: null, p_device: deviceId() });
         setWho(null); setAmount(''); setPurpose('');
-      }, tr('Выдача записана. Получатель увидит запрос на подтверждение.')) },
+      }, tr('Отправлено директору. Выдать можно после его одобрения.')) },
     ]);
   };
   const topup = () => {

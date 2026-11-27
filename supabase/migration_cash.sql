@@ -112,6 +112,8 @@ declare s public.staff; r public.staff; e text; row public.cash_ledger; bal bigi
 begin
   s := public._staff();
   if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+  -- кассир не выдаёт деньги сам: только по запросу, который одобрил директор (req_issue ставит этот признак)
+  if coalesce(current_setting('arev.req_issue', true), '') <> '1' then return jsonb_build_object('error', 'NEED_APPROVAL'); end if;
   e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
   if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
   if coalesce(trim(p_purpose), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;

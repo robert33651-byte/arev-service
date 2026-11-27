@@ -32,6 +32,8 @@ alter table public.tasks add column if not exists money int;   -- сколько
 alter table public.cash_requests add column if not exists kind text not null default 'advance';  -- advance: просит заранее; reimb: купил за свои, просит вернуть
 alter table public.cash_requests add column if not exists purchase_id uuid;
 alter table public.cash_requests add column if not exists photo text;                             -- фото чека или товара
+alter table public.cash_requests drop constraint if exists cash_requests_origin_check;
+alter table public.cash_requests add constraint cash_requests_origin_check check (origin in ('worker','boss','cashier'));  -- cashier: выдачу предлагает кассир, решает директор
 alter table public.cash_requests enable row level security;
 
 create table if not exists public.cash_request_log(
@@ -75,7 +77,7 @@ do $$ begin
 
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.proname in ('req_create','req_cancel','req_forward','req_decide','req_issue','req_say','req_admin_create','_req_log','_req_notify_cashiers','req_reminders','exp_add','exp_close','req_reimb')
+           where n.nspname = 'public' and p.proname in ('req_create','req_cancel','req_forward','req_decide','req_issue','req_say','req_admin_create','_req_log','_req_notify_cashiers','req_reminders','exp_add','exp_close','req_reimb','req_cashier_create')
   loop execute 'drop function ' || f.sig || ' cascade'; end loop;
 end $$;
 
@@ -251,7 +253,8 @@ begin
   s := public._staff();
   if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
   select * into r from public.cash_requests where id = p_id and status = 'approved' for update;
-  if r.id is null or r.requester_id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  if r.id is null or (r.requester_id is null and r.origin <> 'cashier') then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  perform set_config('arev.req_issue', '1', true);
   res := public.cash_issue(r.requester_id, r.amount_approved, r.purpose, 'По запросу', null, p_device);
   if res ? 'error' then return res; end if;
   update public.cash_requests set status = 'paid', paid_at = now(), issue_id = (res->>'id')::uuid where id = r.id returning * into r;
@@ -357,6 +360,34 @@ begin
 end $$;
 revoke all on function public.req_reimb from public, anon;
 grant execute on function public.req_reimb to authenticated;
+
+-- кассир сам предлагает выдачу (сотруднику или на нужды офиса): запрос сразу уходит директору, без его одобрения выдать нельзя
+create function public.req_cashier_create(p_staff uuid, p_amount int, p_purpose text, p_note text default null, p_device text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; t public.staff; e text; r public.cash_requests; nm text;
+begin
+  s := public._staff();
+  if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+  e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
+  if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
+  if coalesce(trim(p_purpose), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;
+  if p_staff is null then nm := 'Офис';
+  else
+    select * into t from public.staff where id = p_staff and status = 'approved';
+    if t.id is null or t.id = s.id then return jsonb_build_object('error', 'BAD_RECIPIENT'); end if;
+    nm := t.name;
+  end if;
+  insert into public.cash_requests(requester_id, requester_name, origin, amount_asked, purpose, status, forwarded_at, last_reminded_at)
+  values (p_staff, nm, 'cashier', p_amount, left(trim(p_purpose), 200), 'forwarded', now(), now()) returning * into r;
+  perform public._req_log(r.id, s.id, 'cashier', 'event', 'cashier_created', p_amount::text, null);
+  if coalesce(trim(p_note), '') <> '' then
+    perform public._req_log(r.id, s.id, 'cashier', 'text', null, left(trim(p_note), 500), null);
+  end if;
+  perform public._notify(null, true, 'Кассир просит выдать: ' || nm || ', ' || p_amount || ' ֏', left(trim(p_purpose), 200), null);
+  return to_jsonb(r);
+end $$;
+revoke all on function public.req_cashier_create from public, anon;
+grant execute on function public.req_cashier_create to authenticated;
 
 -- ожидаемые (предстоящие) приходы: наличными и на банк. В остаток кассы не входят.
 -- Наличный приход при получении превращается в обычное пополнение кассы; банковский просто закрывается.
