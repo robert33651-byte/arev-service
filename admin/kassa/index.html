@@ -234,7 +234,7 @@ function recUI(key){
   var R=S.rec||{};
   if(R.on)return '<div class="small" style="margin-top:6px"><b>Идёт запись…</b> <button class="bad sm" data-a="recstop">Остановить запись</button></div>';
   if(R.blob&&R.key===key)return '<div class="small" style="margin-top:6px"><audio controls src="'+h(R.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="sm" data-a="recdel">Удалить запись</button></div>';
-  return '<div style="margin-top:6px"><button class="sm" data-a="recstart" data-k="'+h(key)+'">Записать голосовое</button></div>';
+  return '<div style="margin-top:6px"><button class="sm" data-a="recstart" data-k="'+h(key)+'"><img src="../icons/voice.png" alt="" width="22" height="22" style="vertical-align:middle"> Записать голосовое</button></div>';
 }
 function rThread(r){
   var L=S.rlog,f=S.form;

@@ -960,7 +960,7 @@ function rqThread(){const L=S.rqLog;if(L===null||L===undefined)return '<div clas
 function rqVoiceBox(id){const R=S.rqVoice&&S.rqVoice.id===id?S.rqVoice:null;
  if(rqRec&&rqRec.rid===id)return '<div class="row" style="gap:8px"><b class="small" style="color:var(--bad)">● Идёт запись…</b><button class="btn danger" data-act="rqrec" data-id="'+h(id)+'">Остановить запись</button></div>';
  if(R)return '<div class="row wrapx" style="gap:8px"><audio controls src="'+h(R.url)+'" style="height:36px;max-width:100%"></audio><button class="btn ghost sm" data-act="rqrecdel">Удалить запись</button></div>';
- return '<button class="btn ghost block" data-act="rqrec" data-id="'+h(id)+'">🎤 Записать голосовое</button>'}
+ return '<button class="btn ghost block" data-act="rqrec" data-id="'+h(id)+'">'+VIC+' Записать голосовое</button>'}
 function rqRow(r){const open=S.rqOpen===r.id;const t=RQST[r.status]||[r.status,'chip'];const live=['new','forwarded','waiting'].includes(r.status);
  const ak='rqa_'+r.id,nk='rqn_'+r.id;const av=S.form[ak]!=null?S.form[ak]:String(r.amount_approved||r.amount_asked);
  const dec=live?'<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">'+
@@ -981,6 +981,7 @@ function vReq(){const f=S.rqF||'wait';const all=S.reqs||[];
  s+=lst.length?lst.slice(0,200).map(rqRow).join(''):'<div class="empty">Запросов нет.</div>';
  s+='<p class="small muted">Запрос идёт кассиру; вы видите его сразу, но уведомление приходит, когда кассир передаст его вам. Решение: одобрить (можно изменить сумму), отклонить или попросить подождать. Выдаёт деньги кассир наличными.</p>';
  return s}
+const VIC='<img class="vic" src="icons/voice.png" alt="" width="26" height="26" style="vertical-align:middle">';
 let rqRec=null;
 async function rqRecord(rid){if(rqRec){rqRec.stop();return}
  if(!navigator.mediaDevices||!window.MediaRecorder)return toast('Этот браузер не умеет записывать голос');
@@ -992,7 +993,7 @@ async function rqRecord(rid){if(rqRec){rqRec.stop();return}
  if(S.rqVoice&&S.rqVoice.id!==rid)rqClear();
  rqRec=mr;mr.rid=rid;mr.start();render(true);rqVoiceUi()}
 function rqVoiceUi(){const el=document.getElementById('rq-voice');if(!el)return;
- el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec" data-id="new">Остановить</button>':S.rqVoice?'<audio controls src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost sm" data-act="rqrec">🎤 Записать голосовое</button>'}
+ el.innerHTML=rqRec?'<b class="small">Идёт запись…</b> <button class="btn danger sm" data-act="rqrec" data-id="new">Остановить</button>':S.rqVoice?'<audio controls src="'+h(S.rqVoice.url)+'" style="height:34px;vertical-align:middle"></audio> <button class="btn ghost sm" data-act="rqrecdel">Удалить</button>':'<button class="btn ghost" data-act="rqrec" data-id="new">'+VIC+' Записать голосовое</button>'}
 async function rqUpload(){const R=S.rqVoice;if(!R||!R.blob)return null;const path=S.session.user.id+'/req_'+Date.now()+'.webm';
  const up=await sb.storage.from('photos').upload(path,R.blob,{contentType:R.blob.type||'audio/webm',upsert:false});if(up.error)throw new Error(up.error.message);return path}
 function rqClear(){if(S.rqVoice&&S.rqVoice.url)try{URL.revokeObjectURL(S.rqVoice.url)}catch(e){}S.rqVoice=null;rqRec=null}
