@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View, Text, Pressable, RefreshControl, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { supabase, rpc, errText } from './supabase';
+import { Audio } from 'expo-av';
 import { deviceId } from './device';
 import { C, Btn, Card, H2, Label, Muted, T, Field, Chip } from './ui';
 import { tr, loc } from './i18n';
@@ -18,6 +19,28 @@ const ROLE = { worker: 'Вы', cashier: 'Кассир', admin: 'Шеф', system:
 const RQ_ERR = { BAD_AMOUNT: 'Неверная сумма', NEED_PURPOSE: 'Впишите, на что нужны деньги', REQ_CLOSED: 'Запрос уже закрыт', NOT_FOUND: 'Запрос не найден', EMPTY: 'Впишите сообщение' };
 const eText = (e) => { const m = (e && (e.error || e.message)) || ''; for (const k of Object.keys(RQ_ERR)) if (m.includes(k)) return tr(RQ_ERR[k]); return errText(e); };
 const fmt = (iso) => { const d = new Date(iso); return d.toLocaleDateString(loc(), { day: 'numeric', month: 'short' }) + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+
+function VoiceBtn({ path }) {
+  const [snd, setSnd] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => () => { if (snd) snd.unloadAsync().catch(() => {}); }, [snd]);
+  const toggle = async () => {
+    try {
+      if (snd) {
+        const st = await snd.getStatusAsync();
+        if (st.isLoaded && st.isPlaying) { await snd.pauseAsync(); setPlaying(false); return; }
+        if (st.isLoaded) { if (st.didJustFinish || (st.durationMillis && st.positionMillis >= st.durationMillis)) await snd.setPositionAsync(0); await snd.playAsync(); setPlaying(true); return; }
+      }
+      const u = await supabase.storage.from('photos').createSignedUrl(path, 3600);
+      if (!u.data) throw new Error('no url');
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync({ uri: u.data.signedUrl }, { shouldPlay: true });
+      sound.setOnPlaybackStatusUpdate((x) => { if (x.isLoaded && x.didJustFinish) setPlaying(false); });
+      setSnd(sound); setPlaying(true);
+    } catch (e) { Alert.alert(tr('Не удалось воспроизвести')); }
+  };
+  return <Btn title={(playing ? '⏸ ' : '▶ ') + (playing ? tr('Пауза') : tr('Слушать'))} kind="ghost" onPress={toggle} />;
+}
 
 function Thread({ id, uid }) {
   const [log, setLog] = useState(null);
@@ -39,7 +62,7 @@ function Thread({ id, uid }) {
       {log === null ? <Muted>{tr('Загрузка…')}</Muted> : log.length === 0 ? <Muted>{tr('Сообщений пока нет.')}</Muted> : log.map((m, i) => (
         <View key={i}>
           <Muted style={{ fontSize: 11 }}>{fmt(m.at)} · {tr(ROLE[m.actor_role] || m.actor_role)}</Muted>
-          <T>{m.kind === 'text' ? m.body : m.kind === 'voice' ? tr('🎤 Голосовое сообщение (послушайте в админке или на компьютере)') : tr(EV[m.code] || m.code || '') + (['created', 'approved', 'paid', 'boss_created'].includes(m.code) && m.body ? ': ' + money(+m.body) : '')}</T>
+          {m.kind === 'voice' && m.path ? <VoiceBtn path={m.path} /> : <T>{m.kind === 'text' ? m.body : tr(EV[m.code] || m.code || '') + (['created', 'approved', 'paid', 'boss_created'].includes(m.code) && m.body ? ': ' + money(+m.body) : '')}</T>}
         </View>
       ))}
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
