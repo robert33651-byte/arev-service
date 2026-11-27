@@ -24,6 +24,7 @@ input,select{font:inherit;color:var(--ink);background:var(--surface-2);border:1p
 input:focus,select:focus{outline:2px solid var(--pine);outline-offset:1px}
 button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);padding:9px 14px}
 button.p{background:var(--pine);color:var(--pine-ink);border-color:var(--pine);font-weight:600}
+button.out{background:#b3261e;color:#fff;border-color:#b3261e;font-weight:700}button.in{background:#2e7d32;color:#fff;border-color:#2e7d32;font-weight:700}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
 button.bad{background:var(--bad);border-color:var(--bad);color:#fff}
 button.sm{padding:5px 10px;font-size:13px}button:disabled{opacity:.5;cursor:default}
@@ -92,8 +93,10 @@ async function load(){
     sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle(),
     sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5),
     sb.from('tasks').select('id,day,title,note,status,by_self,done_at,done_note,seen_at').eq('staff_id',u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200),
-    sb.from('cash_requests').select('*').order('created_at',{ascending:false}).limit(500)
+    sb.from('cash_requests').select('*').order('created_at',{ascending:false}).limit(500),
+    sb.from('cash_expected').select('*').eq('status','open').order('created_at',{ascending:true}).limit(300)
   ]);
+  S.exp=q[6]&&!q[6].error?(q[6].data||[]):null;
   S.tasks=q[4].error?null:(q[4].data||[]);
   S.reqs=q[5].error?null:(q[5].data||[]);
   S.shifts=q[3].error?null:(q[3].data||[]);
@@ -132,19 +135,19 @@ function recvBlock(){
 function issueForm(){
   var f=S.form;
   if(S.step){var p=S.step.staff?(S.people.find(function(x){return x.id===S.step.staff})||{}):{name:'Офис'};
-    return '<section class="card"><h2>Проверьте выдачу</h2><p style="font-size:18px;margin:0 0 6px"><b>'+money(S.step.amount)+'</b> → '+hu(p.name||'')+'</p><p class="muted" style="margin:0 0 12px">'+hu(puT(S.step.purpose))+(S.step.note?' · '+S.step.note:'')+'</p><div class="row"><button class="p" data-a="issueok"'+(S.busy?' disabled':'')+'>Выдать деньги</button><button data-a="issueback">Изменить</button></div></section>'}
+    return '<section class="card"><h2>Проверьте выдачу</h2><p style="font-size:18px;margin:0 0 6px"><b>'+money(S.step.amount)+'</b> → '+hu(p.name||'')+'</p><p class="muted" style="margin:0 0 12px">'+hu(puT(S.step.purpose))+(S.step.note?' · '+S.step.note:'')+'</p><div class="row"><button class="out" data-a="issueok"'+(S.busy?' disabled':'')+'>↓ Выдать деньги</button><button data-a="issueback">Изменить</button></div></section>'}
   return '<section class="card"><h2>Выдать наличные</h2><div class="row" style="align-items:flex-end">'+
    '<div class="field"><label for="i-s">Кому</label><select id="i-s" data-f="is"><option value="">— выберите —</option><option value="__office"'+(f.is==='__office'?' selected':'')+'>Офис</option>'+S.people.map(function(x){return '<option value="'+h(x.id)+'"'+(f.is===x.id?' selected':'')+'>'+h(x.name)+'</option>'}).join('')+'</select></div>'+
    '<div class="field"><label for="i-a">Сумма, ֏</label><input id="i-a" data-f="ia" inputmode="numeric" placeholder="50000" value="'+h(f.ia||'')+'"></div>'+
    '<div class="field" style="flex:2;min-width:240px"><label for="i-p">За что выданы деньги</label><input id="i-p" data-f="ip" maxlength="200" placeholder="впишите вручную" value="'+h(f.ip||'')+'"></div>'+
-   '<button class="p" data-a="issue">Выдать…</button></div></section>'}
+   '<button class="out" data-a="issue">↓ Выдать из кассы</button></div></section>'}
 
 function topupForm(){
   var f=S.form;
   return '<section class="card"><h2>Приход денег в кассу</h2><div class="row" style="align-items:flex-end">'+
    '<div class="field"><label for="t-a">Сумма, ֏</label><input id="t-a" data-f="ta" inputmode="numeric" placeholder="100000" value="'+h(f.ta||'')+'"></div>'+
    '<div class="field" style="flex:2;min-width:240px"><label for="t-n">Откуда деньги</label><input id="t-n" data-f="tn" maxlength="300" placeholder="впишите вручную" value="'+h(f.tn||'')+'"></div>'+
-   '<button class="p" data-a="topup"'+(S.busy?' disabled':'')+'>Внести в кассу</button></div></section>'}
+   '<button class="in" data-a="topup"'+(S.busy?' disabled':'')+'>↑ Принять в кассу</button></div></section>'}
 
 function ledger(){
   var from=perFrom(S.flt.per);
@@ -203,6 +206,18 @@ function periodBar(){
    '<span class="sp"></span><button class="sm" data-a="lockcash">Заблокировать кассу</button></div></section>';
 }
 
+function expBlock(){
+  if(S.exp==null)return '';var f=S.form;var k=f.xk||'cash';
+  var sum=function(t){return S.exp.filter(function(x){return x.kind===t}).reduce(function(m,x){return m+x.amount},0)};
+  var rows=S.exp.map(function(x){return '<tr><td>'+(x.kind==='cash'?'<span class="chip c-ok">Наличными</span>':'<span class="chip">Банк</span>')+'</td><td class="n"><b>'+money(x.amount)+'</b></td><td>'+hu(x.source||'')+(x.due?'<div class="tiny muted">'+h(String(x.due).split('-').reverse().join('.'))+'</div>':'')+'</td><td><div class="row" style="gap:6px"><button class="in" data-a="expok" data-id="'+h(x.id)+'">'+(x.kind==='cash'?'↑ Получено, в кассу':'Получено')+'</button><button data-a="expno" data-id="'+h(x.id)+'">Отменить</button></div></td></tr>'}).join('');
+  return '<section class="card"><h2>Предстоящие приходы</h2><p class="muted small" style="margin:0 0 10px">Ожидаемые деньги считаются отдельно и в остаток кассы не входят.</p>'+
+   '<div class="kpis" style="margin-bottom:12px"><div class="kpi"><span class="muted small">Ожидается наличными</span><b>'+money(sum('cash'))+'</b></div><div class="kpi"><span class="muted small">Ожидается на банк</span><b>'+money(sum('bank'))+'</b></div></div>'+
+   (rows?'<div style="overflow:auto"><table><tbody>'+rows+'</tbody></table></div>':'<p class="muted">Ожидаемых приходов нет.</p>')+
+   '<div class="row" style="align-items:flex-end;margin-top:12px"><div class="field"><label for="x-k">Как придут</label><select id="x-k" data-f="xk"><option value="cash"'+(k==='cash'?' selected':'')+'>Наличными</option><option value="bank"'+(k==='bank'?' selected':'')+'>Банк</option></select></div>'+
+   '<div class="field"><label for="x-a">Сумма, ֏</label><input id="x-a" data-f="xa" inputmode="numeric" placeholder="100000" value="'+h(f.xa||'')+'"></div>'+
+   '<div class="field" style="flex:2;min-width:200px"><label for="x-s">От кого / за что</label><input id="x-s" data-f="xs" maxlength="200" placeholder="впишите вручную" value="'+h(f.xs||'')+'"></div>'+
+   '<div class="field"><label for="x-d">Когда ждём (необязательно)</label><input id="x-d" type="date" data-f="xd" value="'+h(f.xd||'')+'"></div>'+
+   '<button data-a="expadd"'+(S.busy?' disabled':'')+'>Добавить ожидаемый приход</button></div></section>'}
 function flowTiles(){
   var from=perFrom(S.flt.per),to=perTo();
   var rows=S.cash.filter(function(x){var t=ms(x.at);return t>=from&&t<to&&!x.voided_at});
@@ -323,7 +338,7 @@ function mainView(){
     var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
     s+=reqCashier();
     s+=periodBar()+flowTiles();
-    s+=issueForm()+topupForm()+ledger();
+    s+=issueForm()+topupForm()+expBlock()+ledger();
   }else s+=myHistory();
   return s+'</main>'}
 
@@ -443,6 +458,15 @@ var A={
     if(!confirm(puT('Внести в кассу')+': '+money(a)+'?'))return;
     var r=await sb.rpc('cash_topup',{p_amount:a,p_note:String(f.tn).trim(),p_device:'web'});var e=errOf(r);if(e)return toast(e);
     S.form.ta='';S.form.tn='';toast('Приход записан');await load()})},
+  expadd:function(){return run(async function(){var f=S.form,a=parseInt(String(f.xa||'').replace(/\D/g,''),10);
+    if(!a)return toast('Введите сумму');if(!String(f.xs||'').trim())return toast('Впишите, откуда деньги');
+    var r=await sb.rpc('exp_add',{p_kind:f.xk||'cash',p_amount:a,p_source:String(f.xs).trim(),p_due:f.xd||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
+    S.form.xa='';S.form.xs='';S.form.xd='';toast('Ожидаемый приход добавлен');await load()})},
+  expok:function(d){return run(async function(){var x=(S.exp||[]).find(function(y){return y.id===d.id});if(!x)return;
+    if(!confirm(puT(x.kind==='cash'?'Деньги получены? Сумма будет внесена в кассу':'Деньги пришли на банк?')+': '+money(x.amount)))return;
+    var r=await sb.rpc('exp_close',{p_id:d.id,p_received:true,p_device:'web'});var e=errOf(r);if(e)return toast(e);toast(x.kind==='cash'?'Приход записан':'Отмечено: получено');await load()})},
+  expno:function(d){return run(async function(){if(!confirm(puT('Убрать этот ожидаемый приход?')))return;
+    var r=await sb.rpc('exp_close',{p_id:d.id,p_received:false,p_device:'web'});var e=errOf(r);if(e)return toast(e);await load()})},
   issueback:function(){S.step=null;render()},
   issueok:function(){return run(async function(){var st=S.step;var r=await sb.rpc('cash_issue',{p_staff:st.staff,p_amount:st.amount,p_purpose:st.purpose,p_note:st.note,p_task:null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
     S.step=null;S.form.ia='';S.form.is='';S.form.ip='';S.form.in='';toast(st.staff?'Выдача записана. Получатель увидит её и подтвердит.':'Выдача записана');await load()})},
@@ -478,6 +502,7 @@ document.addEventListener('keydown',function(e){
   else if(f==='tsay'&&S.openT)go='tasksay';
   else if(f==='ia'||f==='ip'||f==='in'||f==='is')go='issue';
   else if(f==='ta'||f==='tn')go='topup';
+  else if(f==='xa'||f==='xs')go='expadd';
   else if(f==='rq_a'||f==='rq_p'||f==='rq_n')go='reqsend';
   else if(f==='rq_say'&&S.reqOpen)go='reqsay';
   else if(f==='rq_fw'&&S.fwId)go='reqforward';

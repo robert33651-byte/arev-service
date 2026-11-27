@@ -2327,7 +2327,7 @@ do $$ begin
 
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.proname in ('req_create','req_cancel','req_forward','req_decide','req_issue','req_say','req_admin_create','_req_log','_req_notify_cashiers','req_reminders')
+           where n.nspname = 'public' and p.proname in ('req_create','req_cancel','req_forward','req_decide','req_issue','req_say','req_admin_create','_req_log','_req_notify_cashiers','req_reminders','exp_add','exp_close')
   loop execute 'drop function ' || f.sig || ' cascade'; end loop;
 end $$;
 
@@ -2347,7 +2347,7 @@ begin
 end $$;
 
 -- 1) работник просит деньги → уведомление кассиру
-create function public.req_create(p_amount int, p_purpose text, p_note text default null, p_device text default null)
+create function public.req_create(p_amount int, p_purpose text, p_note text default null, p_device text default null, p_voice text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.staff; e text; r public.cash_requests;
 begin
@@ -2357,11 +2357,17 @@ begin
   e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
   if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
   if coalesce(trim(p_purpose), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;
+  if p_voice is not null then
+    e := public._check_photo(p_voice); if e is not null then return jsonb_build_object('error', e); end if;
+  end if;
   insert into public.cash_requests(requester_id, requester_name, origin, amount_asked, purpose)
   values (s.id, s.name, 'worker', p_amount, left(trim(p_purpose), 200)) returning * into r;
   perform public._req_log(r.id, s.id, 'worker', 'event', 'created', p_amount::text, null);
   if coalesce(trim(p_note), '') <> '' then
     perform public._req_log(r.id, s.id, 'worker', 'text', null, left(trim(p_note), 500), null);
+  end if;
+  if p_voice is not null then
+    perform public._req_log(r.id, s.id, 'worker', 'voice', null, null, p_voice);
   end if;
   perform public._req_notify_cashiers('Запрос денег: ' || s.name || ', ' || p_amount || ' ֏', left(trim(p_purpose), 200));
   return to_jsonb(r);
@@ -2408,9 +2414,10 @@ begin
 end $$;
 
 -- 3) директор решает: approve / reject / wait; при одобрении может изменить сумму
-create function public.req_decide(p_id uuid, p_decision text, p_amount int default null, p_note text default null)
+-- p_extra + p_task: директор добавляет сверху сумму и отдельную задачу на неё (например, «купить ещё отвёртки»)
+create function public.req_decide(p_id uuid, p_decision text, p_amount int default null, p_note text default null, p_extra int default null, p_task text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare r public.cash_requests; who text; amt int;
+declare r public.cash_requests; who text; amt int; ex int; tid uuid;
 begin
   if not public.is_admin() then return jsonb_build_object('error', 'FORBIDDEN'); end if;
   if p_decision not in ('approve','reject','wait') then return jsonb_build_object('error', 'BAD_DECISION'); end if;
@@ -2419,10 +2426,23 @@ begin
   if r.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
   if p_decision = 'approve' then
     amt := coalesce(p_amount, r.amount_asked);
+    ex := greatest(coalesce(p_extra, 0), 0);
+    if ex > 0 and coalesce(trim(p_task), '') = '' then return jsonb_build_object('error', 'NEED_TASK'); end if;
+    amt := amt + ex;
     if amt <= 0 or amt > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
     update public.cash_requests set status = 'approved', amount_approved = amt, decided_at = now(), decided_by = who, last_reminded_at = now()
      where id = r.id returning * into r;
     perform public._req_log(r.id, auth.uid(), 'admin', 'event', 'approved', amt::text, null);
+    if coalesce(trim(p_task), '') <> '' and r.requester_id is not null then
+      insert into public.tasks(staff_id, day, title, note, created_by, money)
+      values (r.requester_id, current_date, left(trim(p_task), 200), 'К запросу: ' || r.purpose, auth.uid(), nullif(ex, 0))
+      returning id into tid;
+      update public.cash_requests set task_id = coalesce(task_id, tid) where id = r.id returning * into r;
+      perform public._req_log(r.id, auth.uid(), 'admin', 'event', 'extra_task', ex::text, null);
+      perform public._req_log(r.id, auth.uid(), 'admin', 'text', null, 'Доп. задача: ' || left(trim(p_task), 200) || case when ex > 0 then ' (+' || ex || ' ֏)' else '' end, null);
+      perform public._notify(r.requester_id, false, 'Новая задача от директора' || case when ex > 0 then ': +' || ex || ' ֏' else '' end, left(trim(p_task), 200), null);
+      perform public._req_notify_cashiers('Директор добавил к запросу ' || r.requester_name || case when ex > 0 then ' +' || ex || ' ֏' else '' end, left(trim(p_task), 200));
+    end if;
     perform public._notify(r.requester_id, false, 'Запрос одобрен: ' || amt || ' ֏', coalesce(nullif(left(trim(coalesce(p_note, '')), 200), ''), 'Кассир скоро выдаст деньги.'), null);
     perform public._req_notify_cashiers('К выдаче: ' || r.requester_name || ', ' || amt || ' ֏', r.purpose);
   elsif p_decision = 'reject' then
@@ -2557,6 +2577,68 @@ do $$ begin
     raise notice 'pg_cron не включён: включите его в Database → Extensions и запустите файл ещё раз';
   end if;
 end $$;
+
+-- ожидаемые (предстоящие) приходы: наличными и на банк. В остаток кассы не входят.
+-- Наличный приход при получении превращается в обычное пополнение кассы; банковский просто закрывается.
+create table if not exists public.cash_expected(
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  kind text not null check (kind in ('cash','bank')),
+  amount int not null check (amount > 0 and amount <= 100000000),
+  source text not null,
+  due date,
+  by_name text,
+  status text not null default 'open' check (status in ('open','received','cancelled')),
+  closed_at timestamptz,
+  closed_by text
+);
+alter table public.cash_expected enable row level security;
+do $$ begin
+  drop policy if exists cexp_read on public.cash_expected;
+  create policy cexp_read on public.cash_expected for select to authenticated
+    using (public.is_admin() or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved'));
+end $$;
+
+create function public.exp_add(p_kind text, p_amount int, p_source text, p_due date default null, p_device text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; e text; who text; x public.cash_expected;
+begin
+  if public.is_admin() then who := public._actor_name(auth.uid());
+  else
+    s := public._staff();
+    if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+    e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
+    who := s.name;
+  end if;
+  if p_kind not in ('cash','bank') then return jsonb_build_object('error', 'BAD_KIND'); end if;
+  if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
+  if coalesce(trim(p_source), '') = '' then return jsonb_build_object('error', 'NEED_NOTE'); end if;
+  insert into public.cash_expected(kind, amount, source, due, by_name) values (p_kind, p_amount, left(trim(p_source), 200), p_due, who) returning * into x;
+  return to_jsonb(x);
+end $$;
+
+create function public.exp_close(p_id uuid, p_received boolean, p_device text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; e text; who text; x public.cash_expected; res jsonb;
+begin
+  if public.is_admin() then who := public._actor_name(auth.uid());
+  else
+    s := public._staff();
+    if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+    e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
+    who := s.name;
+  end if;
+  select * into x from public.cash_expected where id = p_id and status = 'open' for update;
+  if x.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  if p_received and x.kind = 'cash' then
+    res := public.cash_topup(x.amount, 'Ожидаемый приход: ' || x.source, p_device);
+    if res ? 'error' then return res; end if;
+  end if;
+  update public.cash_expected set status = case when p_received then 'received' else 'cancelled' end, closed_at = now(), closed_by = who where id = x.id returning * into x;
+  return to_jsonb(x);
+end $$;
+revoke all on function public.exp_add, public.exp_close from public, anon;
+grant execute on function public.exp_add, public.exp_close to authenticated;
 
 revoke all on function public.req_create, public.req_cancel, public.req_forward, public.req_decide, public.req_issue,
   public.req_say, public.req_admin_create from public, anon;

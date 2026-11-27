@@ -8,6 +8,7 @@ import { Audio } from 'expo-av';
 import { deviceId } from './device';
 import { C, Btn, Card, H2, Label, Muted, T, Field, Chip } from './ui';
 import { tr, loc } from './i18n';
+import { startVoice, stopVoice, uploadVoice } from './tasks';
 
 const money = (n) => (n == null ? '—' : Math.round(n).toLocaleString('ru-RU') + ' ֏');
 const ST = {
@@ -80,6 +81,8 @@ export default function RequestsScreen({ ctx }) {
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('');
   const [note, setNote] = useState('');
+  const [rec, setRec] = useState(false);       // идёт запись голосового
+  const [voiceUri, setVoiceUri] = useState(null); // записанное голосовое к запросу
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [open, setOpen] = useState(null);
@@ -95,12 +98,20 @@ export default function RequestsScreen({ ctx }) {
   const send = async () => {
     if (!sum) return Alert.alert(tr('Сумма'), tr('Укажите сумму'));
     if (!purpose.trim()) return Alert.alert(tr('На что'), tr('Впишите, на что нужны деньги'));
+    if (rec) return Alert.alert(tr('Идёт запись…'), tr('Сначала остановите запись'));
     setBusy(true);
     try {
-      await rpc('req_create', { p_amount: sum, p_purpose: purpose.trim(), p_note: note.trim() || null, p_device: deviceId() });
-      setAmount(''); setPurpose(''); setNote(''); setMo(0); setShowForm(false); await refresh(); reloadMain && reloadMain();
+      const vp = voiceUri ? await uploadVoice(voiceUri, uid) : null;
+      await rpc('req_create', { p_amount: sum, p_purpose: purpose.trim(), p_note: note.trim() || null, p_device: deviceId(), p_voice: vp });
+      setAmount(''); setPurpose(''); setNote(''); setVoiceUri(null); setMo(0); setShowForm(false); await refresh(); reloadMain && reloadMain();
       Alert.alert(tr('Запрос отправлен кассиру'));
     } catch (e) { Alert.alert(tr('Не получилось'), eText(e)); } finally { setBusy(false); }
+  };
+  const toggleRec = async () => {
+    try {
+      if (!rec) { await startVoice(); setVoiceUri(null); setRec(true); return; }
+      setRec(false); const r = await stopVoice(); if (r && r.uri) setVoiceUri(r.uri);
+    } catch (e) { setRec(false); Alert.alert(tr('Не получилось'), String(e && e.message) === 'MIC_DENIED' ? tr('Нет доступа к микрофону. Разрешите его в настройках телефона.') : eText(e)); }
   };
   const cancel = (r) => Alert.alert(tr('Отменить запрос?'), money(r.amount_asked) + ' · ' + r.purpose, [
     { text: tr('Нет'), style: 'cancel' },
@@ -116,6 +127,13 @@ export default function RequestsScreen({ ctx }) {
         <Field label={tr('Сумма, ֏')} value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="25000" />
         <Field label={tr('На что нужны деньги')} value={purpose} onChangeText={setPurpose} maxLength={200} />
         <Field label={tr('Комментарий (необязательно)')} value={note} onChangeText={setNote} maxLength={500} />
+        <Btn title={rec ? '⏹ ' + tr('Остановить запись') : voiceUri ? '🎤 ' + tr('Записать заново') : '🎤 ' + tr('Записать голосовое')} kind={rec ? 'danger' : 'ghost'} onPress={toggleRec} disabled={busy} />
+        {voiceUri && !rec ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+            <Text style={{ color: C.ok || '#2c8a57', fontWeight: '700' }}>✓ {tr('Голосовое записано')}</Text>
+            <Pressable onPress={() => setVoiceUri(null)} hitSlop={10}><Text style={{ color: C.bad || '#b3261e', fontWeight: '700' }}>{tr('Удалить')}</Text></Pressable>
+          </View>
+        ) : null}
         <Btn title={tr('Отправить запрос')} onPress={send} busy={busy} big />
         <Btn title={tr('Закрыть')} kind="ghost" onPress={() => setShowForm(false)} />
         <Muted>{tr('Запрос идёт кассиру, затем директору. Вы увидите каждый этап и получите уведомление. Деньги выдаёт кассир наличными.')}</Muted>
