@@ -27,6 +27,8 @@ create table if not exists public.cash_requests(
 create index if not exists cash_requests_created on public.cash_requests(created_at desc);
 create index if not exists cash_requests_who on public.cash_requests(requester_id, created_at desc);
 create index if not exists cash_requests_open on public.cash_requests(status) where status in ('new','forwarded','waiting','approved');
+alter table public.cash_requests add column if not exists task_id uuid;
+alter table public.tasks add column if not exists money int;   -- сколько денег директор выделил на эту задачу
 alter table public.cash_requests enable row level security;
 
 create table if not exists public.cash_request_log(
@@ -52,16 +54,19 @@ do $$ begin
   drop policy if exists creq_log_read on public.cash_request_log;
   create policy creq_log_read on public.cash_request_log for select to authenticated
     using (public.is_admin() or exists(select 1 from public.cash_requests r where r.id = request_id and
-           (r.requester_id = auth.uid() or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved'))));
+           (exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved')
+            -- работник видит этапы и переписку с кассиром, но не слова и не голос директора: касса — связующее звено
+            or (r.requester_id = auth.uid() and (cash_request_log.actor_role <> 'admin' or cash_request_log.kind = 'event')))));
   -- голосовые сообщения читают участники запроса и администратор
   drop policy if exists photos_read_creq on storage.objects;
   create policy photos_read_creq on storage.objects for select to authenticated
     using (bucket_id = 'photos' and exists(
       select 1 from public.cash_request_log l join public.cash_requests r on r.id = l.request_id
        where l.path = storage.objects.name
-         and (public.is_admin() or r.requester_id = auth.uid()
-              or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved'))));
-end $$;
+         and (public.is_admin()
+              or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved')
+              or (r.requester_id = auth.uid() and l.actor_role <> 'admin'))));
+  end $$;
 
 do $$ declare f record; begin
   for f in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -183,7 +188,7 @@ end $$;
 -- директор сам создаёт выдачу для сотрудника (уже одобрена): кассир получает «к выдаче»
 create function public.req_admin_create(p_staff uuid, p_amount int, p_purpose text, p_note text default null, p_voice text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare t public.staff; r public.cash_requests; e text; who text;
+declare t public.staff; r public.cash_requests; e text; who text; tid uuid;
 begin
   if not public.is_admin() then return jsonb_build_object('error', 'FORBIDDEN'); end if;
   select * into t from public.staff where id = p_staff and status = 'approved' and not is_cashier;
@@ -196,6 +201,11 @@ begin
   who := public._actor_name(auth.uid());
   insert into public.cash_requests(requester_id, requester_name, origin, amount_asked, amount_approved, purpose, status, decided_at, decided_by, last_reminded_at)
   values (t.id, t.name, 'boss', p_amount, p_amount, left(trim(p_purpose), 200), 'approved', now(), who, now()) returning * into r;
+  -- работнику сразу ставится задача: видно, на что выделены деньги; позже директор видит, кто выполнил и сколько потратил
+  insert into public.tasks(staff_id, day, title, note, created_by, money)
+  values (t.id, current_date, left(trim(p_purpose), 200), nullif(left(trim(coalesce(p_note, '')), 500), ''), auth.uid(), p_amount)
+  returning id into tid;
+  update public.cash_requests set task_id = tid where id = r.id returning * into r;
   perform public._req_log(r.id, auth.uid(), 'admin', 'event', 'boss_created', p_amount::text, null);
   if coalesce(trim(p_note), '') <> '' then
     perform public._req_log(r.id, auth.uid(), 'admin', 'text', null, left(trim(p_note), 500), null);

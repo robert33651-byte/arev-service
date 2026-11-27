@@ -277,6 +277,7 @@ export default function TasksScreen({ userId, embedded, openTaskId, onOpenedTask
             </View>
             <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
               <Text style={st.h1}>{task.title}</Text>
+              {task.money ? <Text style={{ color: '#2c8a57', fontWeight: '700', marginTop: 4 }}>{tr('Выдано на задачу')}: {Math.round(task.money).toLocaleString('ru-RU')} ֏</Text> : null}
               <View style={st.row}>
                 {!!task.project && <Chip text={task.project} fg={P.ink} bg={P.line} />}
                 {PRI[task.priority] && <Chip text={PRI[task.priority][0]} fg={PRI[task.priority][1]} bg={PRI[task.priority][2]} />}
