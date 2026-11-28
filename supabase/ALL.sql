@@ -2321,8 +2321,8 @@ do $$ begin
   create policy creq_log_read on public.cash_request_log for select to authenticated
     using (public.is_admin() or exists(select 1 from public.cash_requests r where r.id = request_id and
            (exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved')
-            -- работник видит этапы и переписку с кассиром, но не слова и не голос директора: касса — связующее звено
-            or (r.requester_id = auth.uid() and (cash_request_log.actor_role <> 'admin' or cash_request_log.kind = 'event')))));
+            -- работник видит только этапы и свои собственные сообщения: слова и голос кассира и директора ему не показываются
+            or (r.requester_id = auth.uid() and (cash_request_log.kind = 'event' or cash_request_log.actor_id = auth.uid())))));
   -- голосовые сообщения читают участники запроса и администратор
   drop policy if exists photos_read_creq on storage.objects;
   create policy photos_read_creq on storage.objects for select to authenticated
@@ -2331,7 +2331,7 @@ do $$ begin
        where l.path = storage.objects.name
          and (public.is_admin()
               or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved')
-              or (r.requester_id = auth.uid() and l.actor_role <> 'admin'))));
+              or (r.requester_id = auth.uid() and l.actor_id = auth.uid()))));
   end $$;
 
 do $$ declare f record; begin
