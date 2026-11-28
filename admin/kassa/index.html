@@ -162,8 +162,8 @@ function topupForm(){
 
 function ledger(){
   var from=perFrom(S.flt.per);
-  var rows=S.cash.filter(function(x){var t=ms(x.at);if(t<from||t>=perTo())return false;if(S.flt.who&&x.staff_id!==S.flt.who)return false;
-    if(S.flt.st==='pending')return x.kind==='issue'&&x.status==='pending'&&!x.voided_at;if(S.flt.st==='disputed')return x.status==='disputed'&&!x.voided_at;if(S.flt.st==='void')return !!x.voided_at;return true});
+  var sk=function(x){return x.backfilled?Math.max(ms(x.confirmed_at)||0,ms(x.at)):ms(x.at)};var rows=S.cash.filter(function(x){var t=sk(x);if(t<from||t>=perTo())return false;if(S.flt.who&&x.staff_id!==S.flt.who)return false;
+    if(S.flt.st==='pending')return x.kind==='issue'&&x.status==='pending'&&!x.voided_at;if(S.flt.st==='disputed')return x.status==='disputed'&&!x.voided_at;if(S.flt.st==='void')return !!x.voided_at;return true});rows.sort(function(p,q){return sk(q)-sk(p)});
   var live=rows.filter(function(x){return !x.voided_at});
   var out=live.filter(function(x){return x.kind==='issue'}).reduce(function(a,x){return a+x.amount},0),inn=live.filter(function(x){return x.kind==='topup'}).reduce(function(a,x){return a+x.amount},0);
   var names={};S.cash.forEach(function(x){if(x.staff_id)names[x.staff_id]=x.staff_name||'—'});
