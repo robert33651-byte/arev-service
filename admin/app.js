@@ -1050,7 +1050,7 @@ const rqErr=e=>RQERR[e&&e.message]||('Ошибка: '+(e&&e.message||e));
 const VIEWS={'a-req':vReq,'a-cash':vCash,'a-report':vReport,'a-dash':vDash,'a-staff':vStaff,'a-emp':vEmp,'a-shifts':vShifts,'a-fuel':vFuel,'a-orders':vOrders,'a-new':vNew,'a-order':vOrder,'a-buys':vBuys,'a-day':vDay,'a-place':vPlace,'a-live':vLive,'a-log':vLog,'a-tasks':vTasks,'a-places':vPlaces,'a-issues':vIssues,'a-photos':vPhotos,'a-talks':vTalks,'a-settings':vSettings};
 function render(keep){const y=window.scrollY;const root=document.getElementById('root');
  if(!CFG.SUPABASE_URL||/ВАШ_ПРОЕКТ/.test(CFG.SUPABASE_URL)){root.innerHTML='<div class="loginwrap"><div class="card"><h2>Админка не настроена</h2><p class="small">Откройте файл config.js и вставьте адрес проекта Supabase и ключ anon public.</p></div></div>';return}
- if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else{let body;try{body=(VIEWS[S.view.name]||vDash)()}catch(e){console.error(e);body='<div class="card"><h2>Не удалось показать страницу</h2><p class="small">Сообщите разработчику текст ошибки: '+h(String(e&&e.message||e))+'</p></div>'}root.innerHTML=shell(body)}
+ if(S.boot||S.checking)root.innerHTML='<div class="bootsplash"><div class="bootlogo">Arev</div><div class="bootdot"></div></div>';else if(!S.session)root.innerHTML=vLogin();else if(!S.isAdmin)root.innerHTML=vClaim();else if(!S.loaded)root.innerHTML=shell('<div class="empty">Загрузка…</div>');else{let body;try{body=(VIEWS[S.view.name]||vDash)()}catch(e){console.error(e);body='<div class="card"><h2>Не удалось показать страницу</h2><p class="small">Сообщите разработчику текст ошибки: '+h(String(e&&e.message||e))+'</p></div>'}root.innerHTML=shell(body)}
  if(keep)window.scrollTo(0,y);signPending();if(S.view.name==='a-day'&&S.loaded&&S.isAdmin)initDayMap();else if(S.view.name==='a-places'&&S.loaded&&S.isAdmin)initPlacesMap();else if(S.view.name==='a-live'&&S.loaded&&S.isAdmin)initLiveMap();else if(S.map){try{S.map.remove()}catch(e){}S.map=null}}
 function go(name,p){if(S.view&&S.view.name&&(S.view.name!==name||JSON.stringify(S.view.p||{})!==JSON.stringify(p||{}))){S.hist=S.hist||[];S.hist.push(S.view);if(S.hist.length>40)S.hist.shift();try{history.pushState({a:1},'')}catch(e){}}S.view={name,p:p||{}};S.form={};render();window.scrollTo(0,0)}
 // шаг назад: закрыть окно → предыдущий экран → главная; false — идти некуда (приложение закроется)
@@ -1283,7 +1283,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!S.session&&e.target
 document.getElementById('fileSheet').addEventListener('change',async e=>{const file=e.target.files&&e.target.files[0];if(!file)return;try{S.imp=await readSheet(file);render(true)}catch(err){toast('Не удалось прочитать файл. Нужен Excel (.xlsx) или CSV')}});
 
 /* ---------- запуск ---------- */
-async function onSession(s){S.session=s;S.isAdmin=false;S.loaded=false;if(s){const r=await sb.rpc('is_admin');S.isAdmin=!!r.data;if(S.isAdmin){await load();if(window.AREV_PUSH)try{await sb.rpc('save_push_token',{p_token:window.AREV_PUSH})}catch(e){}}}render();if(S.isAdmin)syncMyName()}
+async function onSession(s){S.boot=false;S.session=s;S.isAdmin=false;S.loaded=false;if(s){S.checking=true;render();let r;try{r=await sb.rpc('is_admin')}catch(e){r={data:false}}S.checking=false;S.isAdmin=!!r.data;if(S.isAdmin){await load();if(window.AREV_PUSH)try{await sb.rpc('save_push_token',{p_token:window.AREV_PUSH})}catch(e){}}}render();if(S.isAdmin)syncMyName()}
 const myName=()=>String(((S.session&&S.session.user&&S.session.user.user_metadata)||{}).name||'').trim();
 // имя из регистрации → в таблицу админов; нет имени — спросить один раз
 let nameSynced=false;
@@ -1293,8 +1293,8 @@ async function syncMyName(){if(nameSynced||!S.isAdmin)return;nameSynced=true;let
  const r=await sb.rpc('set_my_admin_name',{p_name:nm});if(r.error&&/function|does not exist/i.test(r.error.message||''))console.warn('Выполните supabase/migration_admin_name.sql')}
 async function saveMyName(nm){nm=String(nm||'').trim();if(nm.length<2)return toast('Впишите имя');const u=await sb.auth.updateUser({data:{name:nm}});if(u.error)return toast('Ошибка: '+u.error.message);if(u.data&&u.data.user)S.session.user=u.data.user;
  const r=await sb.rpc('set_my_admin_name',{p_name:nm});if(r.error)return toast('Имя сохранено в профиле, но не в базе: выполните migration_admin_name.sql в Supabase');toast('Имя сохранено: '+nm);render(true)}
-sb.auth.getSession().then(({data})=>onSession(data.session||null));
-sb.auth.onAuthStateChange((ev,s)=>{if(ev==='SIGNED_IN'||ev==='SIGNED_OUT')onSession(s||null)});
+S.boot=true;sb.auth.getSession().then(({data})=>onSession(data.session||null)).catch(()=>{S.boot=false;S.checking=false;render()});
+sb.auth.onAuthStateChange((ev,s)=>{if(ev==='SIGNED_IN'&&s&&S.session&&S.session.user&&S.session.user.id===s.user.id&&(S.loaded||S.checking)){S.session=s;return}if(ev==='SIGNED_IN'||ev==='SIGNED_OUT')onSession(s||null)});
 setInterval(()=>{if(S.isAdmin&&!document.hidden&&S.view.name==='a-day'&&S.dayEmp&&S.dayDate===ymd(Date.now()))loadDayPts(S.dayEmp,S.dayDate,true);   // сегодняшний маршрут догружается раз в минуту
  if(S.isAdmin&&!document.hidden&&!S.busy&&S.view.name!=='a-day'&&S.view.name!=='a-places'&&!document.querySelector('#root input:focus,#root textarea:focus,#root select:focus'))load()},60000);
 render();
