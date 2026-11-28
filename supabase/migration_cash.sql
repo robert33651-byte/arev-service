@@ -362,6 +362,10 @@ begin
   update public.tasks set status = 'done', done_at = now(), done_note = nullif(left(trim(coalesce(p_note, '')), 500), '')
    where id = p_id and (staff_id = s.id or staff2_id = s.id) and status = 'new' returning * into r;
   if r.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  -- регулярная задача выполнена: сообщаем директору
+  if (to_jsonb(r) ->> 'tpl_id') is not null then
+    perform public._notify(null, true, 'Регулярная задача выполнена ✅', s.name || ': ' || r.title, r.id);
+  end if;
   return to_jsonb(r);
 end $$;
 

@@ -241,11 +241,13 @@ begin
   if t.staff_id = s.id and t.seen_at is null then
     update public.tasks set seen_at = now() where id = t.id;
     perform public._log(t.id, s.id, 'staff', 'event', 'seen', null, null);
-    perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id);
+    -- по регулярным задачам директора не беспокоим: ему важны только «выполнено» и «срок сегодня, не сделано»
+    if (to_jsonb(t) ->> 'tpl_id') is null then perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id); end if;
   elsif t.staff2_id = s.id and t.seen2_at is null then
     update public.tasks set seen2_at = now() where id = t.id;
     perform public._log(t.id, s.id, 'staff', 'event', 'seen', null, null);
-    perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id);
+    -- по регулярным задачам директора не беспокоим: ему важны только «выполнено» и «срок сегодня, не сделано»
+    if (to_jsonb(t) ->> 'tpl_id') is null then perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id); end if;
   end if;
   return jsonb_build_object('ok', true);
 end $$;

@@ -1169,11 +1169,13 @@ begin
   if t.staff_id = s.id and t.seen_at is null then
     update public.tasks set seen_at = now() where id = t.id;
     perform public._log(t.id, s.id, 'staff', 'event', 'seen', null, null);
-    perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id);
+    -- по регулярным задачам директора не беспокоим: ему важны только «выполнено» и «срок сегодня, не сделано»
+    if (to_jsonb(t) ->> 'tpl_id') is null then perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id); end if;
   elsif t.staff2_id = s.id and t.seen2_at is null then
     update public.tasks set seen2_at = now() where id = t.id;
     perform public._log(t.id, s.id, 'staff', 'event', 'seen', null, null);
-    perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id);
+    -- по регулярным задачам директора не беспокоим: ему важны только «выполнено» и «срок сегодня, не сделано»
+    if (to_jsonb(t) ->> 'tpl_id') is null then perform public._notify(null, true, 'Задачу открыли 👀', s.name || ': ' || t.title, t.id); end if;
   end if;
   return jsonb_build_object('ok', true);
 end $$;
@@ -2203,6 +2205,10 @@ begin
   update public.tasks set status = 'done', done_at = now(), done_note = nullif(left(trim(coalesce(p_note, '')), 500), '')
    where id = p_id and (staff_id = s.id or staff2_id = s.id) and status = 'new' returning * into r;
   if r.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  -- регулярная задача выполнена: сообщаем директору
+  if (to_jsonb(r) ->> 'tpl_id') is not null then
+    perform public._notify(null, true, 'Регулярная задача выполнена ✅', s.name || ': ' || r.title, r.id);
+  end if;
   return to_jsonb(r);
 end $$;
 
@@ -2847,6 +2853,29 @@ end $$;
 revoke all on function public.tpl_generate() from public, anon;
 grant execute on function public.tpl_generate() to authenticated;
 
+-- в последний день срока, если регулярная задача ещё не сделана, директору уходит одно уведомление
+alter table public.tasks add column if not exists due_alert_on date;
+create or replace function public.tpl_due_alerts() returns int
+language plpgsql security definer set search_path = public as $$
+declare t record; n int := 0; today date := (now() at time zone 'Asia/Yerevan')::date;
+begin
+  for t in select x.*, s.name as sname from public.tasks x join public.staff s on s.id = x.staff_id
+            where x.tpl_id is not null and x.status = 'new' and x.archived_at is null and x.due = today
+              and (x.due_alert_on is null or x.due_alert_on < today) loop
+    perform public._notify(null, true, 'Срок сегодня, не выполнено ⏰', t.sname || ': ' || t.title, t.id);
+    update public.tasks set due_alert_on = today where id = t.id;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+revoke all on function public.tpl_due_alerts() from public, anon, authenticated;
+do $$ begin
+  if exists(select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'task-recurring-due';
+    perform cron.schedule('task-recurring-due', '0 12 * * *', 'select public.tpl_due_alerts()');  -- 16:00 по Еревану
+  end if;
+end $$;
+
 -- исполнитель переносит срок регулярной задачи (выходной, праздник): директору — простое уведомление
 create function public.task_move_due(p_id uuid, p_due date, p_reason text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -2861,7 +2890,7 @@ begin
   if p_due is null or p_due < today or p_due > today + 45 then return jsonb_build_object('error', 'BAD_DATE'); end if;
   old := t.due;
   if old = p_due then return to_jsonb(t); end if;
-  update public.tasks set due = p_due, day = p_due, due_moved_from = coalesce(due_moved_from, old), overdue_remind_on = null
+  update public.tasks set due = p_due, day = p_due, due_moved_from = coalesce(due_moved_from, old), overdue_remind_on = null, due_alert_on = null
    where id = t.id returning * into t;
   perform public._notify(null, true, s.name || ' перенёс(ла) срок: ' || to_char(old, 'DD.MM') || ' → ' || to_char(p_due, 'DD.MM'),
                          t.title || case when coalesce(trim(p_reason), '') <> '' then ' — ' || left(trim(p_reason), 200) else '' end, t.id);
