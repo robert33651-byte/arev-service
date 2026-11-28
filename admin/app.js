@@ -763,16 +763,17 @@ function cashChip(x){if(x.kind==='topup')return '<span class="chip c-ok">поп�
  if(x.status==='disputed')return '<span class="chip c-bad">оспорено</span><div class="tiny" style="color:var(--bad)">'+hu(x.dispute_note||'')+'</div>';
  if(x.status==='pending'){const late=Date.now()-x.at>(+S.cfg.cash_confirm_hours||24)*36e5;return '<span class="chip '+(late?'c-bad':'c-warn')+'">ждёт подтверждения</span><div class="tiny muted">'+ago(x.at)+'</div>'}
  return '<span class="chip c-ok">получено</span><div class="tiny muted">'+fT(x.cAt)+(x.confirmed_by_admin?' · подтвердил администратор':'')+'</div>'}
-function vCash(){const from=perFrom(S.per);const flt=S.cashSt||'';
+function vCash(){const from=perFrom(S.per);const flt=S.cashSt||'';const empN=S.empF?((S.staff.find(m=>m.id===S.empF)||{}).name||''):'';
  const cashiers=S.staff.filter(m=>m.is_cashier&&m.status==='approved');
- const inPer=(S.cash||[]).filter(x=>(x.at>=from||(x.backfilled&&(ms(x.confirmed_at)||0)>=from))&&(!S.empF||x.staff_id===S.empF));
+ const inPer=(S.cash||[]).filter(x=>(x.at>=from||(x.backfilled&&(ms(x.confirmed_at)||0)>=from))&&(!S.empF||x.staff_id===S.empF||(!x.staff_id&&empN&&x.staff_name===empN)));
  const list=inPer.filter(x=>flt===''?true:flt==='pending'?(x.kind==='issue'&&x.status==='pending'&&!x.voided_at):flt==='disputed'?(x.status==='disputed'&&!x.voided_at):flt==='void'?!!x.voided_at:true);
  const live=inPer.filter(x=>!x.voided_at);const out=live.filter(x=>x.kind==='issue').reduce((a,x)=>a+x.amount,0),inn=live.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0);
  const pend=cashPend(),late=cashLate(),bal=cashBal();
+ const wrq=(S.reqs||[]).filter(r=>(r.status==='forwarded'||r.status==='waiting')&&(!S.empF||r.requester_id===S.empF)),wbf=bfWait().filter(x=>x.kind!=='topup'&&(!S.empF||(empN&&x.who===empN)));const wcnt=wrq.length+wbf.length,wsum=wrq.reduce((a,r)=>a+(+r.amount_asked||0),0)+wbf.reduce((a,x)=>a+(+x.amount||0),0);
  let s=atop('Касса','<div class="row wrapx"><button class="btn primary sm" data-act="cashtop">Пополнить кассу</button></div>');
  if(S.cashMissing)s+='<div class="flag warn">'+I.alert+'<span>Выполните в Supabase файл ALL.sql: без него касса не работает.</span></div>';
  if(!cashiers.length)s+='<div class="flag warn">'+I.alert+'<span>Кассир не назначен. Откройте сотрудника → «Настройки контроля» → «Кассир».</span></div>';
- s+='<div class="kgrid">'+kpi(money(bal),'остаток кассы',bal<0)+kpi(pend.length+(pend.length?' · '+money(pend.reduce((a,x)=>a+x.amount,0)):''),'работник ещё не подтвердил'+(late.length?', просрочено '+late.length:''),late.length>0)+kpi(money(out),'выдано за период')+kpi(money(inn),'пополнено за период')+'</div>';
+ s+='<div class="kgrid">'+kpi(money(bal),'остаток кассы',bal<0)+kpi(money(wsum),'запросы ждут подтверждения'+(wcnt?' · '+wcnt:''),wcnt>0)+kpi(money(out),'выдано за период')+kpi(money(inn),'пополнено за период')+'</div>';
  if(cashiers.length)s+='<p class="small muted" style="margin:0">Кассир: '+cashiers.map(m=>hu(m.name)).join(', ')+'</p>';
  s+='<div class="row wrapx">'+empSel()+perSeg()+'</div><div class="filters">'+[['','Все'],['pending','Ждут подтверждения'],['disputed','Оспоренные'],['void','Отменённые']].map(x=>'<button class="'+(flt===x[0]?'on':'')+'" data-act="cashst" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>';
  s+='<section class="card"><div class="tblw flat"><table class="tbl"><thead><tr><th>Когда</th><th class="l">Кому</th><th>Сумма</th><th class="l">Цель</th><th class="l">Кто внёс</th><th class="l">Статус</th><th></th></tr></thead><tbody>'+
