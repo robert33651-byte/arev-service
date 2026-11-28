@@ -2875,3 +2875,58 @@ do $$ begin
     perform cron.schedule('task-recurring', '15 3 * * *', 'select public.tpl_generate()');
   end if;
 end $$;
+
+-- ---------- Запуск кассы с прошлой даты ----------
+-- config.cash_backfill_from: пока задано, кассир может вносить приход и расход задним числом (не раньше этой даты).
+-- Такие записи помечены «Внесено задним числом» и сразу видны директору. Выключить: update config set cash_backfill_from = null.
+alter table public.config add column if not exists cash_backfill_from date;
+alter table public.cash_ledger add column if not exists backfilled boolean not null default false;
+
+do $$ declare r record; begin
+  for r in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+           where n.nspname = 'public' and p.proname in ('cash_backfill','cash_start') loop
+    execute 'drop function ' || r.sig || ' cascade';
+  end loop;
+end $$;
+
+create function public.cash_backfill(p_kind text, p_amount int, p_date date, p_purpose text, p_who text default null, p_device text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.staff; e text; c public.config; x public.cash_ledger;
+        today date := (now() at time zone 'Asia/Yerevan')::date;
+begin
+  s := public._staff();
+  if not s.is_cashier then return jsonb_build_object('error', 'NOT_CASHIER'); end if;
+  e := public._cash_guard(s, p_device); if e is not null then return jsonb_build_object('error', e); end if;
+  select * into c from public.config where id = 1;
+  if c.cash_backfill_from is null then return jsonb_build_object('error', 'BACKFILL_OFF'); end if;
+  if p_date is null or p_date < c.cash_backfill_from or p_date > today then return jsonb_build_object('error', 'BAD_DATE'); end if;
+  if p_kind not in ('topup','issue') then return jsonb_build_object('error', 'BAD_KIND'); end if;
+  if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
+  if coalesce(trim(p_purpose), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;
+  insert into public.cash_ledger(at, kind, amount, staff_name, cashier_id, by_name, purpose, note, status, confirmed_at, backfilled)
+  values ((p_date::text || ' 12:00')::timestamp at time zone 'Asia/Yerevan', p_kind, p_amount,
+          nullif(left(trim(coalesce(p_who, '')), 100), ''), s.id, s.name, left(trim(p_purpose), 200), 'Внесено задним числом', 'confirmed', now(), true)
+  returning * into x;
+  return to_jsonb(x);
+end $$;
+revoke all on function public.cash_backfill from public, anon;
+grant execute on function public.cash_backfill to authenticated;
+
+-- Начать кассу заново с даты и остатка. Старые записи не удаляются, а аннулируются (их видно в журнале).
+-- Запускается только вручную из SQL-редактора: select public.cash_start('2026-11-24', -120670);
+create function public.cash_start(p_date date, p_balance int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  update public.cash_ledger set voided_at = now(), void_reason = 'Касса начата заново с ' || to_char(p_date, 'DD.MM.YYYY'), void_by = 'Система'
+   where voided_at is null;
+  get diagnostics n = row_count;
+  if p_balance <> 0 then
+    insert into public.cash_ledger(at, kind, amount, by_name, purpose, note, status, confirmed_at, backfilled)
+    values ((p_date::text || ' 00:01')::timestamp at time zone 'Asia/Yerevan', case when p_balance > 0 then 'topup' else 'issue' end, abs(p_balance),
+            'Система', 'Начальный остаток на ' || to_char(p_date, 'DD.MM.YYYY'), 'Начальный остаток', 'confirmed', now(), true);
+  end if;
+  update public.config set cash_backfill_from = p_date where id = 1;
+  return jsonb_build_object('voided', n, 'balance', public._cash_bal());
+end $$;
+revoke all on function public.cash_start from public, anon, authenticated;

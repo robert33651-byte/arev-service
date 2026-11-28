@@ -65,7 +65,7 @@ var DOMAIN='staff.arevservice.app';
 var S={sess:null,me:null,cash:[],people:[],bal:null,purposes:[],hours:24,form:{},busy:false,flt:{who:'',per:'month',st:'',from:'',to:''},step:null,dispute:null,voidId:null,loaded:false,err:'',shifts:null,pin:null,tasks:null,last:Date.now()};
 var $=function(s){return document.querySelector(s)};
 var h=function(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
-var SRV_X=['Офис','По запросу','Пополнение кассы','Приход (внёс кассир)','Куплено за свои','Куплено за свои, возврат через кассу','Тестовая корректировка остатка','Закупка материалов','Командировка','Топливо','Заправка','Зарплата / аванс','Прочее','Инструмент'],SRV_P=['Возврат за покупку: ','Доп. задача: ','К запросу: ','Ожидаемый приход: '];
+var SRV_X=['Офис','По запросу','Пополнение кассы','Приход (внёс кассир)','Куплено за свои','Куплено за свои, возврат через кассу','Тестовая корректировка остатка','Внесено задним числом','Начальный остаток','Закупка материалов','Командировка','Топливо','Заправка','Зарплата / аванс','Прочее','Инструмент'],SRV_P=['Начальный остаток на ','Возврат за покупку: ','Доп. задача: ','К запросу: ','Ожидаемый приход: '];
 var srvT=function(s){if(window.ARLANG!=='hy'||s==null)return s;s=String(s);var D=window.HY_DICT||{};if(SRV_X.indexOf(s)>=0&&D[s])return D[s];for(var i=0;i<SRV_P.length;i++){var p=SRV_P[i];if(s.indexOf(p)===0&&D[p])return D[p]+s.slice(p.length)}return s};
 var hu=function(x){return '<span data-noi18n>'+h(srvT(x))+'</span>'};
 var puT=function(x){return window.ARLANG==='hy'&&window.HY_DICT&&window.HY_DICT[x]?window.HY_DICT[x]:x};
@@ -77,7 +77,7 @@ var fT=function(ts){var d=new Date(ts);return d.getDate()+' '+MON[d.getMonth()]+
 var ms=function(x){return x?new Date(x).getTime():null};
 var toast=function(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var e=document.createElement('div');e.className='toast';e.textContent=window.tr?window.tr(t):t;document.body.appendChild(e);setTimeout(function(){e.remove()},3500)};
 function normPhone(raw){var d=String(raw||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);if(d.length===9&&d[0]==='0')d='374'+d.slice(1);if(d.length===8)d='374'+d;return d}
-var ERR={BAD_DATE:'Срок должен быть не раньше сегодня и не дальше 45 дней',NOT_RECURRING:'Срок можно перенести только у регулярной задачи',NEED_APPROVAL:'Выдать можно только после одобрения директора',LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',CASHIER_CANNOT:'Кассир запрашивает деньги через директора',REQ_CLOSED:'Запрос уже закрыт',BAD_DECISION:'Неверное решение',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Файл не загрузился, повторите',PHOTO_TOO_OLD:'Файл устарел, выберите заново',NEED_FILE:'Выберите файл',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
+var ERR={BACKFILL_OFF:'Ввод прошлых операций выключен',BAD_DATE:'Неверная дата',NOT_RECURRING:'Срок можно перенести только у регулярной задачи',NEED_APPROVAL:'Выдать можно только после одобрения директора',LOCKED:'Касса заблокирована: введите кассовый PIN',NO_PIN:'Сначала задайте кассовый PIN',PIN_LOCKED:'Касса заблокирована на 15 минут из-за неверных PIN',BAD_PIN_FORMAT:'PIN — от 4 до 6 цифр',PIN_WRONG:'Неверный PIN',NEED_TITLE:'Впишите название задачи',NOT_FOUND:'Запись не найдена',SHIFT_ALREADY_OPEN:'Приход уже отмечен',NO_OPEN_SHIFT:'Приход ещё не отмечен',NOT_OFFICE:'Отметка с компьютера доступна только офисным сотрудникам',BAD_AMOUNT:'Неверная сумма',NEED_PURPOSE:'Выберите цель выдачи',BAD_RECIPIENT:'Выберите получателя',NOT_CASHIER:'Нет прав кассира',NEED_NOTE:'Впишите причину',NOT_FOUND:'Запись не найдена или уже обработана',CANNOT_VOID:'Эту запись отменить нельзя',WEB_NOT_ALLOWED:'Вход с компьютера не разрешён администратором',OTHER_DEVICE:'Действие с другого устройства запрещено',NOT_APPROVED:'Анкета ещё не принята администратором',NOT_REGISTERED:'Сотрудник не найден',CASHIER_CANNOT:'Кассир запрашивает деньги через директора',REQ_CLOSED:'Запрос уже закрыт',BAD_DECISION:'Неверное решение',TASK_CLOSED:'Задача уже закрыта',PHOTO_NOT_FOUND:'Файл не загрузился, повторите',PHOTO_TOO_OLD:'Файл устарел, выберите заново',NEED_FILE:'Выберите файл',EMPTY:'Напишите текст',NOT_YOUR_TASK:'Это не ваша задача'};
 function errOf(r){var m=r&&r.error?r.error.message:(r&&r.data&&r.data.error)||'';if(!m)return '';if((m==='LOCKED'||m==='NO_PIN')&&S.pin){S.pin.unlocked=false;S.pin.set=m==='LOCKED';render()}if(m==='PIN_WRONG'&&r.data&&r.data.left!=null)return 'Неверный PIN. Осталось попыток: '+r.data.left;for(var k in ERR)if(String(m).indexOf(k)>=0)return ERR[k];return 'Ошибка: '+m}
 function stat(x){
   if(x.kind==='topup')return '<span class="chip c-ok">пополнение</span>';
@@ -95,7 +95,7 @@ async function load(){
   var q=await Promise.all([
     sb.from('staff').select('id,name,status,is_cashier,web_access,kind').eq('id',u).maybeSingle(),
     sb.from('cash_ledger').select('*').order('at',{ascending:false}).limit(2000),
-    sb.from('config').select('cash_purposes,cash_confirm_hours').eq('id',1).maybeSingle(),
+    sb.from('config').select('*').eq('id',1).maybeSingle(),
     sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5),
     sb.from('tasks').select('id,day,due,tpl_id,due_moved_from,title,note,status,by_self,done_at,done_note,seen_at').or('staff_id.eq.'+u+',staff2_id.eq.'+u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200),
     sb.from('cash_requests').select('*').order('created_at',{ascending:false}).limit(500),
@@ -106,7 +106,7 @@ async function load(){
   S.reqs=q[5].error?null:(q[5].data||[]);
   S.shifts=q[3].error?null:(q[3].data||[]);
   S.me=q[0].data||null;S.cash=q[1].data||[];S.err=q[1].error?q[1].error.message:'';
-  var c=q[2].data||{};S.purposes=Array.isArray(c.cash_purposes)&&c.cash_purposes.length?c.cash_purposes:['Закупка материалов','Командировка','Топливо','Зарплата / аванс','Прочее'];S.hours=+c.cash_confirm_hours||24;
+  var c=q[2].data||{};S.cfg=c;S.purposes=Array.isArray(c.cash_purposes)&&c.cash_purposes.length?c.cash_purposes:['Закупка материалов','Командировка','Топливо','Зарплата / аванс','Прочее'];S.hours=+c.cash_confirm_hours||24;
   S.bal=null;S.people=[];
   if(S.me&&S.me.is_cashier&&S.me.status==='approved'){
     var pr=await sb.rpc('cash_pin_state');S.pin=pr.error?{set:false,unlocked:false}:pr.data;
@@ -211,6 +211,15 @@ function periodBar(){
    '<span class="sp"></span><button class="sm" data-a="lockcash">Заблокировать кассу</button></div></section>';
 }
 
+function backBlock(){
+  var c=S.cfg||{};if(!c.cash_backfill_from)return '';var f=S.form,today=new Date().toISOString().slice(0,10),k=f.bk||'issue';
+  return '<section class="card" style="border:2px dashed var(--warn,#b86d06)"><h2>Внести прошлую операцию</h2><p class="muted small" style="margin:0 0 10px"><span>Касса ведётся с</span> <b>'+h(String(c.cash_backfill_from).split('-').reverse().join('.'))+'</b>. <span>Здесь вносятся приход и расход, которые уже были с этого дня. Директор видит каждую запись.</span></p>'+
+   '<div class="row" style="align-items:flex-end"><div class="field"><label for="b-d">Дата</label><input id="b-d" type="date" data-f="bd" min="'+h(c.cash_backfill_from)+'" max="'+today+'" value="'+h(f.bd||c.cash_backfill_from)+'" style="width:auto"></div>'+
+   '<div class="field"><label for="b-k">Что было</label><select id="b-k" data-f="bk"><option value="issue"'+(k==='issue'?' selected':'')+'>Расход (выдача)</option><option value="topup"'+(k==='topup'?' selected':'')+'>Приход</option></select></div>'+
+   '<div class="field"><label for="b-a">Сумма, ֏</label><input id="b-a" data-f="ba" inputmode="numeric" value="'+h(f.ba||'')+'"></div>'+
+   '<div class="field"><label for="b-w">Кому / от кого</label><input id="b-w" data-f="bw" maxlength="100" value="'+h(f.bw||'')+'"></div>'+
+   '<div class="field" style="flex:2;min-width:200px"><label for="b-p">На что / откуда</label><input id="b-p" data-f="bp" maxlength="200" value="'+h(f.bp||'')+'"></div>'+
+   '<button class="p" data-a="backadd"'+(S.busy?' disabled':'')+'>Внести</button></div></section>'}
 function expBlock(){
   if(S.exp==null)return '';var f=S.form;var k=f.xk||'cash';
   var sum=function(t){return S.exp.filter(function(x){return x.kind===t}).reduce(function(m,x){return m+x.amount},0)};
@@ -343,7 +352,7 @@ function mainView(){
     var pend=S.cash.filter(function(x){return x.kind==='issue'&&x.status==='pending'&&!x.voided_at});
     s+=reqCashier();
     s+=periodBar()+flowTiles();
-    s+=issueForm()+topupForm()+expBlock()+ledger();
+    s+=backBlock()+issueForm()+topupForm()+expBlock()+ledger();
   }else s+=myHistory();
   return s+'</main>'}
 
@@ -468,6 +477,10 @@ var A={
     if(!confirm(puT('Внести в кассу')+': '+money(a)+'?'))return;
     var r=await sb.rpc('cash_topup',{p_amount:a,p_note:String(f.tn).trim(),p_device:'web'});var e=errOf(r);if(e)return toast(e);
     S.form.ta='';S.form.tn='';toast('Приход записан');await load()})},
+  backadd:function(){return run(async function(){var f=S.form,a=parseInt(String(f.ba||'').replace(/\D/g,''),10);
+    if(!a)return toast('Введите сумму');if(!String(f.bp||'').trim())return toast('Впишите, на что или откуда');
+    var r=await sb.rpc('cash_backfill',{p_kind:f.bk||'issue',p_amount:a,p_date:f.bd||(S.cfg||{}).cash_backfill_from,p_purpose:String(f.bp).trim(),p_who:String(f.bw||'').trim()||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
+    S.form.ba='';S.form.bp='';S.form.bw='';toast('Запись внесена');await load()})},
   expadd:function(){return run(async function(){var f=S.form,a=parseInt(String(f.xa||'').replace(/\D/g,''),10);
     if(!a)return toast('Введите сумму');if(!String(f.xs||'').trim())return toast('Впишите, откуда деньги');
     var r=await sb.rpc('exp_add',{p_kind:f.xk||'cash',p_amount:a,p_source:String(f.xs).trim(),p_due:f.xd||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
