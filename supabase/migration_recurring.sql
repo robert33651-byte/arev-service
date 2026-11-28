@@ -118,6 +118,8 @@ create table if not exists public.cash_backfill_req(
   decided_by text,
   ledger_id uuid
 );
+alter table public.cash_backfill_req add column if not exists amount_asked int;   -- сколько вписал кассир, если директор изменил сумму
+alter table public.cash_backfill_req add column if not exists decide_note text;   -- комментарий директора
 alter table public.cash_backfill_req enable row level security;
 do $$ begin
   drop policy if exists cbf_read on public.cash_backfill_req;
@@ -149,25 +151,28 @@ end $$;
 revoke all on function public.cash_backfill from public, anon;
 grant execute on function public.cash_backfill to authenticated;
 
-create function public.backfill_decide(p_id uuid, p_ok boolean)
+create function public.backfill_decide(p_id uuid, p_ok boolean, p_amount int default null, p_note text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare x public.cash_backfill_req; l public.cash_ledger; who text;
+declare x public.cash_backfill_req; l public.cash_ledger; who text; amt int; nt text;
 begin
   if not public.is_admin() then return jsonb_build_object('error', 'FORBIDDEN'); end if;
   who := public._actor_name(auth.uid());
   select * into x from public.cash_backfill_req where id = p_id and status = 'wait' for update;
   if x.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  amt := coalesce(p_amount, x.amount); nt := nullif(left(trim(coalesce(p_note, '')), 300), '');
+  if amt <= 0 or amt > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
   if p_ok then
     insert into public.cash_ledger(at, kind, amount, staff_name, cashier_id, by_name, purpose, note, status, confirmed_at, backfilled)
-    values ((x.op_date::text || ' 12:00')::timestamp at time zone 'Asia/Yerevan', x.kind, x.amount, x.who, x.cashier_id, x.by_name, x.purpose,
+    values ((x.op_date::text || ' 12:00')::timestamp at time zone 'Asia/Yerevan', x.kind, amt, x.who, x.cashier_id, x.by_name, x.purpose,
             'Внесено задним числом', 'confirmed', now(), true)
     returning * into l;
   end if;
-  update public.cash_backfill_req set status = case when p_ok then 'ok' else 'no' end, decided_at = now(), decided_by = who, ledger_id = l.id
+  update public.cash_backfill_req set status = case when p_ok then 'ok' else 'no' end, decided_at = now(), decided_by = who, ledger_id = l.id, decide_note = nt,
+         amount_asked = case when p_ok and amt <> amount then amount else amount_asked end, amount = case when p_ok then amt else amount end
    where id = x.id returning * into x;
   if x.cashier_id is not null then
     perform public._notify(x.cashier_id, false, case when p_ok then 'Директор подтвердил запись за ' else 'Директор отклонил запись за ' end || to_char(x.op_date, 'DD.MM'),
-                           x.amount || ' ֏ · ' || x.purpose, null);
+                           x.amount || ' ֏ · ' || x.purpose || coalesce(' — ' || nt, ''), null);
   end if;
   return to_jsonb(x);
 end $$;
