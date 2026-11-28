@@ -465,8 +465,10 @@ var A={
     var r=await sb.rpc('exp_add',{p_kind:f.xk||'cash',p_amount:a,p_source:String(f.xs).trim(),p_due:f.xd||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
     S.form.xa='';S.form.xs='';S.form.xd='';toast('Ожидаемый приход добавлен');await load()})},
   expok:function(d){return run(async function(){var x=(S.exp||[]).find(function(y){return y.id===d.id});if(!x)return;
-    if(!confirm(puT(x.kind==='cash'?'Деньги получены? Сумма будет внесена в кассу':'Деньги пришли на банк?')+': '+money(x.amount)))return;
-    var r=await sb.rpc('exp_close',{p_id:d.id,p_received:true,p_device:'web'});var e=errOf(r);if(e)return toast(e);toast(x.kind==='cash'?'Приход записан':'Отмечено: получено');await load()})},
+    var v=prompt(puT(x.kind==='cash'?'Сколько получено наличными? Эта сумма будет внесена в кассу. Если пришла только часть — впишите её, остаток останется в ожидаемых.':'Сколько пришло на банк? Если пришла только часть — впишите её, остаток останется в ожидаемых.'),String(x.amount));
+    if(v==null)return;var a=parseInt(String(v).replace(/\D/g,''),10);if(!a||a>x.amount)return toast('Введите сумму не больше ожидаемой');
+    var r=await sb.rpc('exp_close',{p_id:d.id,p_received:true,p_device:'web',p_amount:a});var e=errOf(r);if(e)return toast(e);
+    toast(a<x.amount?'Часть получена, остаток ждём':(x.kind==='cash'?'Приход записан':'Отмечено: получено'));await load()})},
   expno:function(d){return run(async function(){if(!confirm(puT('Убрать этот ожидаемый приход?')))return;
     var r=await sb.rpc('exp_close',{p_id:d.id,p_received:false,p_device:'web'});var e=errOf(r);if(e)return toast(e);await load()})},
   issueback:function(){S.step=null;render()},

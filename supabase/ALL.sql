@@ -1,4 +1,4 @@
--- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-27).
+-- Arev Service — ВСЯ база одним файлом. Собран автоматически из schema.sql и миграций (2026-11-28).
 -- Supabase → SQL Editor → New query → вставить целиком → Run. Можно запускать повторно, данные не удаляются.
 -- Порядок внутри: schema → tasks v2 → tasks geo → tasks v3 → admin name → talks → registry → cash → task files → requests → simplify.
 
@@ -2687,9 +2687,10 @@ begin
   return to_jsonb(x);
 end $$;
 
-create function public.exp_close(p_id uuid, p_received boolean, p_device text default null)
+-- p_amount: пришла только часть — она вносится в кассу (для наличных), остаток продолжает ожидаться
+create function public.exp_close(p_id uuid, p_received boolean, p_device text default null, p_amount int default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; e text; who text; x public.cash_expected; res jsonb;
+declare s public.staff; e text; who text; x public.cash_expected; res jsonb; part int;
 begin
   if public.is_admin() then who := public._actor_name(auth.uid());
   else
@@ -2700,9 +2701,15 @@ begin
   end if;
   select * into x from public.cash_expected where id = p_id and status = 'open' for update;
   if x.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  part := coalesce(p_amount, x.amount);
+  if p_received and (part <= 0 or part > x.amount) then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
   if p_received and x.kind = 'cash' then
-    res := public.cash_topup(x.amount, 'Ожидаемый приход: ' || x.source, p_device);
+    res := public.cash_topup(part, 'Ожидаемый приход: ' || x.source || case when part < x.amount then ' (часть)' else '' end, p_device);
     if res ? 'error' then return res; end if;
+  end if;
+  if p_received and part < x.amount then
+    update public.cash_expected set amount = amount - part where id = x.id returning * into x;
+    return to_jsonb(x) || jsonb_build_object('partial', part);
   end if;
   update public.cash_expected set status = case when p_received then 'received' else 'cancelled' end, closed_at = now(), closed_by = who where id = x.id returning * into x;
   return to_jsonb(x);
