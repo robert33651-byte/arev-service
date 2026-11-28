@@ -767,7 +767,7 @@ function vCash(){const from=perFrom(S.per);const flt=S.cashSt||'';const empN=S.e
  const cashiers=S.staff.filter(m=>m.is_cashier&&m.status==='approved');
  const inPer=(S.cash||[]).filter(x=>(x.at>=from||(x.backfilled&&(ms(x.confirmed_at)||0)>=from))&&(!S.empF||x.staff_id===S.empF||(!x.staff_id&&empN&&x.staff_name===empN)));
  const list=inPer.filter(x=>flt===''?true:flt==='pending'?(x.kind==='issue'&&x.status==='pending'&&!x.voided_at):flt==='disputed'?(x.status==='disputed'&&!x.voided_at):flt==='void'?!!x.voided_at:true);
- const live=inPer.filter(x=>!x.voided_at);const out=live.filter(x=>x.kind==='issue').reduce((a,x)=>a+x.amount,0),inn=live.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0);
+ const live=inPer.filter(x=>!x.voided_at&&x.at>=from&&x.note!=='Начальный остаток');const out=live.filter(x=>x.kind==='issue').reduce((a,x)=>a+x.amount,0),inn=live.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0);
  const pend=cashPend(),late=cashLate(),bal=cashBal();
  const wrq=(S.reqs||[]).filter(r=>(r.status==='forwarded'||r.status==='waiting')&&(!S.empF||r.requester_id===S.empF)),wbf=bfWait().filter(x=>x.kind!=='topup'&&(!S.empF||(empN&&x.who===empN)));const wcnt=wrq.length+wbf.length,wsum=wrq.reduce((a,r)=>a+(+r.amount_asked||0),0)+wbf.reduce((a,x)=>a+(+x.amount||0),0);
  let s=atop('Касса','<div class="row wrapx"><button class="btn primary sm" data-act="cashtop">Пополнить кассу</button></div>');
