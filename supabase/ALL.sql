@@ -2940,10 +2940,10 @@ grant execute on function public.cash_backfill to authenticated;
 
 create function public.backfill_decide(p_id uuid, p_ok boolean, p_amount int default null, p_note text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare x public.cash_backfill_req; l public.cash_ledger; who text; amt int; nt text;
+declare x public.cash_backfill_req; l public.cash_ledger; actor text; amt int; nt text;
 begin
   if not public.is_admin() then return jsonb_build_object('error', 'FORBIDDEN'); end if;
-  who := public._actor_name(auth.uid());
+  actor := public._actor_name(auth.uid());
   select * into x from public.cash_backfill_req where id = p_id and status = 'wait' for update;
   if x.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
   amt := coalesce(p_amount, x.amount); nt := nullif(left(trim(coalesce(p_note, '')), 300), '');
@@ -2954,7 +2954,7 @@ begin
             'Внесено задним числом', 'confirmed', now(), true)
     returning * into l;
   end if;
-  update public.cash_backfill_req set status = case when p_ok then 'ok' else 'no' end, decided_at = now(), decided_by = who, ledger_id = l.id, decide_note = nt,
+  update public.cash_backfill_req set status = case when p_ok then 'ok' else 'no' end, decided_at = now(), decided_by = actor, ledger_id = l.id, decide_note = nt,
          amount_asked = case when p_ok and amt <> amount then amount else amount_asked end, amount = case when p_ok then amt else amount end
    where id = x.id returning * into x;
   if x.cashier_id is not null then
