@@ -2911,6 +2911,15 @@ end $$;
 -- Такие записи помечены «Внесено задним числом» и сразу видны директору. Выключить: update config set cash_backfill_from = null.
 alter table public.config add column if not exists cash_backfill_from date;
 alter table public.cash_ledger add column if not exists backfilled boolean not null default false;
+-- записи, аннулированные при «начать кассу заново», скрыты от кассира и сотрудников (директор видит их в журнале)
+alter table public.cash_ledger add column if not exists hidden boolean not null default false;
+do $$ begin
+  drop policy if exists cash_read on public.cash_ledger;
+  create policy cash_read on public.cash_ledger for select to authenticated
+    using (public.is_admin()
+           or (not hidden and (staff_id = auth.uid()
+               or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved'))));
+end $$;
 
 do $$ declare r record; begin
   for r in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -3005,6 +3014,8 @@ begin
   update public.cash_ledger set voided_at = now(), void_reason = 'Касса начата заново с ' || to_char(p_date, 'DD.MM.YYYY'), void_by = 'Система'
    where voided_at is null;
   get diagnostics n = row_count;
+  update public.cash_ledger set hidden = true where voided_at is not null and not hidden;
+  delete from public.cash_backfill_req;   -- пробные записи задним числом начинаются с чистого листа
   if p_balance <> 0 then
     insert into public.cash_ledger(at, kind, amount, by_name, purpose, note, status, confirmed_at, backfilled)
     values ((p_date::text || ' 00:01')::timestamp at time zone 'Asia/Yerevan', case when p_balance > 0 then 'topup' else 'issue' end, abs(p_balance),
