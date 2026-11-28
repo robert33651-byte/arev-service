@@ -20,7 +20,7 @@ module.exports = ({ config }) => {
       permissions: ['POST_NOTIFICATIONS', 'RECORD_AUDIO', 'USE_BIOMETRIC'],
       versionCode: 1,
     });
-    delete android.googleServicesFile; // push заработают после добавления пакета в Firebase (см. инструкцию)
+    // пакеты am.arevservice.admin и .admin.test добавлены в Firebase (google-services.json), push включены
     const out = Object.assign({}, config, {
       name: t ? 'Arev Admin ТЕСТ' : 'Arev Admin', android,
       plugins: (config.plugins || []).filter((p) => !['expo-location', 'expo-camera'].includes(Array.isArray(p) ? p[0] : p)),
