@@ -770,10 +770,11 @@ function vCash(){const from=perFrom(S.per);const flt=S.cashSt||'';const empN=S.e
  const live=inPer.filter(x=>!x.voided_at&&x.at>=from&&x.note!=='Начальный остаток');const out=live.filter(x=>x.kind==='issue').reduce((a,x)=>a+x.amount,0),inn=live.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0);
  const pend=cashPend(),late=cashLate(),bal=cashBal();
  const wrq=(S.reqs||[]).filter(r=>(r.status==='forwarded'||r.status==='waiting')&&(!S.empF||r.requester_id===S.empF)),wbf=bfWait().filter(x=>x.kind!=='topup'&&(!S.empF||(empN&&x.who===empN)));const wcnt=wrq.length+wbf.length,wsum=wrq.reduce((a,r)=>a+(+r.amount_asked||0),0)+wbf.reduce((a,x)=>a+(+x.amount||0),0);
+ const asked=(S.reqs||[]).filter(r=>r.at>=from&&r.status!=='cancelled'&&(!S.empF||r.requester_id===S.empF)).reduce((a,r)=>a+(+r.amount_asked||0),0);
  let s=atop('Касса','<div class="row wrapx"><button class="btn primary sm" data-act="cashtop">Пополнить кассу</button></div>');
  if(S.cashMissing)s+='<div class="flag warn">'+I.alert+'<span>Выполните в Supabase файл ALL.sql: без него касса не работает.</span></div>';
  if(!cashiers.length)s+='<div class="flag warn">'+I.alert+'<span>Кассир не назначен. Откройте сотрудника → «Настройки контроля» → «Кассир».</span></div>';
- s+='<div class="kgrid">'+kpi(money(bal),'остаток кассы',bal<0)+kpi(money(wsum),'запросы ждут подтверждения'+(wcnt?' · '+wcnt:''),wcnt>0)+kpi(money(out),'выдано за период')+kpi(money(inn),'пополнено за период')+'</div>';
+ s+='<div class="kgrid">'+kpi(money(bal),'остаток кассы',bal<0)+kpi(money(wsum),'запросы ждут подтверждения'+(wcnt?' · '+wcnt:''),wcnt>0)+kpi(money(out),'выдано за период')+kpi(money(inn),'пополнено за период')+kpi(money(asked),'запрошено работниками за период')+'</div>';
  if(cashiers.length)s+='<p class="small muted" style="margin:0">Кассир: '+cashiers.map(m=>hu(m.name)).join(', ')+'</p>';
  s+='<div class="row wrapx">'+empSel()+perSeg()+'</div><div class="filters">'+[['','Все'],['pending','Ждут подтверждения'],['disputed','Оспоренные'],['void','Отменённые']].map(x=>'<button class="'+(flt===x[0]?'on':'')+'" data-act="cashst" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>';
  s+='<section class="card"><div class="tblw flat"><table class="tbl"><thead><tr><th>Когда</th><th class="l">Кому</th><th>Сумма</th><th class="l">Цель</th><th class="l">Кто внёс</th><th class="l">Статус</th><th></th></tr></thead><tbody>'+
