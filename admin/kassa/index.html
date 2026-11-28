@@ -26,6 +26,7 @@ button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--lin
 button.p{background:var(--pine);color:var(--pine-ink);border-color:var(--pine);font-weight:600}
 h2.hh{display:flex;align-items:center;gap:10px}.hic{width:54px;height:54px;border-radius:16px;display:inline-grid;place-items:center;flex:none}.hic img{width:40px;height:40px;display:block}.hic.o{background:#fde3e0}.hic.i{background:#dff3e2}
 button img.bi{width:26px;height:26px;filter:invert(1);vertical-align:-7px;margin-right:7px}
+header .tabs{display:inline-flex;gap:4px;margin-left:14px;background:rgba(127,127,127,.15);padding:4px;border-radius:12px}header .tabs button{border:0;background:transparent;padding:7px 16px;border-radius:9px;font-weight:600}header .tabs button.on{background:var(--pine);color:var(--pine-ink)}header .tabs .tn{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:#b3261e;color:#fff;font-size:12px;line-height:18px;text-align:center}
 button.out{background:#b3261e;color:#fff;border-color:#b3261e;font-weight:700}button.in{background:#2e7d32;color:#fff;border-color:#2e7d32;font-weight:700}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
 button.bad{background:var(--bad);border-color:var(--bad);color:#fff}
@@ -118,7 +119,7 @@ async function load(){
   S.loaded=true;render();
 }
 
-function header(){return '<header><b>'+(S.me&&S.me.is_cashier?'Arev Касса':'Arev')+'</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
+function header(){return '<header><b>'+(S.me&&S.me.is_cashier?'Arev Касса':'Arev')+'</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+(function(){if(!S.me||!S.me.is_cashier||S.me.kind!=='office'||S.me.status!=='approved'||!S.me.web_access)return '';var t=S.tab||'cash',n=(S.tasks||[]).filter(function(x){return x.status==='new'}).length;return '<span class="tabs"><button class="'+(t==='cash'?'on':'')+'" data-a="tab" data-v="cash">Касса</button><button class="'+(t==='tasks'?'on':'')+'" data-a="tab" data-v="tasks"><span>Задачи</span>'+(n?' <b class="tn">'+n+'</b>':'')+'</button></span>'})()+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
 
 function loginView(){
   var reg=!!S.reg;
@@ -346,8 +347,10 @@ function mainView(){
   if(!S.me.web_access)return header()+'<main><div class="flag">Вход с компьютера не разрешён. Попросите администратора включить «Вход с компьютера» в вашей карточке сотрудника.</div></main>';
   var s=header()+'<main>';
   if(S.err)s+='<div class="flag">Касса не готова: администратору нужно выполнить обновление базы (файл ALL.sql).</div>';
+  var split=S.me.is_cashier&&S.me.kind==='office',tab=S.tab||'cash';
   s+=shiftBlock();
-  s+=tasksBlock();
+  if(split&&tab==='tasks')return s+tasksBlock()+'</main>';
+  if(!split)s+=tasksBlock();
   s+=recvBlock();
   s+=reqWorker();
   if(S.me.is_cashier&&!(S.pin&&S.pin.unlocked))s+=lockView();
@@ -440,6 +443,7 @@ var A={
     var e=errOf(r);if(e)return toast(e);
     S.form.tsay='';S.tfile=null;toast('Отправлено');await loadLog(d.id)})},
   taskdoneopen:function(d){S.doneId=d.id;S.form.tdn='';render()},
+  tab:function(d){S.tab=d.v;render();window.scrollTo(0,0)},
   taskdoneno:function(){S.doneId=null;render()},
   taskmoveopen:function(d){S.moveId=S.moveId===d.id?null:d.id;S.form.tmd='';S.form.tmr='';render()},
   taskmoveno:function(){S.moveId=null;render()},
