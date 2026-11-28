@@ -27,6 +27,9 @@ button.p{background:var(--pine);color:var(--pine-ink);border-color:var(--pine);f
 h2.hh{display:flex;align-items:center;gap:10px}.hic{width:54px;height:54px;border-radius:16px;display:inline-grid;place-items:center;flex:none}.hic img{width:40px;height:40px;display:block}.hic.o{background:#fde3e0}.hic.i{background:#dff3e2}
 button img.bi{width:26px;height:26px;filter:invert(1);vertical-align:-7px;margin-right:7px}
 header .tabs{display:inline-flex;gap:4px;margin-left:14px;background:rgba(255,255,255,.14);padding:4px;border-radius:12px}header .tabs button{border:0;background:transparent;color:var(--pine-ink);padding:7px 16px;border-radius:9px;font-weight:600}header .tabs button.on{background:var(--pine-ink);color:var(--pine)}header .tabs .tn{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:#b3261e;color:#fff;font-size:12px;line-height:18px;text-align:center}
+body.mode-tasks header{background:#27408b}body.mode-tasks header .tabs button.on{color:#27408b}body.mode-tasks{background:#eef1fa}body.mode-tasks .card{border-top:4px solid #27408b}body.mode-cash .card{border-top:4px solid var(--pine)}
+.modebar{font-weight:800;font-size:13px;letter-spacing:.08em;text-transform:uppercase;padding:8px 14px;border-radius:10px;color:#fff;background:var(--pine);align-self:flex-start}body.mode-tasks .modebar{background:#27408b}
+@media (prefers-color-scheme:dark){body.mode-tasks{background:#12172a}}
 button.out{background:#b3261e;color:#fff;border-color:#b3261e;font-weight:700}button.in{background:#2e7d32;color:#fff;border-color:#2e7d32;font-weight:700}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
 button.bad{background:var(--bad);border-color:var(--bad);color:#fff}
@@ -119,7 +122,7 @@ async function load(){
   S.loaded=true;render();
 }
 
-function header(){return '<header><b>'+(S.me&&S.me.is_cashier?'Arev Касса':'Arev')+'</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+(function(){if(!S.me||!S.me.is_cashier||S.me.kind!=='office'||S.me.status!=='approved'||!S.me.web_access)return '';var t=S.tab||'cash',n=(S.tasks||[]).filter(function(x){return x.status==='new'}).length;return '<span class="tabs"><button class="'+(t==='cash'?'on':'')+'" data-a="tab" data-v="cash">Касса</button><button class="'+(t==='tasks'?'on':'')+'" data-a="tab" data-v="tasks"><span>Задачи</span>'+(n?' <b class="tn">'+n+'</b>':'')+'</button></span>'})()+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
+function header(){var tk=!!(S.me&&S.me.is_cashier&&S.me.kind==='office'&&S.tab==='tasks');document.body.classList.toggle('mode-tasks',tk);document.body.classList.toggle('mode-cash',!!(S.me&&S.me.is_cashier&&S.me.kind==='office'&&!tk));return '<header><b>'+(S.me&&S.me.is_cashier?'Arev Касса':'Arev')+'</b>'+(S.me?'<span>'+hu(S.me.name)+'</span>':'')+(function(){if(!S.me||!S.me.is_cashier||S.me.kind!=='office'||S.me.status!=='approved'||!S.me.web_access)return '';var t=S.tab||'cash',n=(S.tasks||[]).filter(function(x){return x.status==='new'}).length;return '<span class="tabs"><button class="'+(t==='cash'?'on':'')+'" data-a="tab" data-v="cash">Касса</button><button class="'+(t==='tasks'?'on':'')+'" data-a="tab" data-v="tasks"><span>Задачи</span>'+(n?' <b class="tn">'+n+'</b>':'')+'</button></span>'})()+'<span class="sp"></span><button data-a="lang" data-v="'+(window.ARLANG==='hy'?'ru':'hy')+'">'+(window.ARLANG==='hy'?'Русский':'Հայերեն')+'</button>'+(S.sess?'<button data-a="reload">Обновить</button><button data-a="logout">Выйти</button>':'')+'</header>'}
 
 function loginView(){
   var reg=!!S.reg;
@@ -349,6 +352,7 @@ function mainView(){
   if(S.err)s+='<div class="flag">Касса не готова: администратору нужно выполнить обновление базы (файл ALL.sql).</div>';
   var split=S.me.is_cashier&&S.me.kind==='office',tab=S.tab||'cash';
   s+=shiftBlock();
+  if(split)s+='<div class="modebar">'+(tab==='tasks'?'Задачи':'Касса')+'</div>';
   if(split&&tab==='tasks')return s+tasksBlock()+'</main>';
   if(!split)s+=tasksBlock();
   s+=recvBlock();
