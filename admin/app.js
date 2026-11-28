@@ -770,7 +770,7 @@ function vCash(){const from=perFrom(S.per);const flt=S.cashSt||'';const empN=S.e
  const live=inPer.filter(x=>!x.voided_at&&x.at>=from&&x.note!=='Начальный остаток');const out=live.filter(x=>x.kind==='issue').reduce((a,x)=>a+x.amount,0),inn=live.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0);
  const pend=cashPend(),late=cashLate(),bal=cashBal();
  const wrq=(S.reqs||[]).filter(r=>(r.status==='forwarded'||r.status==='waiting')&&(!S.empF||r.requester_id===S.empF)),wbf=bfWait().filter(x=>x.kind!=='topup'&&(!S.empF||(empN&&x.who===empN)));const wcnt=wrq.length+wbf.length,wsum=wrq.reduce((a,r)=>a+(+r.amount_asked||0),0)+wbf.reduce((a,x)=>a+(+x.amount||0),0);
- const asked=(S.reqs||[]).filter(r=>r.at>=from&&r.status!=='cancelled'&&(!S.empF||r.requester_id===S.empF)).reduce((a,r)=>a+(+r.amount_asked||0),0);
+ const asked=(S.reqs||[]).filter(r=>r.at>=from&&r.status!=='cancelled'&&r.origin!=='cashier'&&!cashiers.some(m=>m.id===r.requester_id)&&(!S.empF||r.requester_id===S.empF)).reduce((a,r)=>a+(+r.amount_asked||0),0);
  let s=atop('Касса','<div class="row wrapx"><button class="btn primary sm" data-act="cashtop">Пополнить кассу</button></div>');
  if(S.cashMissing)s+='<div class="flag warn">'+I.alert+'<span>Выполните в Supabase файл ALL.sql: без него касса не работает.</span></div>';
  if(!cashiers.length)s+='<div class="flag warn">'+I.alert+'<span>Кассир не назначен. Откройте сотрудника → «Настройки контроля» → «Кассир».</span></div>';
