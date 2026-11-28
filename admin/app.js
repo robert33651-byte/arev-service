@@ -323,7 +323,7 @@ const officeWarn=()=>office()?'':'<div class="flag warn">'+I.alert+'<span>Не �
 
 const ANAV=[['a-dash','Сводка','chart'],['a-live','Где все сейчас','map'],['a-report','Отчёт','chart'],['a-day','Маршрут дня','route'],['a-tasks','Задачи','check'],['a-photos','Фото работ','camera'],['a-talks','Разговоры','mic'],['a-buys','Закупки','box'],['a-cash','Касса','cash'],['a-req','Запросы денег','cash'],['a-places','Объекты','pin'],['a-fuel','Топливо','fuel'],['a-shifts','Рабочие дни','clock'],['a-staff','Сотрудники','team'],['a-log','Журнал','book'],['a-settings','Настройки','cog']];
 function shell(body){const n=S.view.name;const cur={'a-issues':'a-dash','a-emp':'a-staff','a-place':'a-places','a-order':'a-orders','a-new':'a-orders'}[n]||n;
- const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-req':(S.reqs||[]).filter(r=>r.status==='forwarded'||r.status==='waiting').length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&t.disc_status==='open'&&(t.status==='new'||t.status==='report')).length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
+ const cnt={'a-staff':S.staff.filter(m=>m.status==='pending').length,'a-req':(S.reqs||[]).filter(r=>r.status==='forwarded'||r.status==='waiting').length+bfWait().length,'a-orders':S.tickets.filter(t=>t.status==='new').length,'a-dash':todayIssues(),'a-tasks':S.tasks.filter(t=>!t.archived_at&&t.disc_status==='open'&&(t.status==='new'||t.status==='report')).length,'a-buys':S.buys.filter(b=>['bought','partial','delivered'].includes(b.status)&&buyFlags(b).some(f=>f.lv==='bad')||b.status==='delivered').length};
  const MN=[['a-dash','Сводка','chart'],['a-req','Запросы','cash'],['a-tasks','Задачи','check','Առաջադր․'],['a-cash','Касса','cash']];const inMN=MN.some(x=>x[0]===cur);
  const title=(ANAV.find(x=>x[0]===cur)||['','Arev Admin'])[1];
  const top='<header class="mtop"><span class="sunmark" aria-hidden="true"></span><b class="grow">'+h(title)+'</b>'+(installable()?'<button class="mtbtn" data-act="install">Установить</button>':'')+'<button class="mtbtn ic" data-act="reload" aria-label="Обновить данные">'+I.refresh+'</button><button class="mtbtn ic" data-act="nav" data-v="a-settings" aria-label="Настройки">'+I.cog+'</button></header>';
@@ -1022,9 +1022,9 @@ function vReq(){const f=S.rqF||'wait';const all=S.reqs||[];
  const lst=f==='wait'?wait:f==='new'?nw:f==='pay'?pay:all;
  let s=atop('Запросы денег','<button class="btn primary sm" data-act="rqnew">Назначить выдачу сотруднику</button>');
  if(S.reqMissing)s+='<div class="flag warn">'+I.alert+'<span>Выполните в Supabase файл migration_requests.sql: без него запросы денег не работают.</span></div>';
- s+='<div class="kgrid">'+kpi(wait.length,'ждут вашего решения',wait.some(r=>r.status==='forwarded'))+kpi(nw.length,'у кассира, ещё не переданы')+kpi(pay.length,'одобрено, касса выдаёт')+'</div>';
+ s+='<div class="kgrid">'+kpi(wait.length+bfWait().length,'ждут вашего решения',wait.some(r=>r.status==='forwarded')||bfWait().length>0)+kpi(nw.length,'у кассира, ещё не переданы')+kpi(pay.length,'одобрено, касса выдаёт')+'</div>';
  s+='<div class="filters">'+[['wait','Ждут решения'],['new','У кассира'],['pay','К выдаче'],['all','Все']].map(x=>'<button class="'+(f===x[0]?'on':'')+'" data-act="rqf" data-v="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>';
- s+=lst.length?lst.slice(0,200).map(rqRow).join(''):'<div class="empty">Запросов нет.</div>';
+ const bfh=(f==='wait'||f==='all')?bfBlock():'';s+=bfh;s+=lst.length?lst.slice(0,200).map(rqRow).join(''):(bfh?'':'<div class="empty">Запросов нет.</div>');
  s+='<p class="small muted">Запрос идёт кассиру; вы видите его сразу, но уведомление приходит, когда кассир передаст его вам. Решение: одобрить (можно изменить сумму), отклонить или попросить подождать. Выдаёт деньги кассир наличными.</p>';
  return s}
 const VPB='<button type="button" class="vpb" data-vp aria-label="Слушать"><img class="vpi" src="icons/play.png" alt="" width="30" height="30"><span>Слушать</span></button>';
