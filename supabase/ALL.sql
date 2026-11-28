@@ -2907,6 +2907,8 @@ begin
   values ((p_date::text || ' 12:00')::timestamp at time zone 'Asia/Yerevan', p_kind, p_amount,
           nullif(left(trim(coalesce(p_who, '')), 100), ''), s.id, s.name, left(trim(p_purpose), 200), 'Внесено задним числом', 'confirmed', now(), true)
   returning * into x;
+  perform public._notify(null, true, case when p_kind = 'topup' then 'Приход задним числом: ' else 'Расход задним числом: ' end || p_amount || ' ֏ за ' || to_char(p_date, 'DD.MM'),
+                         s.name || ': ' || left(trim(p_purpose), 200) || coalesce(' · ' || x.staff_name, ''), null);
   return to_jsonb(x);
 end $$;
 revoke all on function public.cash_backfill from public, anon;
