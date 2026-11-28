@@ -2884,14 +2884,37 @@ alter table public.cash_ledger add column if not exists backfilled boolean not n
 
 do $$ declare r record; begin
   for r in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.proname in ('cash_backfill','cash_start') loop
+           where n.nspname = 'public' and p.proname in ('cash_backfill','cash_start','backfill_decide') loop
     execute 'drop function ' || r.sig || ' cascade';
   end loop;
 end $$;
 
+-- запись задним числом сначала ждёт подтверждения директора и только потом попадает в кассу
+create table if not exists public.cash_backfill_req(
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  op_date date not null,
+  kind text not null check (kind in ('topup','issue')),
+  amount int not null check (amount > 0 and amount <= 100000000),
+  who text,
+  purpose text not null,
+  cashier_id uuid references public.staff(id) on delete set null,
+  by_name text,
+  status text not null default 'wait' check (status in ('wait','ok','no')),
+  decided_at timestamptz,
+  decided_by text,
+  ledger_id uuid
+);
+alter table public.cash_backfill_req enable row level security;
+do $$ begin
+  drop policy if exists cbf_read on public.cash_backfill_req;
+  create policy cbf_read on public.cash_backfill_req for select to authenticated
+    using (public.is_admin() or exists(select 1 from public.staff c where c.id = auth.uid() and c.is_cashier and c.status = 'approved'));
+end $$;
+
 create function public.cash_backfill(p_kind text, p_amount int, p_date date, p_purpose text, p_who text default null, p_device text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.staff; e text; c public.config; x public.cash_ledger;
+declare s public.staff; e text; c public.config; x public.cash_backfill_req;
         today date := (now() at time zone 'Asia/Yerevan')::date;
 begin
   s := public._staff();
@@ -2903,16 +2926,40 @@ begin
   if p_kind not in ('topup','issue') then return jsonb_build_object('error', 'BAD_KIND'); end if;
   if p_amount is null or p_amount <= 0 or p_amount > 100000000 then return jsonb_build_object('error', 'BAD_AMOUNT'); end if;
   if coalesce(trim(p_purpose), '') = '' then return jsonb_build_object('error', 'NEED_PURPOSE'); end if;
-  insert into public.cash_ledger(at, kind, amount, staff_name, cashier_id, by_name, purpose, note, status, confirmed_at, backfilled)
-  values ((p_date::text || ' 12:00')::timestamp at time zone 'Asia/Yerevan', p_kind, p_amount,
-          nullif(left(trim(coalesce(p_who, '')), 100), ''), s.id, s.name, left(trim(p_purpose), 200), 'Внесено задним числом', 'confirmed', now(), true)
+  insert into public.cash_backfill_req(op_date, kind, amount, who, purpose, cashier_id, by_name)
+  values (p_date, p_kind, p_amount, nullif(left(trim(coalesce(p_who, '')), 100), ''), left(trim(p_purpose), 200), s.id, s.name)
   returning * into x;
-  perform public._notify(null, true, case when p_kind = 'topup' then 'Приход задним числом: ' else 'Расход задним числом: ' end || p_amount || ' ֏ за ' || to_char(p_date, 'DD.MM'),
-                         s.name || ': ' || left(trim(p_purpose), 200) || coalesce(' · ' || x.staff_name, ''), null);
+  perform public._notify(null, true, case when p_kind = 'topup' then 'Подтвердите приход за ' else 'Подтвердите расход за ' end || to_char(p_date, 'DD.MM') || ': ' || p_amount || ' ֏',
+                         s.name || ': ' || left(trim(p_purpose), 200) || coalesce(' · ' || x.who, ''), null);
   return to_jsonb(x);
 end $$;
 revoke all on function public.cash_backfill from public, anon;
 grant execute on function public.cash_backfill to authenticated;
+
+create function public.backfill_decide(p_id uuid, p_ok boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare x public.cash_backfill_req; l public.cash_ledger; who text;
+begin
+  if not public.is_admin() then return jsonb_build_object('error', 'FORBIDDEN'); end if;
+  who := public._actor_name(auth.uid());
+  select * into x from public.cash_backfill_req where id = p_id and status = 'wait' for update;
+  if x.id is null then return jsonb_build_object('error', 'NOT_FOUND'); end if;
+  if p_ok then
+    insert into public.cash_ledger(at, kind, amount, staff_name, cashier_id, by_name, purpose, note, status, confirmed_at, backfilled)
+    values ((x.op_date::text || ' 12:00')::timestamp at time zone 'Asia/Yerevan', x.kind, x.amount, x.who, x.cashier_id, x.by_name, x.purpose,
+            'Внесено задним числом', 'confirmed', now(), true)
+    returning * into l;
+  end if;
+  update public.cash_backfill_req set status = case when p_ok then 'ok' else 'no' end, decided_at = now(), decided_by = who, ledger_id = l.id
+   where id = x.id returning * into x;
+  if x.cashier_id is not null then
+    perform public._notify(x.cashier_id, false, case when p_ok then 'Директор подтвердил запись за ' else 'Директор отклонил запись за ' end || to_char(x.op_date, 'DD.MM'),
+                           x.amount || ' ֏ · ' || x.purpose, null);
+  end if;
+  return to_jsonb(x);
+end $$;
+revoke all on function public.backfill_decide from public, anon;
+grant execute on function public.backfill_decide to authenticated;
 
 -- Начать кассу заново с даты и остатка. Старые записи не удаляются, а аннулируются (их видно в журнале).
 -- Запускается только вручную из SQL-редактора: select public.cash_start('2026-11-24', -120670);

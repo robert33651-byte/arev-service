@@ -99,8 +99,10 @@ async function load(){
     sb.from('shifts').select('id,start_at,end_at').eq('staff_id',u).order('start_at',{ascending:false}).limit(5),
     sb.from('tasks').select('id,day,due,tpl_id,due_moved_from,title,note,status,by_self,done_at,done_note,seen_at').or('staff_id.eq.'+u+',staff2_id.eq.'+u).or('status.eq.new,day.gte.'+new Date(Date.now()-7*864e5).toISOString().slice(0,10)).order('day',{ascending:true}).order('created_at',{ascending:true}).limit(200),
     sb.from('cash_requests').select('*').order('created_at',{ascending:false}).limit(500),
-    sb.from('cash_expected').select('*').eq('status','open').order('created_at',{ascending:true}).limit(300)
+    sb.from('cash_expected').select('*').eq('status','open').order('created_at',{ascending:true}).limit(300),
+    sb.from('cash_backfill_req').select('*').order('created_at',{ascending:false}).limit(60)
   ]);
+  S.bf=q[7]&&!q[7].error?(q[7].data||[]):[];
   S.exp=q[6]&&!q[6].error?(q[6].data||[]):null;
   S.tasks=q[4].error?null:(q[4].data||[]);
   S.reqs=q[5].error?null:(q[5].data||[]);
@@ -213,13 +215,14 @@ function periodBar(){
 
 function backBlock(){
   var c=S.cfg||{};if(!c.cash_backfill_from)return '';var f=S.form,today=new Date().toISOString().slice(0,10),k=f.bk||'issue';
-  return '<section class="card" style="border:2px dashed var(--warn,#b86d06)"><h2>Внести прошлую операцию</h2><p class="muted small" style="margin:0 0 10px"><span>Касса ведётся с</span> <b>'+h(String(c.cash_backfill_from).split('-').reverse().join('.'))+'</b>. <span>Здесь вносятся приход и расход, которые уже были с этого дня. Директор видит каждую запись.</span></p>'+
+  return '<section class="card" style="border:2px dashed var(--warn,#b86d06)"><h2>Внести прошлую операцию</h2><p class="muted small" style="margin:0 0 10px"><span>Касса ведётся с</span> <b>'+h(String(c.cash_backfill_from).split('-').reverse().join('.'))+'</b>. <span>Здесь вносятся приход и расход, которые уже были с этого дня. Каждую запись подтверждает директор, после этого она попадает в кассу.</span></p>'+
    '<div class="row" style="align-items:flex-end"><div class="field"><label for="b-d">Дата</label><input id="b-d" type="date" data-f="bd" min="'+h(c.cash_backfill_from)+'" max="'+today+'" value="'+h(f.bd||c.cash_backfill_from)+'" style="width:auto"></div>'+
    '<div class="field"><label for="b-k">Что было</label><select id="b-k" data-f="bk"><option value="issue"'+(k==='issue'?' selected':'')+'>Расход (выдача)</option><option value="topup"'+(k==='topup'?' selected':'')+'>Приход</option></select></div>'+
    '<div class="field"><label for="b-a">Сумма, ֏</label><input id="b-a" data-f="ba" inputmode="numeric" value="'+h(f.ba||'')+'"></div>'+
    '<div class="field"><label for="b-w">Кому / от кого</label><input id="b-w" data-f="bw" maxlength="100" value="'+h(f.bw||'')+'"></div>'+
    '<div class="field" style="flex:2;min-width:200px"><label for="b-p">На что / откуда</label><input id="b-p" data-f="bp" maxlength="200" value="'+h(f.bp||'')+'"></div>'+
-   '<button class="p" data-a="backadd"'+(S.busy?' disabled':'')+'>Внести</button></div></section>'}
+   '<button class="p" data-a="backadd"'+(S.busy?' disabled':'')+'>Отправить директору</button></div>'+
+   (function(){var L=(S.bf||[]).filter(function(x){return x.status!=='ok'}).slice(0,15);if(!L.length)return '';return '<div style="margin-top:12px;overflow:auto"><table><tbody>'+L.map(function(x){return '<tr><td>'+h(String(x.op_date).split('-').reverse().slice(0,2).join('.'))+'</td><td>'+(x.kind==='topup'?'Приход':'Расход')+'</td><td class="n"><b>'+money(x.amount)+'</b></td><td>'+hu(x.purpose||'')+(x.who?' · '+hu(x.who):'')+'</td><td>'+(x.status==='wait'?'<span class="chip c-warn">Ждёт директора</span>':'<span class="chip c-bad">Отклонено</span>')+'</td></tr>'}).join('')+'</tbody></table></div>'})()+'</section>'}
 function expBlock(){
   if(S.exp==null)return '';var f=S.form;var k=f.xk||'cash';
   var sum=function(t){return S.exp.filter(function(x){return x.kind===t}).reduce(function(m,x){return m+x.amount},0)};
@@ -480,7 +483,7 @@ var A={
   backadd:function(){return run(async function(){var f=S.form,a=parseInt(String(f.ba||'').replace(/\D/g,''),10);
     if(!a)return toast('Введите сумму');if(!String(f.bp||'').trim())return toast('Впишите, на что или откуда');
     var r=await sb.rpc('cash_backfill',{p_kind:f.bk||'issue',p_amount:a,p_date:f.bd||(S.cfg||{}).cash_backfill_from,p_purpose:String(f.bp).trim(),p_who:String(f.bw||'').trim()||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
-    S.form.ba='';S.form.bp='';S.form.bw='';toast('Запись внесена');await load()})},
+    S.form.ba='';S.form.bp='';S.form.bw='';toast('Отправлено директору на подтверждение');await load()})},
   expadd:function(){return run(async function(){var f=S.form,a=parseInt(String(f.xa||'').replace(/\D/g,''),10);
     if(!a)return toast('Введите сумму');if(!String(f.xs||'').trim())return toast('Впишите, откуда деньги');
     var r=await sb.rpc('exp_add',{p_kind:f.xk||'cash',p_amount:a,p_source:String(f.xs).trim(),p_due:f.xd||null,p_device:'web'});var e=errOf(r);if(e)return toast(e);
