@@ -345,8 +345,9 @@ begin
   if not s.web_access then return jsonb_build_object('error', 'WEB_NOT_ALLOWED'); end if;
   if s.status <> 'approved' then return jsonb_build_object('error', 'NOT_APPROVED'); end if;
   if coalesce(trim(p_title), '') = '' then return jsonb_build_object('error', 'NEED_TITLE'); end if;
-  insert into public.tasks(staff_id, day, title, note, by_self)
-  values (s.id, coalesce(p_day, current_date), left(trim(p_title), 200), nullif(left(trim(coalesce(p_note, '')), 500), ''), true)
+  -- срок ставится, только если сотрудник сам выбрал дату; без даты задача «без срока» и просроченной не считается
+  insert into public.tasks(staff_id, day, due, title, note, by_self)
+  values (s.id, coalesce(p_day, current_date), p_day, left(trim(p_title), 200), nullif(left(trim(coalesce(p_note, '')), 500), ''), true)
   returning * into r;
   return to_jsonb(r);
 end $$;
