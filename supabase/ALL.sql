@@ -2823,19 +2823,19 @@ end $$;
 -- создаёт задачи по шаблонам на этот и следующий месяц, когда до срока осталось не больше lead_days
 create function public.tpl_generate() returns int
 language plpgsql security definer set search_path = public as $$
-declare t record; d int; m date; due date; n int := 0; tid uuid;
+declare t record; d int; m date; dd date; n int := 0; tid uuid;
         today date := (now() at time zone 'Asia/Yerevan')::date;
 begin
   for t in select tp.* from public.task_templates tp join public.staff s on s.id = tp.staff_id
             where tp.active and s.status = 'approved' loop
     foreach d in array t.days loop
       for m in select generate_series(date_trunc('month', today)::date, (date_trunc('month', today) + interval '1 month')::date, interval '1 month')::date loop
-        due := least(m + (greatest(least(d, 31), 1) - 1), (m + interval '1 month' - interval '1 day')::date);
-        if due >= today and due - today <= t.lead_days
-           and not exists(select 1 from public.tasks x where x.tpl_id = t.id and coalesce(x.due_moved_from, x.due) = due) then
+        dd := least(m + (greatest(least(d, 31), 1) - 1), (m + interval '1 month' - interval '1 day')::date);
+        if dd >= today and dd - today <= t.lead_days
+           and not exists(select 1 from public.tasks x where x.tpl_id = t.id and coalesce(x.due_moved_from, x.due) = dd) then
           insert into public.tasks(staff_id, day, due, title, note, tpl_id)
-          values (t.staff_id, due, due, t.title, t.note, t.id) returning id into tid;
-          perform public._notify(t.staff_id, false, 'Регулярная задача до ' || to_char(due, 'DD.MM'), t.title, tid);
+          values (t.staff_id, dd, dd, t.title, t.note, t.id) returning id into tid;
+          perform public._notify(t.staff_id, false, 'Регулярная задача до ' || to_char(dd, 'DD.MM'), t.title, tid);
           n := n + 1;
         end if;
       end loop;
