@@ -128,7 +128,7 @@ async function load(){
  const ids=S.tickets.map(t=>t.id);S.tphotos={};
  if(ids.length){for(let i=0;i<ids.length;i+=150){const r=await sb.from('ticket_photos').select('*').in('ticket_id',ids.slice(i,i+150));(r.data||[]).forEach(p=>{(S.tphotos[p.ticket_id]=S.tphotos[p.ticket_id]||[]).push({...p,at:ms(p.at)})})}}
  S.cash=(q[18].data||[]).map(x=>({...x,at:ms(x.at),cAt:ms(x.confirmed_at),vAt:ms(x.voided_at)}));S.cashMissing=!!q[18].error;S.reqMissing=!!(q[19]&&q[19].error);S.reqs=S.reqMissing?[]:((q[19]&&q[19].data)||[]).map(x=>({...x,at:ms(x.created_at)}));
- S.loaded=true;render(true);rqLoadMsgs();loadExp();
+ S.loaded=true;render(true);rqLoadMsgs();loadExp();loadTpl();
  // раз в день — очистка старых данных по срокам из настроек
  if(LS.get('clean','')!==ymd(Date.now())){LS.set('clean',ymd(Date.now()));ACT.cleanup()}}
 
@@ -352,7 +352,7 @@ function dashCard(m,st,t0){const sh=st.sh;const gk=sh?shiftGps(sh):null;const ls
   (st.flags.length?'<span class="mflags">'+st.flags.slice(0,3).map(f=>'<span class="'+f.lv+'">'+ft(f)+'</span>').join('')+(st.flags.length>3?'<span class="muted">и ещё '+(st.flags.length-3)+'</span>':'')+'</span>':'')+'</button>'}
 function bossTop(){const all=S.reqs||[];const wait=all.filter(r=>r.status==='forwarded'),hold=all.filter(r=>r.status==='waiting'),pay=all.filter(r=>r.status==='approved'),nw=all.filter(r=>r.status==='new');
  const bal=cashBal(),pend=cashPend(),t0=dayStart(Date.now());const td=cashLive().filter(x=>x.at>=t0);const tin=td.filter(x=>x.kind==='topup').reduce((a,x)=>a+x.amount,0),tout=td.filter(x=>x.kind!=='topup').reduce((a,x)=>a+x.amount,0);
- const tOpen=(S.tasks||[]).filter(t=>t.status==='open').length,tRep=(S.tasks||[]).filter(t=>t.status==='report').length;
+ const tOpen=(S.tasks||[]).filter(t=>t.status==='new'&&!t.archived_at&&!tplQuiet(t)).length,tRep=(S.tasks||[]).filter(t=>t.status==='report').length;
  let s='<button class="chero'+(bal<0?' neg':'')+'" data-act="nav" data-v="a-cash"><span class="hl">Касса сейчас</span><b class="num">'+money(bal)+'</b><div class="hrow"><div><i>сегодня пришло</i><em>+'+money(tin)+'</em></div><div><i>сегодня выдано</i><em>−'+money(tout)+'</em></div>'+(pend.length?'<div><i>не подтверждено</i><em>'+pend.length+' · '+money(pend.reduce((a,x)=>a+x.amount,0))+'</em></div>':'')+(S.exp&&(S.exp.c||S.exp.b)?'<div><i>ожидается наличными</i><em>'+money(S.exp.c)+'</em></div><div><i>ожидается на банк</i><em>'+money(S.exp.b)+'</em></div>':'')+'</div></button>';
  s+='<div class="qa"><button class="qbtn" data-act="hometask">'+I.check+'<span>Дать задачу</span></button><button class="qbtn" data-act="rqnew">'+I.cash+'<span>Выдать деньги</span></button></div>';
  if(wait.length)s+='<section class="card hreq"><div class="row between"><h2 style="margin:0">Ждут вашего решения</h2><span class="chip c-bad">'+wait.length+'</span></div>'+wait.slice(0,3).map(r=>'<button class="hreqrow" data-act="nav" data-v="a-req"><div><b>'+hu(r.requester_name||'—')+'</b><div class="small">'+hu(r.purpose||'')+'</div>'+rqMsgs(r,true)+'</div><div class="hamt">'+rqAmt(r)+'</div></button>').join('')+(wait.length>3?'<button class="btn ghost block" data-act="nav" data-v="a-req">Все запросы</button>':'')+'</section>';
@@ -836,12 +836,28 @@ function taskForm(tk,date,dayMode){
   '<div class="field"><label for="t-pl">Место (для выезда с проверкой GPS)</label><select id="t-pl" class="inp" data-tk="place"><option value="">— без места —</option>'+S.places.map(p=>'<option value="'+h(p.id)+'"'+(tk.place===p.id?' selected':'')+'>'+h(p.name)+'</option>').join('')+'</select></div></div>'+
   '<button class="btn primary" style="align-self:flex-start" data-act="tadd">Добавить задачу</button></section>'}
 
+// регулярная задача «тихая»: в работе, без вопросов и не просрочена — директору её не показываем
+function tplQuiet(t){return !!t.tpl_id&&t.status==='new'&&t.disc_status!=='open'&&!(t.due&&String(t.due).slice(0,10)<ymd(Date.now()))}
+async function loadTpl(){try{if(!S.tplGen){S.tplGen=1;await sb.rpc('tpl_generate')}const r=await sb.from('task_templates').select('*').order('created_at');if(r.error)return;S.tpls=r.data||[];if(S.view.name==='a-tasks'&&S.tmode==='tpl'&&!document.getElementById('scrim')){const ae=document.activeElement;if(!(ae&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName)))render(true)}}catch(e){}}
+function vTpl(){const f=S.form;const L=S.tpls||[];const nm=id=>{const m=S.staff.find(x=>x.id===id);return m?m.name:'—'};
+ let s=atop('Задачи','')+'<div class="filters"><button data-act="tmode" data-v="open">← Все задачи</button><button class="on">Регулярные</button></div>';
+ s+='<section class="card"><h2>Новая регулярная задача</h2><p class="small muted" style="margin:0">Задача сама появляется у сотрудника каждый месяц перед сроком. В общем списке вы увидите её, только если по ней задан вопрос, она выполнена или просрочена.</p>'+
+  '<div class="field"><label>Кому</label><select class="inp" data-f="tps"><option value="">— выберите —</option>'+approved().map(m=>'<option value="'+h(m.id)+'"'+(f.tps===m.id?' selected':'')+' data-noi18n>'+h(m.name)+'</option>').join('')+'</select></div>'+
+  '<div class="field"><label>Что нужно делать</label><input class="inp" data-f="tpt" maxlength="200" value="'+h(f.tpt||'')+'"></div>'+
+  '<div class="row wrapx"><div class="field" style="flex:1;min-width:150px"><label>Числа месяца (через запятую)</label><input class="inp" data-f="tpd" inputmode="numeric" placeholder="1, 10, 20" value="'+h(f.tpd||'')+'"></div><div class="field" style="flex:1;min-width:150px"><label>Показать за сколько дней</label><input class="inp" data-f="tpl" inputmode="numeric" placeholder="3" value="'+h(f.tpl||'')+'"></div></div>'+
+  '<button class="btn primary block" data-act="tpladd">Добавить</button></section>';
+ const by={};L.forEach(t=>{(by[t.staff_id]=by[t.staff_id]||[]).push(t)});
+ s+=Object.keys(by).map(id=>'<section class="card"><h2 data-noi18n>'+h(nm(id))+'</h2>'+by[id].sort((p,q)=>Math.min(...p.days)-Math.min(...q.days)).map(t=>'<div class="tplrow'+(t.active?'':' off')+'"><div><b>'+hu(t.title)+'</b><div class="small muted"><span>каждый месяц:</span> <span data-noi18n>'+h(t.days.slice().sort((x,y)=>x-y).join(', '))+'</span>'+(t.active?'':' · <span>выключена</span>')+'</div></div><div class="row"><button class="btn ghost sm" data-act="tpltoggle" data-id="'+h(t.id)+'">'+(t.active?'Выключить':'Включить')+'</button><button class="btn ghost sm" data-act="tpldel" data-id="'+h(t.id)+'">Удалить</button></div></div>').join('')+'</section>').join('')||'<div class="empty">Регулярных задач пока нет.</div>';
+ const q=(S.tasks||[]).filter(t=>tplQuiet(t)&&!t.archived_at).sort((x,y)=>String(x.due).localeCompare(String(y.due)));
+ if(q.length)s+='<section class="card"><h2>Сейчас в работе</h2><p class="small muted" style="margin:0">Эти задачи скрыты из общего списка, пока по ним нет вопросов.</p>'+q.map(t=>'<div class="tplrow"><div><b>'+hu(t.title)+'</b><div class="small muted"><span data-noi18n>'+h(nm(t.staff_id))+'</span> · <span>срок</span> <span data-noi18n>'+h(String(t.due).slice(0,10).split('-').reverse().slice(0,2).join('.'))+'</span>'+(t.due_moved_from?' · <span>перенесено с</span> <span data-noi18n>'+h(String(t.due_moved_from).split('-').reverse().slice(0,2).join('.'))+'</span>':'')+'</div></div></div>').join('')+'</section>';
+ return s}
 function vTasks(){
  const mode=S.tmode||'open';const today=ymd(Date.now());if(mode!=='day')S.taskDate=today;S.taskDate=S.taskDate||today;
  if(mode==='day')return vTasksDay();
+ if(mode==='tpl')return vTpl();
  if(!S.form.tk)S.form.tk={emp:S.empF||'',place:''};
  if(S.projF===undefined)S.projF=LS.get('projf','')||null;if(S.projF&&S.projF!=='-'&&!PROJ().includes(S.projF))S.projF=null;
- const mine=t=>(!S.empF||t.staff_id===S.empF||t.staff2_id===S.empF)&&projOk(t);
+ const mine=t=>(!S.empF||t.staff_id===S.empF||t.staff2_id===S.empF)&&projOk(t)&&!tplQuiet(t);
  const live=S.tasks.filter(t=>!t.archived_at&&t.status!=='cancelled'&&t.status!=='done'&&mine(t));
  const sorter=(a,b)=>(PRI_W[a.priority]??2)-(PRI_W[b.priority]??2)||String(a.due||'9999').localeCompare(String(b.due||'9999'))||String(a.created_at).localeCompare(String(b.created_at));
  const lists={open:live.filter(t=>t.status==='new').sort(sorter),review:live.filter(t=>t.status==='report').sort(sorter),
@@ -852,7 +868,7 @@ function vTasks(){
  const pFrom=tper==='week'?Date.now()-7*864e5:tper==='month'?d1.getTime():0;
  const tAt=t=>ms(t.created_at)||ymdTs(t.day)||0;
  lists.all=S.tasks.filter(t=>mine(t)&&(tAt(t)>=pFrom||(!t.archived_at&&(t.status==='new'||t.status==='report'))||(ms(t.done_at)||0)>=pFrom)).sort((a,b)=>tAt(b)-tAt(a));
- const tabs=[['open','В работе'],['review','На проверке'],['disc','Обсуждения'],['arch','Архив'],['all','За период'],['day','На день (GPS)']];
+ const tabs=[['open','В работе'],['review','На проверке'],['disc','Обсуждения'],['arch','Архив'],['all','За период'],['tpl','Регулярные'],['day','На день (GPS)']];
  let s=atop('Задачи','<div class="row wrapx">'+empSel()+'<button class="btn primary sm" data-act="tnew">'+I.plus+(S.tnew?'Скрыть форму':'Новая задача')+'</button></div>');
  s+='<div class="filters">'+tabs.map(x=>'<button class="'+(mode===x[0]?'on':'')+'" data-act="tmode" data-v="'+x[0]+'">'+x[1]+(lists[x[0]]&&lists[x[0]].length&&x[0]!=='arch'&&x[0]!=='all'?' · '+lists[x[0]].length:'')+'</button>').join('')+'</div>';
  s+='<div class="filters pjf"><span class="tiny muted" style="align-self:center">Проект:</span>'+[['','Все']].concat(PROJ().map(x=>[x,x])).concat([['-','Без проекта']]).map(x=>'<button class="'+((S.projF||'')===x[0]?'on':'')+'" data-act="projf" data-v="'+h(x[0])+'"'+(x[0]&&x[0]!=='-'?' data-noi18n':'')+'>'+h(x[1])+(x[0]?' · '+S.tasks.filter(t=>!t.archived_at&&(t.status==='new'||t.status==='report')&&(x[0]==='-'?!t.project:t.project===x[0])).length:'')+'</button>').join('')+'</div>';
@@ -1073,6 +1089,12 @@ const ACT={
  tnew(){S.tnew=!S.tnew;render(true)},
  hometask(){S.tnew=true;go('a-tasks')},
  tmode(d){S.tmode=d.v;S.form={};render(true)},
+ async tpladd(){const f=S.form;const days=[...new Set(String(f.tpd||'').split(/[^0-9]+/).map(Number).filter(x=>x>=1&&x<=31))];const title=String(f.tpt||'').trim();
+  if(!f.tps)return toast('Выберите сотрудника');if(!title)return toast('Впишите, что нужно делать');if(!days.length)return toast('Укажите числа месяца, например: 1, 10, 20');
+  const lead=Math.min(15,Math.max(0,parseInt(f.tpl,10)||3));const r=await sb.from('task_templates').insert({staff_id:f.tps,title,days,lead_days:lead});if(r.error)return toast(r.error.message);
+  S.form={tps:f.tps};S.tplGen=0;toast('Регулярная задача добавлена');await loadTpl();render(true)},
+ async tpltoggle(d){const t=(S.tpls||[]).find(x=>x.id===d.id);if(!t)return;const r=await sb.from('task_templates').update({active:!t.active}).eq('id',t.id);if(r.error)return toast(r.error.message);S.tplGen=0;await loadTpl();render(true)},
+ async tpldel(d){const v=await sheet('<h2>Удалить регулярную задачу?</h2><p class="small">Новые задачи по ней появляться не будут. Уже созданные останутся.</p><button class="btn danger block" data-act="sheet" data-v="y">Удалить</button><button class="btn ghost block" data-act="sheet" data-v="">Отмена</button>');if(v!=='y')return;const r=await sb.from('task_templates').delete().eq('id',d.id);if(r.error)return toast(r.error.message);await loadTpl();render(true)},
  tper(d){S.tper=d.v;LS.set('tper',d.v);render(true)},
  tdue(d){S.form.tk=S.form.tk||{};S.form.tk.due=d.v||'';render(true)},
  tpri(d){S.form.tk=S.form.tk||{};S.form.tk.pri=d.v;render(true)},
