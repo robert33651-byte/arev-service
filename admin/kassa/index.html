@@ -226,7 +226,8 @@ function backBlock(){
    '<div class="field"><label for="b-w">Кому / от кого</label><input id="b-w" data-f="bw" maxlength="100" value="'+h(f.bw||'')+'"></div>'+
    '<div class="field" style="flex:2;min-width:200px"><label for="b-p">На что / откуда</label><input id="b-p" data-f="bp" maxlength="200" value="'+h(f.bp||'')+'"></div>'+
    '<button class="p" data-a="backadd"'+(S.busy?' disabled':'')+'>Отправить директору</button></div>'+
-   (function(){var L=(S.bf||[]).filter(function(x){return x.status!=='ok'}).slice(0,15);if(!L.length)return '';return '<div style="margin-top:12px;overflow:auto"><table><tbody>'+L.map(function(x){return '<tr><td>'+h(String(x.op_date).split('-').reverse().slice(0,2).join('.'))+'</td><td>'+(x.kind==='topup'?'Приход':'Расход')+'</td><td class="n"><b>'+money(x.amount)+'</b></td><td>'+hu(x.purpose||'')+(x.who?' · '+hu(x.who):'')+'</td><td>'+(x.status==='wait'?'<span class="chip c-warn">Ждёт директора</span>':'<span class="chip c-bad">Отклонено</span>')+(x.decide_note?'<div class="small">'+hu(x.decide_note)+'</div>':'')+'</td></tr>'}).join('')+'</tbody></table></div>'})()+'</section>'}
+   '</section>'}
+function bfList(){var L=(S.bf||[]).filter(function(x){return x.status!=='ok'}).slice(0,30);if(!L.length)return '';return '<div style="margin-top:12px;overflow:auto"><table><tbody>'+L.map(function(x){return '<tr><td>'+h(String(x.op_date).split('-').reverse().slice(0,2).join('.'))+'</td><td>'+(x.kind==='topup'?'Приход':'Расход')+'</td><td class="n"><b>'+money(x.amount)+'</b></td><td>'+hu(x.purpose||'')+(x.who?' · '+hu(x.who):'')+'</td><td>'+(x.status==='wait'?'<span class="chip c-warn">Ждёт директора</span>':'<span class="chip c-bad">Отклонено</span>')+(x.decide_note?'<div class="small">'+hu(x.decide_note)+'</div>':'')+'</td></tr>'}).join('')+'</tbody></table></div>'}
 function expBlock(){
   if(S.exp==null)return '';var f=S.form;var k=f.xk||'cash';
   var sum=function(t){return S.exp.filter(function(x){return x.kind===t}).reduce(function(m,x){return m+x.amount},0)};
@@ -312,37 +313,12 @@ function reqCashier(){
   var g=function(st){return S.reqs.filter(function(r){return st.indexOf(r.status)>=0})};
   var pay=g(['approved']),nw=g(['new']),boss=g(['forwarded','waiting']),done=g(['paid','rejected','cancelled']).slice(0,10);
   var sec=function(t,a){return a.length?'<h3 style="margin:12px 0 6px;font-size:15px">'+t+' ('+a.length+')</h3><div style="display:flex;flex-direction:column;gap:8px">'+a.map(function(r){return rRow(r,'cashier')}).join('')+'</div>':''};
-  return '<section class="card"><h2>Запросы денег</h2>'+
-    (pay.length+nw.length+boss.length?sec('К выдаче: директор одобрил',pay)+sec('Новые: нужно передать директору',nw)+sec('У директора или ждут',boss):'<p class="muted">Открытых запросов нет.</p>')+
-    (done.length?'<details style="margin-top:10px"><summary class="small muted">Недавно закрытые ('+done.length+')</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">'+done.map(function(r){return rRow(r,'cashier')}).join('')+'</div></details>':'')+'</section>'}
-async function loadRlog(id){
-  var r=await sb.from('cash_request_log').select('at,actor_role,kind,code,body,path').eq('request_id',id).order('at').order('id');
-  var L=r.error?[]:(r.data||[]);S.rurls=S.rurls||{};
-  await Promise.all(L.filter(function(m){return (m.kind==='voice'||m.kind==='photo')&&m.path&&!S.rurls[m.path]}).map(async function(m){try{var u=await sb.storage.from('photos').createSignedUrl(m.path,3600);if(u.data)S.rurls[m.path]=u.data.signedUrl}catch(e){}}));
-  if(S.reqOpen===id){S.rlog=L;render()}}
-async function upVoice(){
-  var R=S.rec;if(!R||!R.blob)return null;
-  var path=S.sess.user.id+'/req_'+Date.now()+'.webm';
-  var up=await sb.storage.from('photos').upload(path,R.blob,{contentType:R.blob.type||'audio/webm',upsert:false});
-  if(up.error)throw new Error(up.error.message);return path}
-function recClear(){if(S.rec&&S.rec.url)try{URL.revokeObjectURL(S.rec.url)}catch(e){}S.rec=null}
-
-function tasksBlock(){
-  if(!S.me||S.me.kind!=='office'||S.tasks===null)return '';
-  var f=S.form,today=new Date().toISOString().slice(0,10);
-  var open=S.tasks.filter(function(x){return x.status==='new'}),done=S.tasks.filter(function(x){return x.status==='done'}).slice(-5).reverse();
-  var dl=function(d){return !d?'без срока':d===today?'сегодня':d<today?'просрочено · '+d.split('-').reverse().slice(0,2).join('.'):d.split('-').reverse().slice(0,2).join('.')};var dOf=function(x){return x.due?String(x.due).slice(0,10):(x.by_self?null:null)};
-  var row=function(x){return '<div class="recv" style="padding:10px 12px"><div class="row between"><div><b>'+hu(x.title)+'</b>'+(x.note?'<div class="small muted">'+hu(x.note)+'</div>':'')+'<div class="tiny '+(dOf(x)&&dOf(x)<today&&x.status==='new'?'':'muted')+'" style="'+(dOf(x)&&dOf(x)<today&&x.status==='new'?'color:var(--bad)':'')+'">'+dl(dOf(x))+' · '+(x.tpl_id?'регулярная':x.by_self?'моя задача':'от руководителя')+(x.due_moved_from?' · <span>перенесено с</span> '+h(String(x.due_moved_from).split('-').reverse().slice(0,2).join('.')):'')+'</div></div>'+
-    (S.doneId===x.id?'':'<div class="row"><button class="sm" data-a="taskopen" data-id="'+h(x.id)+'">'+(S.openT===x.id?'Свернуть':'Открыть')+'</button><button class="ok" data-a="taskdoneopen" data-id="'+h(x.id)+'">Выполнено</button>'+(x.tpl_id?'<button class="sm" data-a="taskmoveopen" data-id="'+h(x.id)+'">Перенести срок</button>':'')+(x.by_self?'<button class="sm" data-a="taskcancel" data-id="'+h(x.id)+'">Убрать</button>':'')+'</div>')+'</div>'+
-    (S.moveId===x.id?'<div class="row" style="align-items:flex-end;margin-top:8px"><div class="field"><label>Новый срок</label><input type="date" data-f="tmd" min="'+today+'" value="'+h(f.tmd||x.due||x.day)+'" style="width:auto"></div><div class="field" style="flex:2;min-width:200px"><label>Причина (необязательно)</label><input data-f="tmr" maxlength="200" placeholder="выходной, праздник…" value="'+h(f.tmr||'')+'"></div><button class="p" data-a="taskmove" data-id="'+h(x.id)+'">Перенести</button><button data-a="taskmoveno">Отмена</button></div><p class="tiny muted" style="margin:4px 0 0">Директор получит уведомление о переносе.</p>':'')+(S.openT===x.id?thread(x):'')+(S.doneId===x.id?'<div class="field" style="margin-top:8px"><label>Комментарий (необязательно)</label><input data-f="tdn" maxlength="500" value="'+h(f.tdn||'')+'"></div><div class="row"><button class="ok" data-a="taskdone" data-id="'+h(x.id)+'">Подтвердить</button><button data-a="taskdoneno">Отмена</button></div>':'')+'</div>'};
-  return '<section class="card"><div class="row between"><h2>Мои задачи</h2>'+(!window.Notification?'':Notification.permission==='default'?'<button class="sm" data-a="notifon">🔔 Включить уведомления</button>':Notification.permission==='granted'?'<span class="small muted">🔔 Уведомления включены</span>':'<span class="small muted">🔕 Уведомления запрещены в настройках браузера</span>')+'</div>'+
-   '<div class="row" style="align-items:flex-end;margin-bottom:12px"><div class="field" style="flex:2;min-width:220px"><label for="t-t">Новая задача для себя</label><input id="t-t" data-f="tt" maxlength="200" placeholder="что нужно сделать" value="'+h(f.tt||'')+'"></div>'+
-   '<div class="field"><label for="t-d">Срок (необязательно)</label><input id="t-d" type="date" data-f="td" value="'+h(f.td||'')+'" style="width:auto"></div>'+
-   '<button class="p" data-a="taskadd"'+(S.busy?' disabled':'')+'>Добавить</button></div>'+
-   (open.length?'<div style="display:flex;flex-direction:column;gap:8px">'+open.map(row).join('')+'</div>':'<p class="muted">Открытых задач нет.</p>')+
-   (done.length?'<details style="margin-top:10px"><summary class="small muted">Недавно выполненные ('+done.length+')</summary>'+done.map(function(x){return '<div class="small" style="padding:6px 0">✓ '+hu(x.title)+' <span class="muted">· '+fT(ms(x.done_at))+'</span></div>'}).join('')+'</details>':'')+'</section>';
-}
-
+  var bl=bfList(),col=function(a){return '<div style="display:flex;flex-direction:column;gap:8px">'+a.map(function(r){return rRow(r,'cashier')}).join('')+'</div>'};
+  var top=pay.length?'<section class="card" style="border:2px solid var(--ok,#1a7f4b)"><h2>Директор одобрил: к выдаче ('+pay.length+')</h2>'+col(pay)+'</section>':'';
+  var wn=nw.length+boss.length;
+  var mid=(wn||bl)?'<section class="card" style="border:2px dashed var(--warn,#b86d06)"><h2>Ещё не одобрено директором</h2>'+sec('Новые: нужно передать директору',nw)+sec('У директора или ждут',boss)+(bl?'<h3 style="margin:12px 0 6px;font-size:15px">Прошлые операции</h3>'+bl:'')+'</section>':'';
+  return top+mid+
+    (done.length?'<section class="card"><details><summary class="small muted">Недавно закрытые ('+done.length+')</summary><div style="margin-top:8px">'+col(done)+'</div></details></section>':'')}
 function mainView(){
   if(!S.loaded)return header()+'<main><p class="muted">Загрузка…</p></main>';
   if(!S.me)return header()+'<main><div class="flag">Этот номер ещё не зарегистрирован как сотрудник. Выйдите и зарегистрируйтесь на странице входа.</div></main>';
